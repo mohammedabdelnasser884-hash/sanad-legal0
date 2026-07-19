@@ -79,7 +79,11 @@ export async function checkClientDuplicate(
     if (poaHasStructured) orParts.push(poaPrefixClause('cr_number', poaParts!.number, poaParts!.letters, poaParts!.year));
     if (orParts.length === 0) return { duplicate: false };
 
-    let query = db.from('clients').select('id,full_name,national_id,cr_number').or(orParts.join(','));
+    // ⚡ FIX: من غير الفلتر ده، موكل متأرشف (soft-deleted) كان بيتحسب في
+    // فحص التكرار زي أي موكل نشط — يرفض إضافة موكل جديد بالغلط، والأخطر:
+    // زرار "ربط الآن" كان ممكن يربط قضية حية بموكل مؤرشف من غير تنبيه.
+    // نفس الفلتر المستخدم في useSessionLinking.ts (سطر 117، 322).
+    let query = db.from('clients').select('id,full_name,national_id,cr_number').is('deleted_at', null).or(orParts.join(','));
     if (excludeClientId) query = query.neq('id', excludeClientId);
     const { data } = await query;
     if (!data || data.length === 0) return { duplicate: false };
