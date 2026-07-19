@@ -36,6 +36,27 @@ function makeMockDb() {
       deleteSpy(table);
       return { eq: vi.fn(() => Promise.resolve(get(`${table}:delete`, { error: null }))) };
     }),
+    // ⚡ FIX: checkClientDuplicate (بينده handleSaveClient/handleUpdateClient
+    // قبل أي حفظ) بيعدي مباشرة عن طريق db.from('clients').select(...).is(...)
+    // .or(...) واختياريًا .neq(...) بعد كده — chain مفقود كان بيرجع undefined
+    // ويوقع "db.from(...).select is not a function". افتراضيًا مفيش تكرار
+    // (data: []) عشان الحفظ يكمل عادي زي قبل الفيكس، وتقدر تتحكم فيه بـ
+    // setResult(`${table}:select`, {...}) في أي تست محتاج يحاكي تكرار فعلي.
+    select: vi.fn(() => {
+      const chain: {
+        is: ReturnType<typeof vi.fn>;
+        or: ReturnType<typeof vi.fn>;
+        neq: ReturnType<typeof vi.fn>;
+        then: (resolve: (v: Result) => void, reject?: (e: unknown) => void) => Promise<void>;
+      } = {
+        is: vi.fn(() => chain),
+        or: vi.fn(() => chain),
+        neq: vi.fn(() => chain),
+        then: (resolve, reject) =>
+          Promise.resolve(get(`${table}:select`, { data: [], error: null })).then(resolve, reject),
+      };
+      return chain;
+    }),
   }));
 
   const storageFrom = vi.fn((bucket: string) => ({
