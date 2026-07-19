@@ -577,6 +577,7 @@ export default function AdminPanel({ profile, lawyers, clients, fetchLawyers, co
             // زرار رجوع بسهم
             React.createElement('button',{
               onClick:()=>setSection(null),
+              'data-testid':'admin-section-back',
               className:"w-9 h-9 rounded-xl bg-white/5 border border-white/8 flex items-center justify-center text-slate-400 active:scale-90 transition-transform"
             },
               React.createElement('svg',{className:"w-4 h-4",fill:"none",viewBox:"0 0 24 24",strokeWidth:"2.5",stroke:"currentColor"},
