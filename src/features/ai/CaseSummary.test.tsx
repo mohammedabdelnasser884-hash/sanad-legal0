@@ -32,6 +32,7 @@ function makeCase(overrides: Partial<MappedCase> = {}): MappedCase {
   return {
     id: 'case-1', number: '10', title: 'قضية مدنية', court: 'محكمة الجيزة', type: 'مدني',
     court_level: null, circuit_number: null, status: 'نشطة', date: '2026-07-01', client_id: 'client-1',
+    ...overrides,
   } as MappedCase;
 }
 const client: MappedClient = { id: 'client-1', full_name: 'أحمد محمد' } as MappedClient;
