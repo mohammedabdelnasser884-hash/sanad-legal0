@@ -72,6 +72,8 @@ interface AppModalsProps {
     handleDeleteCase: (caseId: string) => void | Promise<void>;
     handleUpdateCase: (caseId: string, form: CaseFormSubmitData) => void | Promise<void>;
     handleLinkClient: (caseId: string, clientId: string) => void | Promise<void>;
+    handleCreateAndLinkClient: (caseId: string, plaintiffName: string, plaintiffNationalId?: string | null, plaintiffPoa?: string | null) =>
+        void | Promise<void> | Promise<{ duplicate: true; client: { id: string; full_name: string | null }; message?: string } | undefined>;
     handleSaveClient: (form: ClientFormData, idFile: File | null, poaFile: File | null) => void | Promise<void>;
     handleDeleteClient: (clientId: string) => void | Promise<void>;
     handleUpdateClient: (clientId: string, form: ClientFormData, idFile?: File | null, poaFile?: File | null) => void | Promise<void>;
@@ -99,7 +101,7 @@ function AppModals({
     setCases, setCasesFilter, setCasesPage,
     fetchCases, fetchTodaySessions, fetchUpcomingSessions,
     fetchClients, clientSearch,
-    handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient,
+    handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleCreateAndLinkClient,
     handleSaveClient, handleDeleteClient, handleUpdateClient, handleSaveLawyer,
     sendTelegram,
 }: AppModalsProps) {
@@ -170,7 +172,7 @@ function AppModals({
                 setCases((prev) => prev.map((c) => c.id === selectedCase?.id ? { ...c, status: newStatus } : c));
                 setCasesFilter(newStatus); setCasesPage(0); fetchCases(0, newStatus);
             },
-            onDelete: handleDeleteCase, onEdit: handleUpdateCase, onLinkClient: handleLinkClient, onNotify: sendTelegram, profile, country,
+            onDelete: handleDeleteCase, onEdit: handleUpdateCase, onLinkClient: handleLinkClient, onCreateAndLinkClient: handleCreateAndLinkClient, onNotify: sendTelegram, profile, country,
         }),
     );
 }
