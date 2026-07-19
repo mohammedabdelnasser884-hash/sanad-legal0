@@ -154,6 +154,15 @@ export function useCaseDetailActions(
     const safeDefendantName = escapeHtml(defendantParty?.name || '');
     const safeDefendantLabel = escapeHtml(defendantParty?.capacity || 'المدعى عليه / المطعون ضده');
 
+    // ⚡ FIX (19 يوليو 2026): بيانات الجلسة/السكرتير كانت بتتحفظ في القضية
+    // بس مكانتش بتظهر في تقرير PDF خالص — بنضيفها كقسم مستقل تحت الهيدر.
+    const safeSessionTimeLabel = caseData.session_time === 'صباحي' ? '🌅 صباحي' : caseData.session_time === 'مسائي' ? '🌆 مسائي' : '';
+    const safeSessionHall = escapeHtml(caseData.session_hall || '');
+    const safeSecretaryHall = escapeHtml(caseData.secretary_hall || '');
+    const safeSecretaryName = escapeHtml(caseData.secretary_name || '');
+    const safeSecretaryMobile = escapeHtml(caseData.secretary_mobile || '');
+    const hasExtraInfo = !!(safeSessionTimeLabel || safeSessionHall || safeSecretaryHall || safeSecretaryName || safeSecretaryMobile);
+
     const win = window.open('', '_blank');
     if (!win) { setExportingPdf(false); return; }
 
@@ -227,6 +236,18 @@ ${PDF_FONT_LINK}
     </div>
   </div>
   <div class="gold-bar"></div>
+
+  ${hasExtraInfo ? `
+  <div class="section">
+    <h2>🗂 بيانات إضافية</h2>
+    <div class="grid2">
+      ${safeSessionTimeLabel ? `<div class="field"><label>ميعاد الجلسة</label><span>${safeSessionTimeLabel}</span></div>` : ''}
+      ${safeSessionHall ? `<div class="field"><label>الطابق وقاعة الجلسة</label><span>${safeSessionHall}</span></div>` : ''}
+      ${safeSecretaryHall ? `<div class="field"><label>قاعة سكرتير الجلسة</label><span>${safeSecretaryHall}</span></div>` : ''}
+      ${safeSecretaryName ? `<div class="field"><label>اسم سكرتير الجلسة</label><span>${safeSecretaryName}</span></div>` : ''}
+      ${safeSecretaryMobile ? `<div class="field"><label>موبايل سكرتير الجلسة</label><span>${safeSecretaryMobile}</span></div>` : ''}
+    </div>
+  </div>` : ''}
 
   ${sessions.length > 0 ? `
   <div class="section">
