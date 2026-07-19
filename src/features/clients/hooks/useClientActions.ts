@@ -114,7 +114,13 @@ export function useClientActions(params: {
         if (nameErr) { toast(nameErr, true); return; }
         // ⚡ تحقق موحّد: يرفض الحفظ لو نفس الاسم أو نفس الرقم القومي مسجل
         // لموكل موجود بالفعل (نفس المكتب) — راجع clientValidation.ts.
-        const dup = await checkClientDuplicate(db, { full_name: form.full_name, national_id: form.national_id, cr_number: form.cr_number });
+        let dup;
+        try {
+            dup = await checkClientDuplicate(db, { full_name: form.full_name, national_id: form.national_id, cr_number: form.cr_number });
+        } catch (e) {
+            showErrorToast('client_duplicate_check', e, 'تعذّر التحقق من بيانات الموكل. حاول مرة أخرى.', 'إضافة موكل');
+            return;
+        }
         if (dup.duplicate) { toast(dup.message!, true); return; }
         setSavingClient(true);
         // رفع الصور على Storage (يحتاج نت — مش بنحفظه offline)
@@ -188,7 +194,7 @@ export function useClientActions(params: {
             if (form.phone) clientMsg += `📞 <b>الهاتف:</b> ${escapeTelegramHtml(form.phone)}\n`;
             if (form.email) clientMsg += `📧 <b>الإيميل:</b> ${escapeTelegramHtml(form.email)}\n`;
             if (form.national_id) clientMsg += `🪪 <b>الرقم القومي:</b> ${escapeTelegramHtml(form.national_id)}\n`;
-            if (form.cr_number) clientMsg += `🏢 <b>السجل التجاري:</b> ${escapeTelegramHtml(form.cr_number)}\n`;
+            if (form.cr_number) clientMsg += `📜 <b>رقم التوكيل:</b> ${escapeTelegramHtml(form.cr_number)}\n`;
             if (form.notes) clientMsg += `📝 <b>ملاحظات:</b> ${escapeTelegramHtml(form.notes)}\n`;
             sendTelegram(clientMsg);
             fetchClients(0, clientSearch);
@@ -307,7 +313,13 @@ export function useClientActions(params: {
         // ⚡ تحقق موحّد: يرفض التعديل لو نفس الاسم أو نفس الرقم القومي بقى
         // متسجل لموكل تاني غير الموكل ده نفسه (نفس المكتب) — راجع
         // clientValidation.ts. clientId هنا هو الاستثناء (بنعدّل بياناته هو).
-        const dup = await checkClientDuplicate(db, { full_name: form.full_name, national_id: form.national_id, cr_number: form.cr_number }, clientId);
+        let dup;
+        try {
+            dup = await checkClientDuplicate(db, { full_name: form.full_name, national_id: form.national_id, cr_number: form.cr_number }, clientId);
+        } catch (e) {
+            showErrorToast('client_duplicate_check', e, 'تعذّر التحقق من بيانات الموكل. حاول مرة أخرى.', 'تعديل موكل');
+            return;
+        }
         if (dup.duplicate) { toast(dup.message!, true); return; }
         const client = clients.find((c) => c.id === clientId);
         const existingContactInfo = (client?.contact_info as ClientContactInfo | null) || null;
