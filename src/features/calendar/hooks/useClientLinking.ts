@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { toast } from '../../../shared/lib/notifications';
+import { validateFullNameParts, checkClientDuplicate } from '../../../shared/lib/clientValidation';
 import { db } from '../../../supabaseClient';
 import { showErrorToast } from '../../../shared/lib/errorReporting';
 import { getCurrentTenantId } from '../../../constants';
@@ -18,7 +19,10 @@ export function useClientLinking(savedFormData: SavedFormData | null, onSaved: (
   const [linkingCase, setLinkingCase] = useState(false);
   const [linkingClient, setLinkingClient] = useState(false);
   const [createdCaseId, setCreatedCaseId] = useState<string | null>(null);
-  const [clientStep, setClientStep] = useState<'idle' | 'found' | 'notfound' | 'done'>('idle');
+  // ⚡ NEW (19 يوليو 2026): 'duplicateSession' — لما "إضافة الموكل لقائمة
+  // الموكلين فقط" (بدون إنشاء قضية) تكتشف تكرار، بنعرض زرار ربط مباشر
+  // بالجلسة (case_sessions.client_id) بدل توست بس — شوف handleLinkFoundClientToSession تحت.
+  const [clientStep, setClientStep] = useState<'idle' | 'found' | 'notfound' | 'duplicateSession' | 'done'>('idle');
   const [foundClient, setFoundClient] = useState<{ id: string; full_name: string | null } | null>(null);
   const [linkingToCase, setLinkingToCase] = useState(false);
 
@@ -178,8 +182,24 @@ export function useClientLinking(savedFormData: SavedFormData | null, onSaved: (
       const { form: f } = savedFormData;
       const name = f.plaintiff?.trim();
       if (!name) return;
+      const nameErr = validateFullNameParts(name);
+      if (nameErr) { toast(nameErr, true); return; }
       const tenantId = getCurrentTenantId();
       if (!tenantId) { toast('❌ تعذر تحديد المكتب الحالي، أعد تحميل الصفحة وحاول مرة أخرى', true); return; }
+      // ⚡ تحقق موحّد: يرفض الإضافة لو نفس الاسم أو الرقم القومي أو رقم
+      // التوكيل مسجل لموكل موجود بالفعل (نفس المكتب) — راجع clientValidation.ts.
+      // ⚡ NEW (19 يوليو 2026): كنا بنبعت الاسم والرقم القومي بس، دلوقتي
+      // بنبعت f.plaintiff_power_of_attorney كـ cr_number كمان.
+      const dup = await checkClientDuplicate(db, { full_name: name, national_id: f.plaintiff_national_id, cr_number: f.plaintiff_power_of_attorney });
+      // ⚡ NEW: بدل توست بيوقف الموضوع، بنستخدم نفس خطوة "found" الموجودة
+      // فعلاً (بحث الاسم التلقائي) عشان نعرض زرار "ربط بهذا الموكل" جاهز —
+      // فيه فرق واحد إن هنا التطابق مؤكد (اسم/رقم قومي/توكيل بالظبط)، مش
+      // تخمين بالاسم بس.
+      if (dup.duplicate) {
+        if (dup.client) { setFoundClient(dup.client); setClientStep('found'); }
+        else toast(dup.message!, true);
+        return;
+      }
       // 🆕 المرحلة 3-2 (خطة توسيع الأوفلاين): تحويل من db.from() المباشر
       // لـ __dbWrite. نفس نمط تمبيد القضايا من المرحلة 2 — تمبيد بيتبعت
       // دايمًا مع العميل الجديد بغض النظر عن حالة الاتصال، عشان لو الاتصال
@@ -256,6 +276,11 @@ export function useClientLinking(savedFormData: SavedFormData | null, onSaved: (
     finally { setLinkingToCase(false); }
   };
 
+  // ⚡ FIX: قبل كده الزرار ده كان بينشئ الموكل بس من غير ما يربطه
+  // بـ case_sessions.client_id — فالجلسة كانت تفضل "مش مربوطة"، وزرار
+  // "🔗 ربط" يفضل ظاهر تاني لو المستخدم فتح تفاصيل الجلسة بعدها، وممكن
+  // يضيف نفس الموكل تاني بالغلط. دلوقتي بنربط الموكل الجديد بالجلسة اللي
+  // اتحفظت لسه (savedFormData.sessionId) على طول.
   const handleAddClientOnly = async () => {
     if (!savedFormData) return;
     setLinkingClient(true);
@@ -263,12 +288,25 @@ export function useClientLinking(savedFormData: SavedFormData | null, onSaved: (
       const { form: f } = savedFormData;
       const name = f.plaintiff?.trim();
       if (!name) return;
+      const nameErr = validateFullNameParts(name);
+      if (nameErr) { toast(nameErr, true); return; }
       const tenantId = getCurrentTenantId();
       if (!tenantId) { toast('❌ تعذر تحديد المكتب الحالي، أعد تحميل الصفحة وحاول مرة أخرى', true); return; }
-      // ⚡ FIX (مرحلة 0 — توسيع الأوفلاين): تحويل من db.from() المباشر لـ
-      // __dbWrite. عملية مستقلة تمامًا (إضافة موكل من غير أي ربط بقضية)،
-      // فآمنة تتحول فورًا من غير أي توسيع في نظام الطابور.
-      const { error, offline, queued } = await window.__dbWrite({
+      // ⚡ تحقق موحّد: يرفض الإضافة لو نفس الاسم أو الرقم القومي أو رقم
+      // التوكيل مسجل لموكل موجود بالفعل (نفس المكتب) — راجع clientValidation.ts.
+      // ⚡ NEW (19 يوليو 2026): f.plaintiff_power_of_attorney بيتبعت كـ
+      // cr_number دلوقتي (كان مفقود من الفحص خالص قبل كده).
+      const dup = await checkClientDuplicate(db, { full_name: name, national_id: f.plaintiff_national_id, cr_number: f.plaintiff_power_of_attorney });
+      // ⚡ NEW: بدل توست بس، بنعرض زرار "ربط الجلسة بيه مباشرة" (المسار ده
+      // مالوش قضية أصلاً — case_sessions.client_id بس — فمينفعش نستخدم
+      // نفس خطوة "found" اللي بتربط cases.client_id).
+      if (dup.duplicate) {
+        if (dup.client) { setFoundClient(dup.client); setClientStep('duplicateSession'); }
+        else toast(dup.message!, true);
+        return;
+      }
+      const clientTempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const { data, error, offline: clientOffline, queued: clientQueued } = await window.__dbWrite({
         type: 'INSERT',
         table: 'clients',
         data: {
@@ -280,16 +318,71 @@ export function useClientLinking(savedFormData: SavedFormData | null, onSaved: (
           national_id: f.plaintiff_national_id || null,
           // power_of_attorney مش عمود موجود في clients، والتوكيل متسجل على
           // مستوى الجلسة.
+          _offlineTempId: clientTempId,
         },
+        returning: true,
       });
       if (error) {
         showErrorToast('client_create', error, 'تعذّر إضافة الموكل. تحقق من صحة البيانات. لو المشكلة استمرت، تواصل مع الدعم.', 'إضافة موكل');
+        return;
       }
-      else if (offline && queued) {
-        toast('📥 الموكل محفوظ محلياً — سيُضاف فور عودة الإنترنت');
-        onClientAdded?.();
+      // لو الجلسة لسه ما اتحفظتش أونلاين (sessionId فاضي — نفس الحالة
+      // الموثّقة في handleLinkCase/handleLinkExistingClient فوق)، مفيش id
+      // نربط بيه دلوقتي — نكتفي بإضافة الموكل زي السلوك القديم، من غير
+      // ما نحتاج نتأكد من id العميل الجديد أصلاً.
+      let linkedToSession = false;
+      if (savedFormData.sessionId) {
+        const isTempClientId = clientOffline && clientQueued;
+        const realOrTempClientId = isTempClientId ? clientTempId : (data as { id: string } | null)?.id;
+        if (realOrTempClientId) {
+          const { error: linkErr } = await window.__dbWrite({
+            type: 'UPDATE',
+            table: 'case_sessions',
+            id: savedFormData.sessionId,
+            data: {
+              client_id: realOrTempClientId,
+              ...(isTempClientId ? { _offlineFkTempId: [{ field: 'client_id', tempId: clientTempId, table: 'clients' as const, fallbackNameValue: name }] } : {}),
+            },
+          });
+          if (linkErr) {
+            showErrorToast('session_client_link', linkErr, 'تمت إضافة الموكل لكن تعذّر ربطه بالجلسة. حاول تحديث الصفحة.', 'ربط الموكل بالجلسة');
+          } else {
+            linkedToSession = true;
+          }
+        }
       }
-      else { toast('✅ تمت إضافة الموكل لقائمة الموكلين'); onClientAdded?.(); }
+      if (clientOffline && clientQueued) {
+        toast(linkedToSession
+          ? '📥 إضافة الموكل وربطه بالجلسة محفوظة محلياً — ستُزامن عند عودة الإنترنت'
+          : '📥 الموكل محفوظ محلياً — سيُضاف فور عودة الإنترنت');
+      } else {
+        toast(linkedToSession ? '✅ تمت إضافة الموكل وربطه بالجلسة' : '✅ تمت إضافة الموكل لقائمة الموكلين');
+      }
+      onClientAdded?.();
+      onSaved();
+      setClientStep('done');
+    } catch { toast('❌ خطأ غير متوقع', true); }
+    finally { setLinkingClient(false); }
+  };
+
+  // ⚡ NEW (19 يوليو 2026): ربط الجلسة مباشرة (case_sessions.client_id)
+  // بموكل موجود بالفعل — بتتستخدم من خطوة 'duplicateSession' لما
+  // handleAddClientOnly يكتشف تكرار، بدل ما نسيب المستخدم يدوّر يدويًا.
+  const handleLinkFoundClientToSession = async () => {
+    if (!savedFormData?.sessionId || !foundClient) return;
+    setLinkingClient(true);
+    try {
+      const { error, offline, queued } = await window.__dbWrite({
+        type: 'UPDATE', table: 'case_sessions', id: savedFormData.sessionId, data: { client_id: foundClient.id },
+      });
+      if (error) {
+        showErrorToast('session_client_link', error, 'تعذّر ربط الموكل بالجلسة. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'ربط الموكل بالجلسة');
+        return;
+      }
+      toast(offline && queued ? '📥 الربط محفوظ محلياً — سيُزامن عند عودة الإنترنت' : '✅ تم ربط الموكل بالجلسة');
+      onClientAdded?.();
+      onSaved();
+      setClientStep('done');
     } catch { toast('❌ خطأ غير متوقع', true); }
     finally { setLinkingClient(false); }
   };
@@ -300,5 +393,6 @@ export function useClientLinking(savedFormData: SavedFormData | null, onSaved: (
     clientStep, setClientStep,
     foundClient, setFoundClient,
     handleLinkCase, handleLinkExistingClient, handleAddAndLinkClient, handleAddClientOnly,
+    handleLinkFoundClientToSession,
   };
 }
