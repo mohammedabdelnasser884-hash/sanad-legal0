@@ -62,6 +62,7 @@ interface AILegalAssistantProps {
 
 function AILegalAssistant({onClose, cases, clients, profile, country}: AILegalAssistantProps){
     const [disclaimerOpen, setDisclaimerOpen] = useState(true);
+    const [showSettings, setShowSettings] = useState(false);
     const {
       mode, setMode,
       selectedModel, setSelectedModel, GROQ_MODELS,
@@ -93,14 +94,33 @@ function AILegalAssistant({onClose, cases, clients, profile, country}: AILegalAs
         sf('defendantRole', c.defendant_role || '');
     };
 
-    const taskCards = [
-        { mode: 'summary', icon: '🧾', title: 'تلخيص القضية', desc: 'تلخيص احترافي مختصر للقضية بالذكاء الاصطناعي', accent: 'from-premium-gold/20 to-amber-300/5 border-premium-gold/20 text-premium-gold' },
-        { mode: 'generate', icon: '📝', title: 'توليد مستند', desc: 'صياغة مذكرات وصحف دعاوى وتوكيلات بالذكاء الاصطناعي', accent: 'from-purple-500/20 to-purple-400/5 border-purple-500/20 text-purple-300' },
-        { mode: 'client-message', icon: '💬', title: 'رسالة عميل مختصرة', desc: 'رسالة واتساب بسيطة للعميل عن مستجدات قضيته بالذكاء الاصطناعي', accent: 'from-teal-500/20 to-teal-400/5 border-teal-500/20 text-teal-300' },
-        { mode: 'overview', icon: '🗓', title: 'الجلسات والتذكيرات', desc: 'جلسات فاتت من غير نتيجة، تذكيرات متأخرة وقادمة', accent: 'from-blue-500/20 to-blue-400/5 border-blue-500/20 text-blue-300' },
-        { mode: 'extract', icon: '📋', title: 'بيانات القضية', desc: 'عرض كل بيانات القضية والموكل في مكان واحد', accent: 'from-emerald-500/20 to-emerald-400/5 border-emerald-500/20 text-emerald-300' },
-        { mode: 'docs-required', icon: '📑', title: 'المستندات المطلوبة', desc: 'قائمة استرشادية بالمستندات حسب نوع القضية', accent: 'from-sky-500/20 to-sky-400/5 border-sky-500/20 text-sky-300' },
-        { mode: 'next-step', icon: '🧭', title: 'الخطوة التالية', desc: 'أهم إجراء محتاج تعمله دلوقتي في القضية', accent: 'from-fuchsia-500/20 to-fuchsia-400/5 border-fuchsia-500/20 text-fuchsia-300' },
+    // ── عنوان وأيقونة كل مهمة، بيستخدمهم الهيدر لما يبقى فيه مهمة مفتوحة
+    //    (بديل شريط الـ tabs اللي كان مكرر مع لوحة المهام) ──
+    const modeMeta: Record<string, {icon: React.ComponentType<{className?: string}>; title: string}> = {
+        chat: { icon: I.Scale, title: 'استشارة قانونية' },
+        summary: { icon: I.Note, title: 'تلخيص القضية' },
+        generate: { icon: I.Doc, title: 'توليد مستند' },
+        'client-message': { icon: I.Chat, title: 'رسالة عميل مختصرة' },
+        overview: { icon: I.CalGrid, title: 'الجلسات والتذكيرات' },
+        extract: { icon: I.Folder, title: 'بيانات القضية' },
+        'docs-required': { icon: I.ClipboardList, title: 'المستندات المطلوبة' },
+        'next-step': { icon: I.Compass, title: 'الخطوة التالية' },
+    };
+
+    // ── مهام اللوحة مقسّمة لمجموعتين بمعنى واضح بدل جدول 2×2 غير منتظم:
+    //    (أ) مهام بتولّد محتوى بالذكاء الاصطناعي، (ب) أدوات بترجع بيانات القضية
+    //    من غير استدعاء الموديل. التقسيم بيفهّم المستخدم الفرق ده من العنوان
+    //    نفسه بدل ما يكتشفه بعد الدخول ──
+    const aiTaskCards = [
+        { mode: 'summary', icon: I.Note, title: 'تلخيص القضية', desc: 'تلخيص احترافي مختصر للقضية', accent: 'from-premium-gold/20 to-amber-300/5 border-premium-gold/20 text-premium-gold' },
+        { mode: 'generate', icon: I.Doc, title: 'توليد مستند', desc: 'مذكرات وصحف دعاوى وتوكيلات', accent: 'from-purple-500/20 to-purple-400/5 border-purple-500/20 text-purple-300' },
+        { mode: 'client-message', icon: I.Chat, title: 'رسالة عميل مختصرة', desc: 'رسالة واتساب عن مستجدات القضية', accent: 'from-teal-500/20 to-teal-400/5 border-teal-500/20 text-teal-300' },
+    ];
+    const caseToolCards = [
+        { mode: 'overview', icon: I.CalGrid, title: 'الجلسات والتذكيرات', desc: 'جلسات فاتت من غير نتيجة، وتذكيرات متأخرة وقادمة', accent: 'from-blue-500/20 to-blue-400/5 border-blue-500/20 text-blue-300' },
+        { mode: 'extract', icon: I.Folder, title: 'بيانات القضية', desc: 'كل بيانات القضية والموكل في مكان واحد', accent: 'from-emerald-500/20 to-emerald-400/5 border-emerald-500/20 text-emerald-300' },
+        { mode: 'docs-required', icon: I.ClipboardList, title: 'المستندات المطلوبة', desc: 'قائمة استرشادية بالمستندات حسب نوع القضية', accent: 'from-sky-500/20 to-sky-400/5 border-sky-500/20 text-sky-300' },
+        { mode: 'next-step', icon: I.Compass, title: 'الخطوة التالية', desc: 'أهم إجراء محتاج تعمله دلوقتي في القضية', accent: 'from-fuchsia-500/20 to-fuchsia-400/5 border-fuchsia-500/20 text-fuchsia-300' },
     ];
 
     return React.createElement('div',{className:"fixed inset-0 z-50 flex flex-col bg-premium-bg fade-in"},
@@ -194,9 +214,19 @@ function AILegalAssistant({onClose, cases, clients, profile, country}: AILegalAs
                         ),
                         React.createElement('div',{className:"absolute -bottom-0.5 -left-0.5 w-3 h-3 bg-emerald-400 rounded-full border-2 border-premium-bg"})
                     ),
-                    React.createElement('div',null,
-                        React.createElement('h2',{className:"text-sm font-black text-white"},"المساعد القانوني الاحترافي"),
-                        React.createElement('p',{className:"text-[10px] text-emerald-400 font-bold"},"⚖️ متخصص · مواد قانونية · أسانيد موثقة")
+                    React.createElement('div',{className:"min-w-0"},
+                        mode === 'menu'
+                            ? React.createElement(React.Fragment,null,
+                                React.createElement('h2',{className:"text-sm font-black text-white"},"المساعد القانوني الاحترافي"),
+                                React.createElement('p',{className:"text-[10px] text-emerald-400 font-bold"},"⚖️ متخصص · مواد قانونية · أسانيد موثقة")
+                              )
+                            : React.createElement(React.Fragment,null,
+                                React.createElement('h2',{className:"text-sm font-black text-white truncate flex items-center gap-1.5"},
+                                    modeMeta[mode] && React.createElement(modeMeta[mode].icon,{className:"w-4 h-4 shrink-0"}),
+                                    modeMeta[mode]?.title||''
+                                ),
+                                React.createElement('p',{className:"text-[10px] text-slate-500 font-bold"},"المساعد القانوني الاحترافي")
+                              )
                     )
                 ),
                 React.createElement('div',{className:"flex items-center gap-2"},
@@ -207,27 +237,20 @@ function AILegalAssistant({onClose, cases, clients, profile, country}: AILegalAs
                         className:"w-9 h-9 rounded-xl flex items-center justify-center border border-white/10 bg-white/5 text-slate-400 hover:text-premium-gold active:scale-90 transition-all"
                     },
                         React.createElement('svg',{className:"w-4 h-4",fill:"none",viewBox:"0 0 24 24",strokeWidth:"2",stroke:"currentColor"},
-                            React.createElement('path',{strokeLinecap:"round",strokeLinejoin:"round",d:"M3.75 6h16.5M3.75 12h16.5M3.75 18h16.5"})
+                            React.createElement('path',{strokeLinecap:"round",strokeLinejoin:"round",d:"M8.25 4.5 3.75 9m0 0 4.5 4.5M3.75 9h16.5"})
                         )
                     ),
-                    // ── Model selector ──
-                    React.createElement('select',{
-                        value: selectedModel,
-                        onChange: (e: React.ChangeEvent<HTMLSelectElement>) => setSelectedModel(e.target.value),
-                        title: "اختار نموذج الذكاء الاصطناعي",
-                        className: "text-[9px] font-bold bg-white/5 border border-white/10 text-slate-300 rounded-lg px-1.5 py-1 appearance-none cursor-pointer hover:border-premium-gold/30 transition-all",
-                        style: {maxWidth:'110px'}
-                    },
-                        GROQ_MODELS.map((m: GroqModel) => React.createElement('option',{key:m.id, value:m.id, style:{background:'#0d1a2e'}}, m.label))
-                    ),
+                    // ── زرار الإعدادات: بيجمع اختيار الموديل ومفتاح الـ API في مكان واحد
+                    //    بدل ما يكونوا عناصر منفصلة تتزاحم في الهيدر ──
                     React.createElement('button',{
-                        onClick:()=>setShowKeyInput(true),
-                        title: hasKey ? "مفتاحك الشخصي مفعّل (استخدام غير محدود)" : "المساعد شغال مجانًا — ضيف مفتاحك الشخصي (اختياري) لاستخدام أكبر",
+                        onClick:()=>setShowSettings((p: boolean) =>!p),
+                        title:"الإعدادات",
                         className:`w-9 h-9 rounded-xl flex items-center justify-center border transition-all active:scale-90 ${hasKey?'bg-emerald-500/10 border-emerald-500/20 text-emerald-400':'bg-white/5 border-white/10 text-slate-400'}`
                     },
-                        hasKey
-                            ? React.createElement('svg',{className:"w-3.5 h-3.5",fill:"none",viewBox:"0 0 24 24",strokeWidth:"2",stroke:"currentColor"},React.createElement('path',{strokeLinecap:"round",strokeLinejoin:"round",d:"m4.5 12.75 6 6 9-13.5"}))
-                            : React.createElement(I.Lock)
+                        React.createElement('svg',{className:"w-4 h-4",fill:"none",viewBox:"0 0 24 24",strokeWidth:"1.8",stroke:"currentColor"},
+                            React.createElement('path',{strokeLinecap:"round",strokeLinejoin:"round",d:"M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.24-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"}),
+                            React.createElement('path',{strokeLinecap:"round",strokeLinejoin:"round",d:"M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"})
+                        )
                     ),
                     React.createElement('button',{
                         onClick:()=>setShowTopics((p: boolean) =>!p),
@@ -243,26 +266,26 @@ function AILegalAssistant({onClose, cases, clients, profile, country}: AILegalAs
                     )
                 )
             ),
-            // Mode tabs — شريط قابل للتمرير أفقيًا، بيظهر بس لما تكون جوه مهمة مختارة
-            mode !== 'menu' && React.createElement('div',{className:"flex gap-2 mt-3 overflow-x-auto no-scrollbar pb-0.5"},
-                React.createElement('button',{onClick:()=>setMode('chat'),className:`shrink-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black whitespace-nowrap transition-all ${mode==='chat'?'bg-gradient-to-r from-premium-gold/20 to-amber-300/10 text-premium-gold border border-premium-gold/30':'text-slate-500 hover:text-slate-300 border border-white/5'}`},
-                    React.createElement(I.AI,{cls:"w-3.5 h-3.5"}), "استشارة قانونية",
-                    React.createElement('span',{className:"text-[8px] font-black text-amber-400/70"},"(مؤقت)")
-                ),
-                React.createElement('button',{onClick:()=>setMode('generate'),className:`shrink-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black whitespace-nowrap transition-all ${mode==='generate'?'bg-gradient-to-r from-purple-500/20 to-purple-400/10 text-purple-300 border border-purple-500/30':'text-slate-500 hover:text-slate-300 border border-white/5'}`},
-                    React.createElement(I.Doc), "توليد مستند"
-                ),
-                React.createElement('button',{onClick:()=>setMode('overview'),className:`shrink-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black whitespace-nowrap transition-all ${mode==='overview'?'bg-gradient-to-r from-blue-500/20 to-blue-400/10 text-blue-300 border border-blue-500/30':'text-slate-500 hover:text-slate-300 border border-white/5'}`},
-                    "🗓", "الجلسات والتذكيرات"
-                ),
-                React.createElement('button',{onClick:()=>setMode('extract'),className:`shrink-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black whitespace-nowrap transition-all ${mode==='extract'?'bg-gradient-to-r from-emerald-500/20 to-emerald-400/10 text-emerald-300 border border-emerald-500/30':'text-slate-500 hover:text-slate-300 border border-white/5'}`},
-                    "📋", "بيانات القضية"
-                ),
-                React.createElement('button',{onClick:()=>setMode('docs-required'),className:`shrink-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black whitespace-nowrap transition-all ${mode==='docs-required'?'bg-gradient-to-r from-sky-500/20 to-sky-400/10 text-sky-300 border border-sky-500/30':'text-slate-500 hover:text-slate-300 border border-white/5'}`},
-                    "📑", "المستندات المطلوبة"
-                ),
-                React.createElement('button',{onClick:()=>setMode('next-step'),className:`shrink-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black whitespace-nowrap transition-all ${mode==='next-step'?'bg-gradient-to-r from-fuchsia-500/20 to-fuchsia-400/10 text-fuchsia-300 border border-fuchsia-500/30':'text-slate-500 hover:text-slate-300 border border-white/5'}`},
-                    "🧭", "الخطوة التالية"
+            // ── لوحة الإعدادات (نموذج الذكاء الاصطناعي + مفتاح شخصي) ──
+            //    بديل الـ select والزرار اللي كانوا ظاهرين دايمًا في الهيدر
+            showSettings && React.createElement(React.Fragment,null,
+                React.createElement('div',{className:"fixed inset-0 z-20", onClick:()=>setShowSettings(false)}),
+                React.createElement('div',{className:"absolute left-4 top-full mt-2 z-30 w-60 bg-premium-card border border-white/10 rounded-2xl p-3.5 shadow-2xl slide-up"},
+                    React.createElement('p',{className:"text-[10px] font-black text-slate-500 mb-1.5"},"نموذج الذكاء الاصطناعي"),
+                    React.createElement('select',{
+                        value: selectedModel,
+                        onChange: (e: React.ChangeEvent<HTMLSelectElement>) => setSelectedModel(e.target.value),
+                        className: "w-full text-xs font-bold bg-white/5 border border-white/10 text-slate-300 rounded-lg px-2.5 py-2 mb-3 appearance-none cursor-pointer hover:border-premium-gold/30 transition-all"
+                    },
+                        GROQ_MODELS.map((m: GroqModel) => React.createElement('option',{key:m.id, value:m.id, style:{background:'#0d1a2e'}}, m.label))
+                    ),
+                    React.createElement('button',{
+                        onClick:()=>{setShowSettings(false);setShowKeyInput(true);},
+                        className:`w-full flex items-center justify-between px-3 py-2.5 rounded-xl border text-[11px] font-bold transition-all active:scale-[0.98] ${hasKey?'bg-emerald-500/10 border-emerald-500/20 text-emerald-400':'bg-white/5 border-white/10 text-slate-400'}`
+                    },
+                        React.createElement('span',null, hasKey ? "مفتاحك الشخصي مفعّل" : "إضافة مفتاح شخصي (اختياري)"),
+                        React.createElement(I.Lock)
+                    )
                 )
             )
         ),
@@ -286,20 +309,42 @@ function AILegalAssistant({onClose, cases, clients, profile, country}: AILegalAs
 
         // ══ MENU MODE (لوحة المهام — الوضع الافتراضي عند الفتح) ══
         mode === 'menu' && React.createElement('div',{className:"flex-1 overflow-y-auto no-scrollbar px-4 py-4"},
-            React.createElement('p',{className:"text-[9px] font-black text-slate-500 mb-3 tracking-widest"},"— اختار مهمة —"),
-            React.createElement('div',{className:"grid grid-cols-2 gap-3"},
-                taskCards.map((t) => React.createElement('button',{
+
+            // ── مجموعة (أ): مهام بتولّد محتوى بالذكاء الاصطناعي ──
+            React.createElement('p',{className:"text-[10px] font-bold text-slate-500 mb-2 tracking-widest"},"توليد بالذكاء الاصطناعي ✨"),
+            React.createElement('div',{className:"space-y-2 mb-5"},
+                aiTaskCards.map((t) => React.createElement('button',{
                     key:t.mode,
                     type:"button",
                     onClick:()=>setMode(t.mode),
-                    className:`text-right p-4 rounded-2xl border bg-gradient-to-br ${t.accent} flex flex-col gap-2 active:scale-[0.97] transition-all`
+                    className:`w-full text-right p-3.5 rounded-2xl border bg-gradient-to-l ${t.accent} flex items-center gap-3 active:scale-[0.98] transition-all`
                 },
-                    React.createElement('span',{className:"text-2xl"}, t.icon),
-                    React.createElement('span',{className:"text-xs font-black text-white"}, t.title),
-                    React.createElement('span',{className:"text-[10px] text-slate-400 font-bold leading-relaxed"}, t.desc)
+                    React.createElement(t.icon,{className:"w-5 h-5 shrink-0"}),
+                    React.createElement('div',{className:"flex-1 min-w-0"},
+                        React.createElement('p',{className:"text-xs font-black text-white"}, t.title),
+                        React.createElement('p',{className:"text-[11px] text-slate-400 font-medium leading-relaxed"}, t.desc)
+                    )
                 ))
             ),
-            React.createElement('p',{className:"text-[9.5px] text-slate-600 font-bold text-center mt-5"},
+
+            // ── مجموعة (ب): أدوات ترجع بيانات القضية من غير استدعاء الموديل ──
+            React.createElement('p',{className:"text-[10px] font-bold text-slate-500 mb-2 tracking-widest"},"أدوات القضية"),
+            React.createElement('div',{className:"space-y-2"},
+                caseToolCards.map((t) => React.createElement('button',{
+                    key:t.mode,
+                    type:"button",
+                    onClick:()=>setMode(t.mode),
+                    className:`w-full text-right p-3.5 rounded-2xl border bg-gradient-to-l ${t.accent} flex items-center gap-3 active:scale-[0.98] transition-all`
+                },
+                    React.createElement(t.icon,{className:"w-5 h-5 shrink-0"}),
+                    React.createElement('div',{className:"flex-1 min-w-0"},
+                        React.createElement('p',{className:"text-xs font-black text-white"}, t.title),
+                        React.createElement('p',{className:"text-[11px] text-slate-400 font-medium leading-relaxed"}, t.desc)
+                    )
+                ))
+            ),
+
+            React.createElement('p',{className:"text-[10.5px] text-slate-600 font-medium text-center mt-5"},
                 "🩺 المراجعة الشاملة لنواقص الملف موجودة داخل صفحة كل قضية"
             ),
 
@@ -311,13 +356,13 @@ function AILegalAssistant({onClose, cases, clients, profile, country}: AILegalAs
                     onClick:()=>setMode('chat'),
                     className:"w-full text-right p-3.5 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] flex items-center gap-3 active:scale-[0.98] transition-all"
                 },
-                    React.createElement('span',{className:"text-xl shrink-0"},"⚖️"),
+                    React.createElement(I.Scale,{className:"w-5 h-5 shrink-0"}),
                     React.createElement('div',{className:"flex-1 min-w-0"},
                         React.createElement('div',{className:"flex items-center gap-2"},
                             React.createElement('span',{className:"text-xs font-black text-slate-300"},"استشارة قانونية (شات حر)"),
                             React.createElement('span',{className:"shrink-0 px-1.5 py-0.5 rounded-md text-[8px] font-black bg-amber-500/10 text-amber-400 border border-amber-500/20"},"مؤقت")
                         ),
-                        React.createElement('span',{className:"text-[10px] text-slate-500 font-bold leading-relaxed"},"وضع فرعي مؤقت لحد ما لوحة المهام تكتمل بالكامل")
+                        React.createElement('span',{className:"text-[11px] text-slate-500 font-medium leading-relaxed"},"اسأل أي سؤال قانوني مباشرة واحصل على إجابة فورية")
                     )
                 )
             )
