@@ -71,6 +71,7 @@ interface AppModalsProps {
     handleSaveCase: (form: CaseFormSubmitData) => void | Promise<void>;
     handleDeleteCase: (caseId: string) => void | Promise<void>;
     handleUpdateCase: (caseId: string, form: CaseFormSubmitData) => void | Promise<void>;
+    handleLinkClient: (caseId: string, clientId: string) => void | Promise<void>;
     handleSaveClient: (form: ClientFormData, idFile: File | null, poaFile: File | null) => void | Promise<void>;
     handleDeleteClient: (clientId: string) => void | Promise<void>;
     handleUpdateClient: (clientId: string, form: ClientFormData, idFile?: File | null, poaFile?: File | null) => void | Promise<void>;
@@ -98,7 +99,7 @@ function AppModals({
     setCases, setCasesFilter, setCasesPage,
     fetchCases, fetchTodaySessions, fetchUpcomingSessions,
     fetchClients, clientSearch,
-    handleSaveCase, handleDeleteCase, handleUpdateCase,
+    handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient,
     handleSaveClient, handleDeleteClient, handleUpdateClient, handleSaveLawyer,
     sendTelegram,
 }: AppModalsProps) {
@@ -161,6 +162,7 @@ function AppModals({
         selectedCase && nav.isOpen('caseDetail') && React.createElement(CaseDetailView, {
             caseData: selectedCase,
             client: clients.find((cl) => cl.id === selectedCase?.client_id) || null,
+            clients,
             initialTab: selectedCaseInitialTab,
             onClose: () => { nav.closeModal('caseDetail'); _setSelectedCase(null); },
             onUpdate: (newStatus: string) => {
@@ -168,7 +170,7 @@ function AppModals({
                 setCases((prev) => prev.map((c) => c.id === selectedCase?.id ? { ...c, status: newStatus } : c));
                 setCasesFilter(newStatus); setCasesPage(0); fetchCases(0, newStatus);
             },
-            onDelete: handleDeleteCase, onEdit: handleUpdateCase, onNotify: sendTelegram, profile, country,
+            onDelete: handleDeleteCase, onEdit: handleUpdateCase, onLinkClient: handleLinkClient, onNotify: sendTelegram, profile, country,
         }),
     );
 }
