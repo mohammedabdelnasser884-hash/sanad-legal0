@@ -34,7 +34,7 @@ function MissedTab({ cases, clients, onOpenCase, onOpenReminders, onOpenStandalo
         // جلسات فات تاريخها وليس فيها result ولا next_action (لم تُحدَّث)
         Promise.all([
             db.from('case_sessions')
-              .select('id,session_date,session_time,session_floor,session_hall,case_id,description,result,next_action,title,case_number,court,case_type,plaintiff,defendant,circuit_number,plaintiff_role,defendant_role,cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
+              .select('id,session_date,session_time,session_floor,session_hall,case_id,client_id,description,result,next_action,title,case_number,court,case_type,plaintiff,defendant,circuit_number,plaintiff_role,defendant_role,cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
               .lt('session_date', todayStr)
               .order('session_date', { ascending: false })
               .limit(50)
@@ -88,7 +88,9 @@ function MissedTab({ cases, clients, onOpenCase, onOpenReminders, onOpenStandalo
 
         sessions.map((s: CalendarSessionRow) => {
             const linkedCase   = ((Array.isArray(s.cases) ? s.cases[0] : s.cases) || cases.find((c: MappedCase) => c.id === s.case_id)) as LinkedCaseLike | undefined;
-            const linkedClient = linkedCase ? clients.find((cl: MappedClient) => cl.id === linkedCase.client_id) : null;
+            const linkedClient = linkedCase
+                ? clients.find((cl: MappedClient) => cl.id === linkedCase.client_id)
+                : (s.client_id ? clients.find((cl: MappedClient) => cl.id === s.client_id) : null);
             const { dayName, day, month, year, ago, diff } = fmtDate(s.session_date as string);
             const urgencyColor = diff <= 3 ? { bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.25)', text: '#f87171' }
                                : diff <= 7 ? { bg: 'rgba(245,158,11,0.07)', border: 'rgba(245,158,11,0.2)', text: '#fbbf24' }
