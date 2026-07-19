@@ -14,6 +14,10 @@ interface InfoSectionProps {
   clients?: MappedClient[];
   linkingClient?: boolean;
   onLinkClient?: (clientId: string) => void | Promise<void>;
+  // ⚡ NEW (19 يوليو 2026): يخيّر بين ربط بموكل موجود (فوق) أو إنشاء
+  // موكل جديد من بيانات القضية (المدعي) وربطه مباشرة — بنفس فلسفة اختيار
+  // "ربط/إضافة" الموجودة في NewStandaloneSessionModal (شوف useClientLinking.ts).
+  onCreateAndLinkClient?: () => void | Promise<void> | Promise<{ duplicate: true; client: { id: string; full_name: string | null }; message?: string } | undefined>;
 }
 
 interface InfoRow {
@@ -21,9 +25,13 @@ interface InfoRow {
   value: string | null;
 }
 
-function InfoSection({ caseData, client, sessions, notes, docs, clients = [], linkingClient = false, onLinkClient }: InfoSectionProps) {
-  const [showLinker, setShowLinker] = useState(false);
+function InfoSection({ caseData, client, sessions, notes, docs, clients = [], linkingClient = false, onLinkClient, onCreateAndLinkClient }: InfoSectionProps) {
+  const [linkStep, setLinkStep] = useState<'closed' | 'choice' | 'pickExisting' | 'confirmNew' | 'duplicateFound'>('closed');
   const [pickedClientId, setPickedClientId] = useState('');
+  // ⚡ NEW (19 يوليو 2026): لما "إنشاء موكل جديد" يكتشف تكرار (اسم/رقم
+  // قومي/توكيل مطابق لموكل موجود بالفعل)، بنسجّل بيانات الموكل المطابق هنا
+  // عشان نعرض زرار "ربط الآن" مباشرة بدل توست بس يسيب المستخدم يدوّر يدويًا.
+  const [duplicateMatch, setDuplicateMatch] = useState<{ client: { id: string; full_name: string | null }; message?: string } | null>(null);
   return React.createElement('div', {className: "space-y-4 fade-in"},
                 // بيانات القضية
                 React.createElement('div', {className: "bg-premium-card border border-white/5 rounded-2xl p-4 space-y-0"},
@@ -127,13 +135,35 @@ function InfoSection({ caseData, client, sessions, notes, docs, clients = [], li
                 // ربط بموكل — يظهر بس لو القضية مش مرتبطة بموكل، ويختفي
                 // تلقائيًا بمجرد ما caseData.client_id يتحدّث (نفس مبدأ كارت
                 // "الموكل" فوق، اللي بيظهر هو نفسه لما client يبقى موجود).
-                !client && onLinkClient && React.createElement('div', {className: "bg-premium-card border border-dashed border-premium-gold/30 rounded-2xl p-4"},
-                    !showLinker
+                // ⚡ NEW (19 يوليو 2026): بقى فيه خطوة اختيار قبل الربط —
+                // "ربط بموكل موجود" (الفلو القديم) أو "إنشاء موكل جديد من
+                // بيانات القضية" (اسم المدعي)، بنفس فلسفة اختيار الربط/الإضافة
+                // في NewStandaloneSessionModal (شوف useClientLinking.ts).
+                !client && (onLinkClient || onCreateAndLinkClient) && React.createElement('div', {className: "bg-premium-card border border-dashed border-premium-gold/30 rounded-2xl p-4"},
+                    linkStep === 'closed'
                         ? React.createElement('button', {
-                            onClick: () => setShowLinker(true),
+                            onClick: () => setLinkStep('choice'),
                             className: "w-full flex items-center justify-center gap-2 text-[11px] font-black text-premium-gold py-1.5"
                           }, '🔗 ربط القضية بموكل')
-                        : React.createElement('div', {className: "space-y-3"},
+                    : linkStep === 'choice'
+                        ? React.createElement('div', {className: "space-y-2"},
+                            React.createElement('p', {className: "text-[9px] font-black text-slate-500 tracking-widest mb-1"}, "— اختر طريقة الربط —"),
+                            onLinkClient && React.createElement('button', {
+                                onClick: () => setLinkStep('pickExisting'),
+                                className: "w-full flex items-center justify-center gap-2 text-[11px] font-black text-white bg-white/5 border border-white/10 rounded-xl py-2.5"
+                            }, '🔗 ربط بموكل موجود'),
+                            onCreateAndLinkClient && React.createElement('button', {
+                                onClick: () => setLinkStep('confirmNew'),
+                                disabled: !caseData.plaintiff,
+                                className: "w-full flex items-center justify-center gap-2 text-[11px] font-black text-white bg-white/5 border border-white/10 rounded-xl py-2.5 disabled:opacity-40"
+                            }, `➕ إنشاء موكل جديد${caseData.plaintiff ? ' — ' + caseData.plaintiff : ''}`),
+                            React.createElement('button', {
+                                onClick: () => setLinkStep('closed'),
+                                className: "w-full py-2 text-[11px] font-bold text-slate-500"
+                            }, 'إلغاء')
+                          )
+                    : linkStep === 'pickExisting'
+                        ? React.createElement('div', {className: "space-y-3"},
                             React.createElement('p', {className: "text-[9px] font-black text-slate-500 tracking-widest"}, "— اختر موكلاً —"),
                             React.createElement('select', {
                                 value: pickedClientId,
@@ -147,17 +177,72 @@ function InfoSection({ caseData, client, sessions, notes, docs, clients = [], li
                             React.createElement('div', {className: "flex gap-2"},
                                 React.createElement('button', {
                                     disabled: !pickedClientId || linkingClient,
-                                    onClick: async () => { await onLinkClient(pickedClientId); setShowLinker(false); setPickedClientId(''); },
+                                    onClick: async () => { await onLinkClient!(pickedClientId); setLinkStep('closed'); setPickedClientId(''); },
                                     className: "flex-1 bg-premium-gold text-premium-bg rounded-xl py-2.5 text-[11px] font-black disabled:opacity-40"
                                 }, linkingClient ? '... جارٍ الربط' : 'ربط'),
                                 React.createElement('button', {
                                     disabled: linkingClient,
-                                    onClick: () => { setShowLinker(false); setPickedClientId(''); },
+                                    onClick: () => { setLinkStep('choice'); setPickedClientId(''); },
+                                    className: "flex-1 bg-white/5 border border-white/10 text-slate-300 rounded-xl py-2.5 text-[11px] font-black"
+                                }, 'رجوع')
+                            )
+                          )
+                        // — confirmNew: تأكيد إنشاء موكل جديد باسم المدعي المسجل في القضية —
+                        : linkStep === 'confirmNew'
+                        ? React.createElement('div', {className: "space-y-3"},
+                            React.createElement('p', {className: "text-[9px] font-black text-slate-500 tracking-widest"}, "— إنشاء موكل جديد —"),
+                            React.createElement('p', {className: "text-xs text-slate-300"}, 'هيتم إنشاء موكل جديد باسم '),
+                            React.createElement('p', {className: "text-sm font-black text-premium-gold"}, caseData.plaintiff),
+                            caseData.plaintiff_national_id && React.createElement('p', {className: "text-[10px] text-slate-400"}, 'رقم قومي: ' + caseData.plaintiff_national_id),
+                            React.createElement('p', {className: "text-[10px] text-slate-500"}, 'وربطه بالقضية مباشرة'),
+                            React.createElement('div', {className: "flex gap-2 pt-1"},
+                                React.createElement('button', {
+                                    disabled: linkingClient,
+                                    onClick: async () => {
+                                        const result = await onCreateAndLinkClient!();
+                                        if (result && result.duplicate && result.client) {
+                                            setDuplicateMatch({ client: result.client, message: result.message });
+                                            setLinkStep('duplicateFound');
+                                        } else {
+                                            setLinkStep('closed');
+                                        }
+                                    },
+                                    className: "flex-1 bg-premium-gold text-premium-bg rounded-xl py-2.5 text-[11px] font-black disabled:opacity-40"
+                                }, linkingClient ? '... جارٍ الإنشاء' : 'تأكيد الإنشاء'),
+                                React.createElement('button', {
+                                    disabled: linkingClient,
+                                    onClick: () => setLinkStep('choice'),
+                                    className: "flex-1 bg-white/5 border border-white/10 text-slate-300 rounded-xl py-2.5 text-[11px] font-black"
+                                }, 'رجوع')
+                            )
+                          )
+                        // — duplicateFound: النظام اكتشف موكل موجود بالفعل بنفس الاسم/الرقم
+                        // القومي/التوكيل (checkClientDuplicate) — بدل توست بس، بنعرض اسمه
+                        // وزرار يربط القضية بيه على طول (onLinkClient!، مش onCreateAndLinkClient
+                        // تاني، عشان منعملش نفس الفحص تاني من غير داعي). ⚡ NEW (19 يوليو 2026).
+                        : React.createElement('div', {className: "space-y-3"},
+                            React.createElement('p', {className: "text-[9px] font-black text-amber-400 tracking-widest"}, "— فيه موكل مطابق بالفعل —"),
+                            React.createElement('p', {className: "text-xs text-slate-300"}, duplicateMatch?.message || '⚠️ فيه موكل مسجل بنفس البيانات من قبل'),
+                            React.createElement('p', {className: "text-sm font-black text-premium-gold"}, duplicateMatch?.client.full_name),
+                            React.createElement('div', {className: "flex gap-2 pt-1"},
+                                React.createElement('button', {
+                                    disabled: linkingClient,
+                                    onClick: async () => {
+                                        if (!duplicateMatch) return;
+                                        await onLinkClient!(duplicateMatch.client.id);
+                                        setLinkStep('closed'); setDuplicateMatch(null);
+                                    },
+                                    className: "flex-1 bg-premium-gold text-premium-bg rounded-xl py-2.5 text-[11px] font-black disabled:opacity-40"
+                                }, linkingClient ? '... جارٍ الربط' : '🔗 ربط بهذا الموكل'),
+                                React.createElement('button', {
+                                    disabled: linkingClient,
+                                    onClick: () => { setLinkStep('closed'); setDuplicateMatch(null); },
                                     className: "flex-1 bg-white/5 border border-white/10 text-slate-300 rounded-xl py-2.5 text-[11px] font-black"
                                 }, 'إلغاء')
                             )
-                        )
+                          )
                 ),
+
 
                 // إحصائيات سريعة
                 React.createElement('div', {className: "grid grid-cols-3 gap-3"},
