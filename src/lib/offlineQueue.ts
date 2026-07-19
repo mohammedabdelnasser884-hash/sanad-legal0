@@ -91,6 +91,13 @@ declare global {
     // UPDATE بيرجّع بس `updated_at` من `.select('updated_at')`، مش الصف
     // كامل — Partial بتغطي الحالتين (INSERT بيرجّع صف كامل، UPDATE بيرجّع
     // عمود واحد بس) من غير ما تدّعي شكل مش حقيقي.
+    //
+    // 🆕 المرحلة 1: `data` بقى ممكن يحمل كمان `_offlineFkTempId:
+    // OfflineFkTempIdRef[]` (شوف تعريفها فوق) — سنتينل عام لأي عملية
+    // INSERT/UPDATE محتاجة "تشاور" على سجل لسه في الطابور (مش بس
+    // `_offlineCaseTempId` القديمة المقصورة على case_id). زي باقي حقول
+    // الـ sentinel، بيتشال قبل أي كتابة حقيقية في القاعدة (أونلاين أو وقت
+    // المزامنة) وميوصلش لـ Supabase أبدًا.
     __dbWrite: <T extends DbWriteTable>(op: {
       type: 'INSERT' | 'UPDATE' | 'DELETE';
       table: T;
@@ -223,6 +230,124 @@ function stripOfflineSentinels<T extends Record<string, unknown> | undefined>(da
 }
 
 // ══════════════════════════════════════════════════════════
+//  🆕 المرحلة 1 (خطة توسيع نظام الأوفلاين) — آلية تمبيد عامة (FK Temp ID)
+//  ═══════════════════════════════════════════════════════════
+//  الفرق عن `_offlineCaseTempId`/`_offlineCaseTitle` القديمة (لسه شغالة
+//  زي ما هي فوق، من غير أي تعديل — الآلية دي إضافية جنبها، مش بديلة عنها):
+//  القديمة مبنية خصيصًا لحالة واحدة (جلسة بتستنى قضية، وحقل `case_id` بس).
+//  الجديدة عامة: أي عملية (INSERT أو UPDATE) على أي جدول من DbWriteTable
+//  ممكن "تشاور" على أي حقل FK بيشاور على سجل لسه في الطابور (مش بس
+//  case_id، ومش بس جدول cases).
+//
+//  الشكل: `_offlineFkTempId` بيتحط جوه `data` (زي أي sentinel تاني في
+//  الملف ده) كمصفوفة من المراجع دي، مرجع واحد لكل حقل FK محتاج حل.
+export interface OfflineFkTempIdRef {
+    /** اسم العمود الحقيقي في الجدول المستهدف (مثلاً 'case_id', 'client_id') */
+    field: string;
+    /** المعرّف المؤقت (`_offlineTempId`) بتاع السجل المُشار إليه */
+    tempId: string;
+    /** الجدول اللي السجل المُشار إليه هيتحط فيه */
+    table: DbWriteTable;
+    /**
+     * قيمة احتياطية (اسم/عنوان) تُستخدم للـ fallback النادر لما التمبيد
+     * يختفي من الذاكرة (تشغيلة جديدة عدّت قبل ما يتزامن السجل المرجعي).
+     * زي `_offlineCaseTitle` القديمة بس هنا عامة لأي جدول مدعوم.
+     */
+    fallbackNameValue?: string;
+}
+
+// العمود المستخدم في البحث الاحتياطي بالاسم لكل جدول مدعوم — نفس فكرة
+// البحث بـ `title` في القضايا القديم، بس معمم. الجداول اللي مش هنا (زي
+// case_sessions) مفيهاش معنى لبحث بالاسم أصلاً (مفيش عمود "اسم" فريد
+// منطقي للبحث عنه)، فبتفضل تعتمد على تطابق التمبيد في نفس التشغيلة بس.
+const FK_FALLBACK_NAME_COLUMN: Partial<Record<DbWriteTable, string>> = {
+    cases: 'title',
+    clients: 'full_name',
+};
+
+// مُصدَّرة (exported) عشان تتغطى باختبارات وحدة مباشرة (`dbClient` بيتحقن
+// كباراميتر بدل import مباشر لـ db، بنفس نمط `safeUpdate` في dataAccess.ts)
+// من غير الحاجة لمحاكاة IndexedDB كاملة.
+//
+// بترجع:
+//  - `shouldRetry: true` لو فيه مرجع واحد على الأقل لسه مش قابل للحل
+//    (لا في tempIdToRealId ولا fallback بالاسم نجح)، سواء كان لسه في
+//    الطابور نفسه أو اختفى تمامًا — في الحالتين، الاستدعاء الحالي (Caller)
+//    المفروض يعمل bumpRetry ويستنى الدورة الجاية، بنفس منطق INSERT
+//    القديم بالظبط.
+//  - `data` مُحدَّثة (الحقول اتستبدلت بالـ id الحقيقي) لو كل المراجع اتحلت.
+export async function resolveOfflineFkRefs(
+    dbClient: typeof db,
+    op: OfflineQueueItem,
+    tempIdToRealId: Map<string, string>,
+    queue: OfflineQueueItem[],
+): Promise<{ data: Record<string, unknown>; shouldRetry: boolean }> {
+    const refs = (op.data?._offlineFkTempId as OfflineFkTempIdRef[] | undefined) || [];
+    if (!refs || refs.length === 0) {
+        return { data: op.data || {}, shouldRetry: false };
+    }
+    const updated: Record<string, unknown> = { ...op.data };
+    for (const ref of refs) {
+        // (أ) اتحل فعلاً في نفس دورة المزامنة دي
+        if (tempIdToRealId.has(ref.tempId)) {
+            updated[ref.field] = tempIdToRealId.get(ref.tempId);
+            continue;
+        }
+        // (ب) لسه معلّق في الطابور نفسه — نستنى الدورة الجاية (مفيش داعي
+        // نحاول fallback بالاسم أصلاً هنا، لأن السجل المرجعي هيتزامن قريب)
+        const stillQueued = queue.some(
+            (q) => q.table === ref.table && (q.data as Record<string, unknown> | undefined)?._offlineTempId === ref.tempId
+        );
+        if (stillQueued) {
+            return { data: op.data || {}, shouldRetry: true };
+        }
+        // (ج) fallback بالاسم — الحالة النادرة (تشغيلة جديدة، التمبيد مش
+        // موجود في الذاكرة ولا في الطابور، يبقى غالبًا اتزامن قبل كده)
+        const nameColumn = FK_FALLBACK_NAME_COLUMN[ref.table];
+        let resolvedByName = false;
+        if (nameColumn && ref.fallbackNameValue) {
+            // ⚠️ نفس الكاست الموثّق فوق تعريف dbFrom() بالظبط (ref.table هنا
+            // Generic من نوع DbWriteTable مش literal ثابت — من غير الكاست ده
+            // TypeScript بيحاول يحل النوع على مستوى الـ schema كله فبيرجّع
+            // أخطاء بناء ضخمة، مش لأن اسم الجدول غلط فعليًا وقت التشغيل).
+            // ⚠️ كاست إضافي هنا (`as any` موثّق ومقصود، بنفس اتفاقية
+            // `db.from(table as any)` المقبولة فعليًا في 6 مواضع تانية بالمشروع
+            // — راجع ملاحظات Phase 4.5 لتنظيف `any`): عمود البحث (`nameColumn`)
+            // بيتحدد ديناميكيًا من FK_FALLBACK_NAME_COLUMN حسب الجدول (مش
+            // literal ثابت زي 'title' القديمة)، فـ TypeScript مستحيل يتحقق منه
+            // وقت الكتابة مهما كان الكاست على اسم الجدول نفسه. التحقق الحقيقي
+            // من صحة اسم العمود بيحصل وقت التشغيل فعليًا (Supabase هيرجّع خطأ
+            // واضح لو العمود مش موجود)، وده مغطى بمعالجة الأخطاء العادية في
+            // دورة المزامنة (catch + bumpRetry).
+            const { data: row } = await (dbClient.from(ref.table as 'cases') as unknown as {
+                select: (col: string) => {
+                    eq: (col: string, val: string) => {
+                        order: (col: string, opts: { ascending: boolean }) => {
+                            limit: (n: number) => { maybeSingle: () => Promise<{ data: { id: string } | null; error: unknown }> };
+                        };
+                    };
+                };
+            })
+                .select('id')
+                .eq(nameColumn, ref.fallbackNameValue)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+            if (row?.id) {
+                updated[ref.field] = row.id;
+                resolvedByName = true;
+            }
+        }
+        if (!resolvedByName) {
+            // مفيش حل — لا تمبيد في الذاكرة، لا في الطابور، لا fallback نجح
+            return { data: op.data || {}, shouldRetry: true };
+        }
+    }
+    delete updated._offlineFkTempId;
+    return { data: updated, shouldRetry: false };
+}
+
+// ══════════════════════════════════════════════════════════
 //  Offline Sync Queue — DB Write Wrapper
 // ══════════════════════════════════════════════════════════
 let __syncQueueRunning = false;
@@ -306,8 +431,27 @@ window.__syncOfflineQueue = async function() {
                     delete op.data._offlineCaseTempId;
                     delete op.data._offlineCaseTitle;
                 }
+                // 🆕 المرحلة 1: حل مراجع FK العامة (_offlineFkTempId) لو موجودة —
+                // بيشتغل جنب الآلية القديمة (_offlineCaseTempId) فوق من غير ما
+                // يعارضها؛ الاتنين ممكن يتواجدوا في نفس العملية نظريًا (مش
+                // متوقع فعليًا حاليًا لحد ما المرحلة 2 تتنفذ) من غير تعارض لأنهم
+                // بيشتغلوا على حقول مختلفة.
+                if (op.data?._offlineFkTempId) {
+                    const resolved = await resolveOfflineFkRefs(db, op, tempIdToRealId, queue);
+                    if (resolved.shouldRetry) {
+                        await bumpRetry(op);
+                        failCount++;
+                        continue;
+                    }
+                    op.data = resolved.data;
+                }
                 const insertData = stripOfflineSentinels(op.data);
-                if (op.table === 'cases' && op.data?._offlineTempId) {
+                // 🆕 المرحلة 1: كان مقصور على `op.table === 'cases'` بس — دلوقتي
+                // معمم لأي جدول، عشان أي INSERT (قضية أو عميل) يقدر يسجّل
+                // تمبيده في نفس الـ Map المشتركة (tempIdToRealId) ويتستخدم في
+                // حل مراجع FK لعمليات تانية بعده في نفس الدورة (شوف
+                // resolveOfflineFkRefs فوق). صفر تغيير سلوك للقضايا الموجودة.
+                if (op.data?._offlineTempId) {
                     const res = await db.from(op.table).insert([insertData as Database['public']['Tables'][typeof op.table]['Insert']]).select('id').single();
                     error = res.error;
                     if (!error && res.data) tempIdToRealId.set(op.data._offlineTempId as string, (res.data as { id: string }).id);
@@ -315,6 +459,18 @@ window.__syncOfflineQueue = async function() {
                     ({ error } = await db.from(op.table).insert([insertData as Database['public']['Tables'][typeof op.table]['Insert']]));
                 }
             } else if (op.type === 'UPDATE') {
+                // 🆕 المرحلة 1: حل مراجع FK العامة (_offlineFkTempId) لو موجودة —
+                // نفس منطق فرع INSERT فوق بالظبط، بس هنا للـ UPDATE (مثال:
+                // ربط جلسة حقيقية بقضية لسه في الطابور — case_id تمبيد).
+                if (op.data?._offlineFkTempId) {
+                    const resolved = await resolveOfflineFkRefs(db, op, tempIdToRealId, queue);
+                    if (resolved.shouldRetry) {
+                        await bumpRetry(op);
+                        failCount++;
+                        continue;
+                    }
+                    op.data = resolved.data;
+                }
                 // op.id هنا هي الـ id الحقيقي (string) بتاع السجل — مش الرقم
                 // التلقائي بتاع IndexedDB (ده بس لعمليات INSERT، زي ما موثّق
                 // فوق تعريف OfflineQueueItem). كاست `as string` بنفس منطق
@@ -334,7 +490,11 @@ window.__syncOfflineQueue = async function() {
                     }
                 }
                 if (!conflict) {
-                    ({ error } = await db.from(op.table).update(op.data as Database['public']['Tables'][typeof op.table]['Update']).eq('id', op.id as string));
+                    // 🆕 المرحلة 1: stripOfflineSentinels هنا احتياط — resolveOfflineFkRefs
+                    // فوق بيشيل `_offlineFkTempId` بنفسه لما يحل كل المراجع، لكن
+                    // بنستدعيها تاني هنا زي ما بيحصل مع INSERT، تحسبًا لأي sentinel
+                    // تاني يتضاف مستقبلاً لعمليات UPDATE من غير ما ننسى نشيله هنا.
+                    ({ error } = await db.from(op.table).update(stripOfflineSentinels(op.data) as Database['public']['Tables'][typeof op.table]['Update']).eq('id', op.id as string));
                 }
             } else if (op.type === 'DELETE') {
                 ({ error } = await db.from(op.table).delete().eq('id', op.id as string));
@@ -480,7 +640,15 @@ window.__dbWrite = async function <T extends DbWriteTable>({ type, table, data, 
                 // تاني على نفس السجل بعد التعديل الأول مباشرة كان هيتكشف غلط
                 // كـ"تعارض" مع نفسه (لأن آخر updated_at محفوظة عنده محليًا
                 // هتفضل أقدم من اللي فعليًا في السيرفر بعد أول تعديل ناجح).
-                const res = await dbFrom(table).update(data as Database['public']['Tables']['cases']['Update']).eq('id', id as string).select('updated_at').single();
+                // 🆕 المرحلة 1: بنشيل أي حقل sentinel (_offline...) قبل الإرسال
+                // الفعلي هنا — كانت من غير تنظيف قبل كده (بعكس مسار INSERT فوق
+                // اللي عنده stripOfflineSentinels من الأول). ما كانش ده بيسبب
+                // مشكلة فعلية لحد دلوقتي لأن مفيش caller بيبعت sentinel مع
+                // UPDATE وهو أونلاين، لكن مع _offlineFkTempId الجديدة (المفروض
+                // تتبعت بغض النظر عن حالة الاتصال، زي _offlineCaseTempId)، لازم
+                // تتشال هنا كمان وإلا Supabase هيرفض العملية.
+                const cleanUpdateData = stripOfflineSentinels(data);
+                const res = await dbFrom(table).update(cleanUpdateData as Database['public']['Tables']['cases']['Update']).eq('id', id as string).select('updated_at').single();
                 error = res.error;
                 updatedRow = res.data as unknown as Partial<Database['public']['Tables'][T]['Row']> | null;
             } else if (type === 'DELETE') {
