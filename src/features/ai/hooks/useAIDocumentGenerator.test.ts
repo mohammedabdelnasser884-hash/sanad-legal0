@@ -112,4 +112,25 @@ describe('useAIDocumentGenerator — validation قبل التوليد', () => {
     expect(result.current.generatedDoc.startsWith('⚠️ تعذّر توليد المستند')).toBe(true);
     expect(recordError).toHaveBeenCalledWith('ai_document_generate', 'Failed to fetch', expect.objectContaining({ label: 'توليد المستندات' }));
   });
+
+  // 🆕 المرحلة 5 — البند الأخير المتبقي: تسجيل خطأ فشل تنزيل/طباعة الـ PDF
+  // (كان قبل كده بيعرض توست عام بس من غير أي recordError — الاستثناء
+  // الوحيد بين كل مهام المساعد). بنحاكي فشل window.open (مثلاً حاجب
+  // النوافذ المنبثقة في المتصفح رمى استثناء بدل ما يرجع null) عشان
+  // نوصل لفرع catch فعليًا.
+  it('downloadPDF: فشل فعلي (window.open بيرمي استثناء) → recordError بيتنادى بمفتاح ai_document_download', async () => {
+    const { result } = setup();
+    fillRequiredFields(result);
+    await act(async () => { await result.current.generateDocument(); });
+    expect(result.current.generatedDoc).toContain('نص المستند المولّد');
+
+    const originalOpen = window.open;
+    window.open = vi.fn(() => { throw new Error('Popup blocked'); }) as unknown as typeof window.open;
+    try {
+      act(() => { result.current.downloadPDF(); });
+      expect(recordError).toHaveBeenCalledWith('ai_document_download', 'Popup blocked', expect.objectContaining({ label: 'تنزيل مستند PDF' }));
+    } finally {
+      window.open = originalOpen;
+    }
+  });
 });
