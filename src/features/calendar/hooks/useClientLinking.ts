@@ -3,6 +3,7 @@ import { toast } from '../../../shared/lib/notifications';
 import { db } from '../../../supabaseClient';
 import { showErrorToast } from '../../../shared/lib/errorReporting';
 import { getCurrentTenantId } from '../../../constants';
+import { recalcNextHearing } from '../../../shared/lib/dataAccess';
 import type { Form } from '../NewStandaloneSessionModal';
 
 export type SavedFormData = { form: Form; finalCaseType: string; finalCourtLevel: string; fullCaseNumber: string; sessionId: string | null };
@@ -48,6 +49,10 @@ export function useClientLinking(savedFormData: SavedFormData | null, onSaved: (
         // (مش court_floor القديم المهجور)، وبننقل درجة التقاضي وبيانات
         // السكرتير كمان بنفس المنطق.
         session_hall: f.session_hall || null,
+        // ⚡ FIX: session_time كان بيضيع تمامًا عند تحويل جلسة مستقلة
+        // لقضية — الحقل ده كان متسجل صح في الجلسة، بس مكانش بينتقل للقضية
+        // الجديدة، فكان بيبان فاضي في تاب البيانات وتقرير الـ PDF.
+        session_time: f.session_time || null,
         court_level: cl || null,
         secretary_hall: f.secretary_hall || null,
         secretary_name: f.secretary_name || null,
@@ -69,6 +74,11 @@ export function useClientLinking(savedFormData: SavedFormData | null, onSaved: (
           .eq('id', savedFormData.sessionId);
         if (sessionLinkErr) {
           showErrorToast('session_case_link', sessionLinkErr, 'تم إنشاء القضية لكن تعذّر ربط الجلسة بها. حاول تحديث الصفحة.', 'ربط الجلسة بالقضية');
+        } else {
+          // ⚡ FIX: next_hearing كان بيفضل فاضي في القضية الجديدة رغم إن
+          // فيها جلسة مربوطة فعليًا — نفس منطق recalcNextHearing الموحّد
+          // المستخدم في كل مكان تاني بيضيف/يربط جلسة بقضية.
+          await recalcNextHearing(db, data.id);
         }
       }
       onSaved(); // تحديث قائمة القضايا والجلسات فوراً (بعد اكتمال الربط)
@@ -145,18 +155,29 @@ export function useClientLinking(savedFormData: SavedFormData | null, onSaved: (
       if (!name) return;
       const tenantId = getCurrentTenantId();
       if (!tenantId) { toast('❌ تعذر تحديد المكتب الحالي، أعد تحميل الصفحة وحاول مرة أخرى', true); return; }
-      const { error } = await db.from('clients').insert([{
-        // نفس الإصلاح المذكور فوق في handleAddAndLinkClient — client_name
-        // هو العمود الإجباري الحقيقي، وtenant_id مطلوب عشان الـ RLS.
-        client_name: name,
-        full_name: name,
-        tenant_id: tenantId,
-        national_id: f.plaintiff_national_id || null,
-        // power_of_attorney مش عمود موجود في clients، والتوكيل متسجل على
-        // مستوى الجلسة.
-      }]);
+      // ⚡ FIX (مرحلة 0 — توسيع الأوفلاين): تحويل من db.from() المباشر لـ
+      // __dbWrite. عملية مستقلة تمامًا (إضافة موكل من غير أي ربط بقضية)،
+      // فآمنة تتحول فورًا من غير أي توسيع في نظام الطابور.
+      const { error, offline, queued } = await window.__dbWrite({
+        type: 'INSERT',
+        table: 'clients',
+        data: {
+          // نفس الإصلاح المذكور فوق في handleAddAndLinkClient — client_name
+          // هو العمود الإجباري الحقيقي، وtenant_id مطلوب عشان الـ RLS.
+          client_name: name,
+          full_name: name,
+          tenant_id: tenantId,
+          national_id: f.plaintiff_national_id || null,
+          // power_of_attorney مش عمود موجود في clients، والتوكيل متسجل على
+          // مستوى الجلسة.
+        },
+      });
       if (error) {
         showErrorToast('client_create', error, 'تعذّر إضافة الموكل. تحقق من صحة البيانات. لو المشكلة استمرت، تواصل مع الدعم.', 'إضافة موكل');
+      }
+      else if (offline && queued) {
+        toast('📥 الموكل محفوظ محلياً — سيُضاف فور عودة الإنترنت');
+        onClientAdded?.();
       }
       else { toast('✅ تمت إضافة الموكل لقائمة الموكلين'); onClientAdded?.(); }
     } catch { toast('❌ خطأ غير متوقع', true); }
