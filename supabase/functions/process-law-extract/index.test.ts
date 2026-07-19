@@ -362,6 +362,33 @@ describe('process-law-extract — تحديث/حذف/إدراج law_articles', ()
     expect(lastUpdate.args[0]).toMatchObject({ status: 'completed', processing_error: null });
   });
 
+  it('نص بترقيم بالحروف بس (مادة بالأرقام صفر) → fallback للحروف، رقم المادة يترجم لصيغة رقمية', async () => {
+    queueLawFound();
+    supabaseMock.queueTable('laws', { data: null, error: null }); // update processing
+    supabaseMock.queueStorageDownload('legal-library', { data: fakeBlob(), error: null });
+    supabaseMock.queueTable('laws', { data: null, error: null }); // update completed
+    unpdfState.text =
+      'المادة الأولى: نص تجريبي كافي الطول لهذه المادة في الاختبار الحالي.\n' +
+      'المادة الثانية عشرة: نص تجريبي كافي الطول لهذه المادة في الاختبار الحالي.\n' +
+      'المادة الحادية والعشرون: نص تجريبي كافي الطول لهذه المادة في الاختبار الحالي.';
+    supabaseMock.queueTable('law_articles', { data: null, error: null }); // delete
+    supabaseMock.queueTable('law_articles', { data: null, error: null }); // insert
+
+    supabaseMock.queueRpc('refresh_law_articles_count', () => ({ data: null, error: null }));
+
+    const res = await handler(req({ law_id: 'law-1' }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toEqual({ success: true, articles_count: 3 });
+
+    const insertCall = supabaseMock.calls
+      .filter((c) => c.table === 'law_articles')
+      .flatMap((c) => c.ops)
+      .find((o) => o.method === 'insert')!;
+    const numbers = (insertCall.args[0] as { article_number: string }[]).map((r) => r.article_number);
+    expect(numbers).toEqual(['1', '12', '21']);
+  });
+
   it('أكتر من 100 مادة → إدراج على دفعتين (100 + الباقي)', async () => {
     queueLawFound();
     supabaseMock.queueTable('laws', { data: null, error: null }); // update processing
