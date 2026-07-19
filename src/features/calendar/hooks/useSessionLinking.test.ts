@@ -443,4 +443,71 @@ describe('useSessionLinking', () => {
       expect(dbWrite.callsFor('INSERT:clients')).toHaveLength(0);
     });
   });
+
+  // 🆕 FIX: handleAddClientOnly كان بينشئ الموكل بس من غير ما يربطه
+  // بـ case_sessions.client_id — فزرار "🔗 ربط" كان يفضل ظاهر تاني ويسمح
+  // بتكرار نفس الموكل. التستات دي بتتأكد إن الجلسة بقت مربوطة فعليًا.
+  describe('handleAddClientOnly', () => {
+    it('نجاح (أونلاين) → INSERT:clients، وبعدها UPDATE:case_sessions بـ client_id، وclientStep يبقى done', async () => {
+      dbWrite.setResult('INSERT:clients', { error: null, offline: false, data: { id: 'new-client-solo' } });
+      const mockDb = makeMockDb();
+      const onClientAdded = vi.fn();
+      const onDone = vi.fn();
+      const session = makeSession({ id: 'session-solo-1', plaintiff: 'موكل منفرد', plaintiff_national_id: '111' });
+      const { result } = renderHook(() => useSessionLinking(session, mockDb, onDone, onClientAdded));
+
+      await act(async () => { await result.current.handleAddClientOnly(); });
+
+      expect(dbWrite.callsFor('INSERT:clients')[0].data).toEqual(expect.objectContaining({
+        full_name: 'موكل منفرد', client_name: 'موكل منفرد', tenant_id: 'tenant-1', national_id: '111',
+      }));
+      expect(dbWrite.callsFor('UPDATE:case_sessions')[0]).toEqual(expect.objectContaining({
+        type: 'UPDATE', table: 'case_sessions', id: 'session-solo-1',
+        data: expect.objectContaining({ client_id: 'new-client-solo' }),
+      }));
+      expect(toast).toHaveBeenCalledWith('✅ تمت إضافة الموكل وربطه بالجلسة');
+      expect(result.current.clientStep).toBe('done');
+      expect(onClientAdded).toHaveBeenCalled();
+      expect(onDone).toHaveBeenCalled();
+    });
+
+    it('🆕 أوفلاين (queued) → توست "محفوظ محلياً"، وUPDATE:case_sessions بـ _offlineFkTempId على client_id', async () => {
+      dbWrite.setResult('INSERT:clients', { error: null, offline: true, queued: true });
+      const mockDb = makeMockDb();
+      const session = makeSession({ id: 'session-solo-2', plaintiff: 'موكل أوفلاين منفرد' });
+      const { result } = renderHook(() => useSessionLinking(session, mockDb, vi.fn()));
+
+      await act(async () => { await result.current.handleAddClientOnly(); });
+
+      const linkCall = dbWrite.callsFor('UPDATE:case_sessions')[0];
+      expect(linkCall.data?.client_id).toMatch(/^tmp-/);
+      expect((linkCall.data?._offlineFkTempId as unknown[])?.[0]).toEqual(expect.objectContaining({
+        field: 'client_id', table: 'clients',
+      }));
+      expect(toast).toHaveBeenCalledWith('📥 إضافة الموكل وربطه بالجلسة محفوظة محلياً — ستُزامن عند عودة الإنترنت');
+      expect(result.current.clientStep).toBe('done');
+    });
+
+    it('فشل إنشاء الموكل → توست خطأ، ومفيش أي UPDATE:case_sessions', async () => {
+      dbWrite.setResult('INSERT:clients', { error: { message: 'insert failed' }, offline: false });
+      const mockDb = makeMockDb();
+      const session = makeSession({ plaintiff: 'موكل فشل' });
+      const { result } = renderHook(() => useSessionLinking(session, mockDb, vi.fn()));
+
+      await act(async () => { await result.current.handleAddClientOnly(); });
+
+      expect(toast).toHaveBeenCalledWith('❌ تعذّر إضافة الموكل. تحقق من صحة البيانات. لو المشكلة استمرت، تواصل مع الدعم.', true);
+      expect(dbWrite.callsFor('UPDATE:case_sessions')).toHaveLength(0);
+    });
+
+    it('اسم المدعي فاضي → لا تفعل شيئًا', async () => {
+      const mockDb = makeMockDb();
+      const session = makeSession({ plaintiff: null });
+      const { result } = renderHook(() => useSessionLinking(session, mockDb, vi.fn()));
+
+      await act(async () => { await result.current.handleAddClientOnly(); });
+
+      expect(dbWrite.callsFor('INSERT:clients')).toHaveLength(0);
+    });
+  });
 });
