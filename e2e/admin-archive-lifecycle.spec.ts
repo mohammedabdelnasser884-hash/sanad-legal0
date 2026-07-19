@@ -53,9 +53,13 @@ test('استرجاع قضية من شاشة الأرشيف: تختفي من ال
   if (error) throw error;
   expect(data?.deleted_at).toBeNull();
 
-  // ── لازم نقفل شاشة لوحة الإدارة (overlay بتغطي الشريط السفلي بالكامل)
-  //    قبل ما نقدر نضغط على nav-cases، وإلا الدوسة بتفشل (element intercepted) ──
+  // ── لازم نقفل شاشة لوحة الإدارة (overlay بتغطي الشريط السفلي بالكامل، z-[60])
+  //    قبل ما نقدر نضغط على nav-cases، وإلا الدوسة بتفشل (element intercepted).
+  //    الدوسة على admin-section-back بس مش كفاية أحيانًا (الأوفرلاي بياخد وقت
+  //    يتشال من الـ DOM بعد الاستدعاء، خصوصًا بعد عملية استرجاع)، فلازم
+  //    ننتظر الأوفرلاي يختفي فعليًا قبل ما نكمل ──
   await page.getByTestId('admin-section-back').click();
+  await page.getByTestId('admin-section-back').waitFor({ state: 'detached', timeout: 10_000 });
 
   // وتظهر تاني في قائمة القضايا النشطة
   await page.getByTestId('nav-cases').click();
