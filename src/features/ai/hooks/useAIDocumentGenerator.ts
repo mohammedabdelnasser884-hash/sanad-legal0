@@ -124,7 +124,14 @@ ${caseInfo}
             // 🆕 نفاد السقف اليومي حالة مختلفة عن خطأ عادي — ⏳ بدل ⚠️ + تلميح BYOK
             // (المرحلة 3، بند "fallback واضح عند غياب رصيد AI")
             const isQuota = displayMsg.includes('الحد المجاني اليومي');
-            const cleanMsg = displayMsg.replace(/^[⚠️⏳]\s*/, '');
+            const warningPrefix = '⚠️';
+            const hourglassPrefix = '⏳';
+            let cleanMsg = displayMsg;
+            if (displayMsg.startsWith(warningPrefix)) {
+                cleanMsg = displayMsg.slice(warningPrefix.length).trimStart();
+            } else if (displayMsg.startsWith(hourglassPrefix)) {
+                cleanMsg = displayMsg.slice(hourglassPrefix.length).trimStart();
+            }
             setGeneratedDoc(isQuota
                 ? '⏳ ' + cleanMsg + '\n\nالسقف بيترجع تلقائيًا بكرة. لو عايز تستخدم أكتر دلوقتي، تقدر تضيف مفتاح Groq شخصي مجاني من الإعدادات.'
                 : '⚠️ ' + cleanMsg);
