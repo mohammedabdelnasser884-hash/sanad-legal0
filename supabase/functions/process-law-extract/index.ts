@@ -40,22 +40,89 @@ function normalizeText(raw: string): string {
 
 const ARTICLE_REGEX = /(?<![\u0600-\u06ff])(?:ال)?مادة[ \t]*[()]*\s*([0-9\u0660-\u0669\u06f0-\u06f9]+)\s*[()]*[ \t]*:?[ \t]*((?:مكرر(?:[ \t]*[()]*\s*[0-9\u0660-\u0669\u06f0-\u06f9]+\s*[()]*)?)?)/g;
 
+// ── دعم ترقيم المواد بالحروف ("المادة الأولى" بدل "مادة 1") — بعض
+// القوانين القديمة/التأسيسية بترقّم بالحروف بدل الأرقام. تغطي 1-100.
+// ⚠️ إضافة موازية صرفة — الـ ARTICLE_REGEX الأصلي (بالأرقام) فوق ده
+// فضل زي ما هو حرفيًا وبيتفحص أولاً؛ الدعم ده بيتفعّل فقط لما مفيش
+// تطابق بالأرقام في النص كله (شوف splitIntoArticles تحت).
+const ORDINAL_STANDALONE: Record<string, number> = {
+  'الأولى': 1, 'الثانية': 2, 'الثالثة': 3, 'الرابعة': 4, 'الخامسة': 5,
+  'السادسة': 6, 'السابعة': 7, 'الثامنة': 8, 'التاسعة': 9, 'العاشرة': 10,
+};
+const ORDINAL_COMPOUND_UNIT: Record<string, number> = {
+  'الحادية': 1, 'الثانية': 2, 'الثالثة': 3, 'الرابعة': 4, 'الخامسة': 5,
+  'السادسة': 6, 'السابعة': 7, 'الثامنة': 8, 'التاسعة': 9,
+};
+const ORDINAL_TENS: Record<string, number> = {
+  'العشرون': 20, 'العشرين': 20, 'الثلاثون': 30, 'الثلاثين': 30,
+  'الأربعون': 40, 'الأربعين': 40, 'الخمسون': 50, 'الخمسين': 50,
+  'الستون': 60, 'الستين': 60, 'السبعون': 70, 'السبعين': 70,
+  'الثمانون': 80, 'الثمانين': 80, 'التسعون': 90, 'التسعين': 90,
+};
+const escapeReg = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const unitAlt = Object.keys(ORDINAL_COMPOUND_UNIT).map(escapeReg).join('|');
+const standaloneAlt = Object.keys(ORDINAL_STANDALONE).map(escapeReg).join('|');
+const tensAlt = Object.keys(ORDINAL_TENS).map(escapeReg).join('|');
+// الترتيب مهم: المركّب (11-19 ثم 21-99) قبل المفرد — عشان الالتقاط ما
+// يوقفش عند "الثانية" لوحدها لما تكون فعليًا جزء من "الثانية عشرة"
+// أو "الثانية والعشرون"
+const ORDINAL_PHRASE_INNER =
+  `(?:${unitAlt})\\s+(?:عشرة|عشر)|(?:${unitAlt})\\s+و(?:${tensAlt})|${tensAlt}|${standaloneAlt}|مائة|المائة|مئة|المئة`;
+const ARTICLE_REGEX_ORDINAL = new RegExp(
+  `(?<![\\u0600-\\u06ff])(?:ال)?مادة[ \\t]*[()]*\\s*(${ORDINAL_PHRASE_INNER})\\s*[()]*[ \\t]*:?[ \\t]*((?:مكرر(?:\\s+(?:${ORDINAL_PHRASE_INNER}))?)?)`,
+  'g',
+);
+
+function ordinalPhraseToNumber(phraseRaw: string): number | null {
+  const p = phraseRaw.trim().replace(/\s+/g, ' ');
+  if (p === 'مائة' || p === 'المائة' || p === 'مئة' || p === 'المئة') return 100;
+  const teenMatch = p.match(/^(.+?)\s+(?:عشرة|عشر)$/);
+  if (teenMatch && ORDINAL_COMPOUND_UNIT[teenMatch[1]] !== undefined) {
+    return 10 + ORDINAL_COMPOUND_UNIT[teenMatch[1]];
+  }
+  const compoundMatch = p.match(/^(.+?)\s+و(.+)$/);
+  if (compoundMatch) {
+    const unit = ORDINAL_COMPOUND_UNIT[compoundMatch[1]];
+    const tens = ORDINAL_TENS[compoundMatch[2]];
+    if (unit !== undefined && tens !== undefined) return tens + unit;
+  }
+  if (ORDINAL_TENS[p] !== undefined) return ORDINAL_TENS[p];
+  if (ORDINAL_STANDALONE[p] !== undefined) return ORDINAL_STANDALONE[p];
+  return null;
+}
+
 function splitIntoArticles(rawText: string) {
   const text = normalizeText(rawText);
-  const matches = [...text.matchAll(ARTICLE_REGEX)];
-  if (matches.length === 0) return [];
+  const numericMatches = [...text.matchAll(ARTICLE_REGEX)];
+  if (numericMatches.length > 0) return buildArticlesFromMatches(text, numericMatches, false);
+  // مفيش تطابق بالأرقام في النص كله — نجرّب الترقيم بالحروف كـ fallback
+  const ordinalMatches = [...text.matchAll(ARTICLE_REGEX_ORDINAL)];
+  if (ordinalMatches.length > 0) return buildArticlesFromMatches(text, ordinalMatches, true);
+  return [];
+}
+
+function buildArticlesFromMatches(text: string, matches: RegExpMatchArray[], isOrdinal: boolean) {
   const byNumber = new Map<string, string>();
   const order: string[] = [];
   for (let i = 0; i < matches.length; i++) {
     const m = matches[i];
     const start = m.index ?? 0;
     const end = i + 1 < matches.length ? (matches[i + 1].index ?? text.length) : text.length;
-    let num = normalizeDigits(m[1] || '').trim();
+    let num: string;
+    if (isOrdinal) {
+      const val = ordinalPhraseToNumber(m[1] || '');
+      if (val === null) continue;
+      num = String(val);
+    } else {
+      num = normalizeDigits(m[1] || '').trim();
+    }
     if (!num) continue;
     const mokrarPart = (m[2] || '').trim();
     if (mokrarPart) {
-      const mokrarDigits = normalizeDigits(mokrarPart).match(/[0-9]+/)?.[0];
-      num = num + ' مكرر' + (mokrarDigits ? ' ' + mokrarDigits : '');
+      const mokrarValue = isOrdinal
+        ? ordinalPhraseToNumber(mokrarPart)
+        : Number(normalizeDigits(mokrarPart).match(/[0-9]+/)?.[0]);
+      num = num + ' مكرر' + (mokrarValue ? ' ' + mokrarValue : '');
     }
     const body = text.slice(start, end).trim().replace(/^[()،:\s]+/, '').trim();
     if (body.length < 8) continue;
