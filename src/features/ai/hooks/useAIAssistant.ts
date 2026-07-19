@@ -38,6 +38,7 @@ export function useAIAssistant(cases: MappedCase[], clients: ClientRow[], profil
         docType, setDocType, docFields, sf,
         generatedDoc, setGeneratedDoc, generatingDoc,
         copied, copyDoc, printDoc, downloadPDF, generateDocument,
+        missingCritical: docMissingCritical, canGenerate: canGenerateDoc,
     } = useAIDocumentGenerator({
         profile, activeCfg, today, selectedCase, hasKey, setShowKeyInput,
         retrieveLegalArticles, buildLegalContextBlock, callAI,
@@ -58,7 +59,9 @@ export function useAIAssistant(cases: MappedCase[], clients: ClientRow[], profil
     docType, setDocType, docFields, sf,
     generatedDoc, setGeneratedDoc, generatingDoc,
     copied, copyDoc, printDoc, downloadPDF, generateDocument,
+    docMissingCritical, canGenerateDoc,
     sendMessage, inputRef, messagesEndRef,
     today, activeCfg, DOC_TEMPLATES, colorMap,
+    buildLegalContextBlock, retrieveLegalArticles, callAI,
   };
 }
