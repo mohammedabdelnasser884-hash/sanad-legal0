@@ -72,6 +72,18 @@ function makeMockDb(clientsSelectResult: { data?: unknown; error?: unknown } = {
                 ilikeSpy(col, val);
                 return { limit: vi.fn(() => Promise.resolve(clientsSelectResult)) };
               }),
+              // ⚡ FIX: checkClientDuplicate (بينده handleAddAndLinkClient/
+              // handleAddClientOnly قبل أي إضافة موكل) وsearchExistingClients
+              // بيعدوا عن طريق .is(...).or(...) — مباشرة (thenable) أو
+              // .neq(...)/.limit(...) بعدها. الچين ده كان ناقص فالموك خالص
+              // فكانت بترمي "or is not a function"، وبما إنها جوه try/catch
+              // في الدالة كانت بتظهر كـ"❌ خطأ غير متوقع" بدل السلوك الحقيقي.
+              or: vi.fn(() => ({
+                neq: vi.fn(() => Promise.resolve(clientsSelectResult)),
+                limit: vi.fn(() => Promise.resolve(clientsSelectResult)),
+                then: (resolve: (v: typeof clientsSelectResult) => void, reject?: (e: unknown) => void) =>
+                  Promise.resolve(clientsSelectResult).then(resolve, reject),
+              })),
             })),
           })),
         };
