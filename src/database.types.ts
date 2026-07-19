@@ -333,6 +333,10 @@ export interface Database {
           circuit_number: string | null
           plaintiff_role: string | null
           defendant_role: string | null
+          court_level: string | null
+          secretary_hall: string | null
+          secretary_name: string | null
+          secretary_mobile: string | null
         }
         Insert: {
           id?: string
@@ -360,6 +364,10 @@ export interface Database {
           circuit_number?: string | null
           plaintiff_role?: string | null
           defendant_role?: string | null
+          court_level?: string | null
+          secretary_hall?: string | null
+          secretary_name?: string | null
+          secretary_mobile?: string | null
         }
         Update: {
           id?: string
@@ -387,6 +395,10 @@ export interface Database {
           circuit_number?: string | null
           plaintiff_role?: string | null
           defendant_role?: string | null
+          court_level?: string | null
+          secretary_hall?: string | null
+          secretary_name?: string | null
+          secretary_mobile?: string | null
         }
         // ⚠️ FIX (14 يوليو 2026): كانت فاضية، وده كان بيمنع supabase-js من
         // استنتاج نوع الـ embed `cases(...)` جوه .select() (بيرجع
@@ -431,6 +443,7 @@ export interface Database {
           session_hall: string | null
           secretary_hall: string | null
           secretary_name: string | null
+          secretary_mobile: string | null
           case_number: string | null
           court: string | null
           plaintiff_national_id: string | null
@@ -465,6 +478,7 @@ export interface Database {
           session_hall?: string | null
           secretary_hall?: string | null
           secretary_name?: string | null
+          secretary_mobile?: string | null
           case_number?: string | null
           court?: string | null
           plaintiff_national_id?: string | null
@@ -499,6 +513,7 @@ export interface Database {
           session_hall?: string | null
           secretary_hall?: string | null
           secretary_name?: string | null
+          secretary_mobile?: string | null
           case_number?: string | null
           court?: string | null
           plaintiff_national_id?: string | null
