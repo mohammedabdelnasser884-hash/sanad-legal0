@@ -485,6 +485,7 @@ describe('useSessionLinking', () => {
 
     it('🆕 أوفلاين (queued) → توست "محفوظ محلياً"، وUPDATE:case_sessions بـ _offlineFkTempId على client_id', async () => {
       dbWrite.setResult('INSERT:clients', { error: null, offline: true, queued: true });
+      dbWrite.setResult('UPDATE:case_sessions', { error: null, offline: true, queued: true });
       const mockDb = makeMockDb();
       const session = makeSession({ id: 'session-solo-2', plaintiff: 'موكل أوفلاين منفرد' });
       const { result } = renderHook(() => useSessionLinking(session, mockDb, vi.fn()));
