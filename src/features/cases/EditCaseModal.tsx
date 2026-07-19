@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { I } from '../../constants';
 import { Inp } from '@/shared/ui/Inp';
+import { PoaInput } from '@/shared/ui/PoaInput';
 import { Sel } from '@/shared/ui/Sel';
 import { toast } from '../../shared/lib/notifications';
 import DatePicker from '@/shared/ui/DatePicker';
@@ -23,7 +24,12 @@ interface EditCaseForm {
     status: string; date: string; session_time: string;
     client_name: string; client_capacity: string; opponent: string; opponent_capacity: string;
     session_hall: string; secretary_hall: string; secretary_name: string; secretary_mobile: string;
+    // ⚡ NEW (19 يوليو 2026): نفس الحقول المضافة في NewCaseModal.tsx — شوف
+    // التعليق هناك لتفاصيل التوحيد بين فلو القضية العادية والجلسة المستقلة.
+    plaintiff_national_id: string; plaintiff_power_of_attorney: string; defendant_national_id: string;
 }
+
+const onlyDigits = (v: string, max = 14) => v.replace(/\D/g, '').slice(0, max);
 
 function EditCaseModal({caseData, onClose, onSave, countryCourts, countryCaseTypes}: EditCaseModalProps){
     const splitNum = (num: string) => {
@@ -106,6 +112,9 @@ function EditCaseModal({caseData, onClose, onSave, countryCourts, countryCaseTyp
         secretary_hall: caseData.secretary_hall || '',
         secretary_name: caseData.secretary_name || '',
         secretary_mobile: caseData.secretary_mobile || '',
+        plaintiff_national_id: caseData.plaintiff_national_id || '',
+        plaintiff_power_of_attorney: caseData.plaintiff_power_of_attorney || '',
+        defendant_national_id: caseData.defendant_national_id || '',
     });
     const s = <K extends keyof EditCaseForm>(k: K,v: EditCaseForm[K]) => setForm((p) =>({...p,[k]:v}));
 
@@ -137,11 +146,20 @@ function EditCaseModal({caseData, onClose, onSave, countryCourts, countryCaseTyp
                 React.createElement(Inp, {label:"صفة الموكل", value:form.client_capacity, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('client_capacity',e.target.value), placeholder:"مثال: مدعي / متهم...", required:true, 'data-testid':'edit-case-client-capacity'})
             ),
 
+            // بيانات التوكيل — سطر كامل تحت اسم الموكل مباشرة: رقم / حرف / سنة / مكتب توثيق
+            React.createElement(PoaInput, {value:form.plaintiff_power_of_attorney, onChange:(v: string) =>s('plaintiff_power_of_attorney',v)}),
+
+            // الرقم القومي للموكل
+            React.createElement(Inp, {label:"الرقم القومي للموكل", value:form.plaintiff_national_id, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('plaintiff_national_id',onlyDigits(e.target.value)), placeholder:"14 رقم", inputMode:"numeric", maxLength:14, 'data-testid':'edit-case-plaintiff-national-id'}),
+
             // الخصم + صفته
             React.createElement('div', {className:"grid grid-cols-2 gap-2"},
                 React.createElement(Inp, {label:"الخصم", value:form.opponent, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('opponent',e.target.value), placeholder:"اسم الخصم", required:true, 'data-testid':'edit-case-opponent'}),
                 React.createElement(Inp, {label:"صفة الخصم", value:form.opponent_capacity, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('opponent_capacity',e.target.value), placeholder:"مثال: مدعى عليه...", required:true, 'data-testid':'edit-case-opponent-capacity'})
             ),
+
+            // الرقم القومي للخصم
+            React.createElement(Inp, {label:"الرقم القومي للخصم", value:form.defendant_national_id, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('defendant_national_id',onlyDigits(e.target.value)), placeholder:"14 رقم", inputMode:"numeric", maxLength:14, 'data-testid':'edit-case-defendant-national-id'}),
 
             // ── بيانات القيد الرسمي ──
             React.createElement('div', {className:"border-t border-white/5 pt-1"},
@@ -293,6 +311,8 @@ function EditCaseModal({caseData, onClose, onSave, countryCourts, countryCaseTyp
                     if(!form.client_capacity.trim()){ toast('يرجى إدخال صفة الموكل', true); return; }
                     if(!form.opponent.trim()){ toast('يرجى إدخال اسم الخصم', true); return; }
                     if(!form.opponent_capacity.trim()){ toast('يرجى إدخال صفة الخصم', true); return; }
+                    if(form.plaintiff_national_id && form.plaintiff_national_id.length!==14){ toast('⚠️ الرقم القومي للموكل لازم يكون 14 رقم بالظبط', true); return; }
+                    if(form.defendant_national_id && form.defendant_national_id.length!==14){ toast('⚠️ الرقم القومي للخصم لازم يكون 14 رقم بالظبط', true); return; }
                     const number = form.caseNum&&form.caseYear ? form.caseNum+'/'+form.caseYear : form.caseNum||form.caseYear||'';
                     const finalCourtLevel = form.court_level==='أخرى' ? form.court_level_other : form.court_level;
                     const finalCourt = form.court==='أخرى' ? (form.court_other||'—') : (form.court||'—');
