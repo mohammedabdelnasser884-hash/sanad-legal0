@@ -44,6 +44,13 @@ export interface MappedCase {
     secretary_name: string | null;
     secretary_mobile: string | null;
     session_time: string | null;
+    // ⚡ NEW (19 يوليو 2026): بيانات رسمية إضافية للأطراف — كانت متسجلة في
+    // جدول cases فعليًا (من فلو تحويل جلسة مستقلة لقضية بس)، دلوقتي
+    // NewCaseModal/EditCaseModal بقوا بيسجلوها كمان عشان التوحيد ومفيش
+    // بيانات تضيع بغض النظر عن الفلو اللي القضية جت منه.
+    plaintiff_national_id: string | null;
+    plaintiff_power_of_attorney: string | null;
+    defendant_national_id: string | null;
 }
 
 // شكل عنصر الموكل بعد التطبيع في fetchClients — كل حقول ClientRow
@@ -167,6 +174,9 @@ export function useAppData(profile: ProfileRow | null) {
             secretary_name: r.secretary_name || null,
             secretary_mobile: r.secretary_mobile || null,
             session_time:   r.session_time || null,
+            plaintiff_national_id: r.plaintiff_national_id || null,
+            plaintiff_power_of_attorney: r.plaintiff_power_of_attorney || null,
+            defendant_national_id: r.defendant_national_id || null,
         }));
 
         if (page === 0) setCases(mapped);
@@ -248,6 +258,9 @@ export function useAppData(profile: ProfileRow | null) {
             secretary_name: r.secretary_name || null,
             secretary_mobile: r.secretary_mobile || null,
             session_time:   r.session_time || null,
+            plaintiff_national_id: r.plaintiff_national_id || null,
+            plaintiff_power_of_attorney: r.plaintiff_power_of_attorney || null,
+            defendant_national_id: r.defendant_national_id || null,
         }));
 
         setCases(mapped);
