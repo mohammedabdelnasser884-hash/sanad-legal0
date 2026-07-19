@@ -311,6 +311,18 @@ ${PDF_FONT_LINK}
             w.document.close();
             toast('📥 جاري فتح نافذة الطباعة/الحفظ...');
         } catch(err) {
+            // 🆕 المرحلة 5 (خطة المساعد الذكي) — البند المتبقي الأخير:
+            // كل مهام المساعد التانية (generateDocument فوق، CaseSummary،
+            // ClientMessage، SessionsRemindersOverview، CaseDataExtract،
+            // NextStepSuggestion، retrieveLegalArticles) بتسجّل أي خطأ فعلي
+            // في نظام صحة الخدمات (recordError/showErrorToast) — الاستثناء
+            // الوحيد كان هنا: فشل بناء/فتح نافذة تنزيل الـ PDF كان بيعرض
+            // توست عام بس من غير أي تسجيل داخلي، فمستحيل يظهر في بانر صحة
+            // النظام أو نلاحظ لو بيتكرر لمستخدمين كتير. بنسجّله دلوقتي بنفس
+            // نمط باقي المهام بالظبط (استخراج رسالة الخطأ الخام، مفتاح خدمة
+            // مخصص، رسالة عربية آمنة للمستخدم).
+            const _msg = err instanceof Error ? err.message : String(err);
+            recordError('ai_document_download', _msg, { label: 'تنزيل مستند PDF', message: 'حدث خطأ أثناء تجهيز التنزيل، يرجى المحاولة مرة أخرى' });
             toast('❌ حدث خطأ، يرجى المحاولة مرة أخرى', true);
         }
     };
