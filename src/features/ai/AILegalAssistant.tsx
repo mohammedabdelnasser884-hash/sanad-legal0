@@ -6,6 +6,9 @@ import SessionsRemindersOverview from './SessionsRemindersOverview';
 import CaseDataExtract from './CaseDataExtract';
 import RequiredDocumentsList from './RequiredDocumentsList';
 import NextStepSuggestion from './NextStepSuggestion';
+import CaseSummary from './CaseSummary';
+import ClientMessage from './ClientMessage';
+import { SectionCard } from '../../shared/ui/TaskResultKit';
 import type { AIMessage, AITopic, LegalArticle, GroqModel, DocTemplateConfig } from './hooks/aiAssistantTypes';
 import type { ClientRow, ProfileRow } from '../../types';
 import type { MappedCase } from '../../hooks/useAppData';
@@ -70,12 +73,30 @@ function AILegalAssistant({onClose, cases, clients, profile, country}: AILegalAs
       docType, setDocType, docFields, sf,
       generatedDoc, setGeneratedDoc, generatingDoc,
       copied, copyDoc, printDoc, downloadPDF, generateDocument,
+      docMissingCritical, canGenerateDoc,
       sendMessage, inputRef, messagesEndRef,
       today, activeCfg, DOC_TEMPLATES, colorMap,
+      buildLegalContextBlock, retrieveLegalArticles, callAI,
     } = useAIAssistant(cases, clients, profile, country);
 
+    // ── تعبئة تلقائية لحقول توليد المستند من بيانات القضية المختارة —
+    //    مسودة أولية لمستند (المرحلة 3، قسم 4.2). بتملى رقم القضية والمحكمة
+    //    والموضوع وبيانات الأطراف (كانت رقم القضية/المحكمة/الموضوع بس قبل كده)
+    //    والمستخدم يقدر يعدّل عليها بعدين عادي أو يعيد التعبئة بالزرار ──
+    const autofillDocFieldsFromCase = (c: MappedCase) => {
+        sf('caseNumber', c.number || '');
+        sf('court', c.court || '');
+        sf('subject', c.title || '');
+        sf('plaintiff', c.plaintiff || '');
+        sf('plaintiffRole', c.plaintiff_role || '');
+        sf('defendant', c.defendant || '');
+        sf('defendantRole', c.defendant_role || '');
+    };
+
     const taskCards = [
+        { mode: 'summary', icon: '🧾', title: 'تلخيص القضية', desc: 'تلخيص احترافي مختصر للقضية بالذكاء الاصطناعي', accent: 'from-premium-gold/20 to-amber-300/5 border-premium-gold/20 text-premium-gold' },
         { mode: 'generate', icon: '📝', title: 'توليد مستند', desc: 'صياغة مذكرات وصحف دعاوى وتوكيلات بالذكاء الاصطناعي', accent: 'from-purple-500/20 to-purple-400/5 border-purple-500/20 text-purple-300' },
+        { mode: 'client-message', icon: '💬', title: 'رسالة عميل مختصرة', desc: 'رسالة واتساب بسيطة للعميل عن مستجدات قضيته بالذكاء الاصطناعي', accent: 'from-teal-500/20 to-teal-400/5 border-teal-500/20 text-teal-300' },
         { mode: 'overview', icon: '🗓', title: 'الجلسات والتذكيرات', desc: 'جلسات فاتت من غير نتيجة، تذكيرات متأخرة وقادمة', accent: 'from-blue-500/20 to-blue-400/5 border-blue-500/20 text-blue-300' },
         { mode: 'extract', icon: '📋', title: 'بيانات القضية', desc: 'عرض كل بيانات القضية والموكل في مكان واحد', accent: 'from-emerald-500/20 to-emerald-400/5 border-emerald-500/20 text-emerald-300' },
         { mode: 'docs-required', icon: '📑', title: 'المستندات المطلوبة', desc: 'قائمة استرشادية بالمستندات حسب نوع القضية', accent: 'from-sky-500/20 to-sky-400/5 border-sky-500/20 text-sky-300' },
@@ -442,19 +463,29 @@ function AILegalAssistant({onClose, cases, clients, profile, country}: AILegalAs
 
             // Case selector for doc gen
             cases.length > 0 && React.createElement('div',null,
-                React.createElement('label',{className:"block text-[10px] font-black text-slate-400 mb-1.5"},"ربط بقضية (اختياري)"),
+                React.createElement('div',{className:"flex items-center justify-between mb-1.5"},
+                    React.createElement('label',{className:"text-[10px] font-black text-slate-400"},"ربط بقضية (اختياري)"),
+                    selectedCase && React.createElement('button',{
+                        type:"button",
+                        onClick:()=>autofillDocFieldsFromCase(selectedCase),
+                        className:"text-[9px] font-black text-premium-gold active:opacity-60"
+                    },"🔄 إعادة التعبئة من القضية")
+                ),
                 React.createElement('select',{
                     value:selectedCase?.id||'',
                     onChange:(e: React.ChangeEvent<HTMLSelectElement>) =>{
                         const c=cases.find((x: MappedCase) =>x.id===e.target.value);
                         setSelectedCase(c||null);
-                        if(c){sf('caseNumber',c.number||'');sf('court',c.court||'');sf('subject',c.title||'');}
+                        if(c) autofillDocFieldsFromCase(c);
                     },
                     className:"w-full p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white",
                     style:{fontFamily:'Cairo,sans-serif'}
                 },
                     React.createElement('option',{value:''},"— بدون ربط —"),
                     cases.map((c: MappedCase) =>React.createElement('option',{key:c.id,value:c.id},c.title))
+                ),
+                selectedCase && React.createElement('p',{className:"text-[9px] text-slate-600 font-bold mt-1.5"},
+                    "🔄 اتعبّت بيانات الأطراف ورقم القضية والمحكمة تلقائيًا من القضية المختارة — عدّل عليها لو محتاج"
                 )
             ),
 
@@ -522,10 +553,17 @@ function AILegalAssistant({onClose, cases, clients, profile, country}: AILegalAs
                 )
             ),
 
+            // ── تحذير الحقول الناقصة قبل التوليد (المرحلة 5، Validation) ──
+            docMissingCritical.length > 0 && React.createElement(SectionCard,{title:'بيانات ناقصة',tone:'warning'},
+                React.createElement('p',{className:"text-[11px] text-amber-200 font-bold leading-relaxed"},
+                    `مينفعش نولّد المستند قبل ما تستكمل: ${docMissingCritical.join('، ')}.`
+                )
+            ),
+
             // Generate button
             React.createElement('button',{
                 onClick:generateDocument,
-                disabled:generatingDoc||keyLoading||!docFields.plaintiff||!docFields.subject,
+                disabled:!canGenerateDoc||keyLoading,
                 className:"w-full py-4 rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50 shadow-lg",
                 style:{background:'linear-gradient(135deg,#7c3aed,#a855f7)',color:'white',boxShadow:'0 8px 24px rgba(124,58,237,0.3)'}
             },
@@ -590,6 +628,22 @@ function AILegalAssistant({onClose, cases, clients, profile, country}: AILegalAs
         // ══ NEXT STEP MODE (اقتراح الخطوة التالية) ══
         mode === 'next-step' && React.createElement(NextStepSuggestion, {
             cases,
+        }),
+
+        // ══ SUMMARY MODE (تلخيص القضية بالذكاء الاصطناعي) ══
+        mode === 'summary' && React.createElement(CaseSummary, {
+            cases,
+            clients,
+            retrieveLegalArticles,
+            buildLegalContextBlock,
+            callAI,
+        }),
+
+        // ══ CLIENT MESSAGE MODE (رسالة عميل مختصرة بالذكاء الاصطناعي) ══
+        mode === 'client-message' && React.createElement(ClientMessage, {
+            cases,
+            clients,
+            callAI,
         })
     );
 }
