@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { db } from '../../../supabaseClient';
 import { toast } from '../../../shared/lib/notifications';
 import { escapeTelegramHtml } from '../../../shared/lib/sanitize';
-import { safeUpdate, logActivity } from '../../../shared/lib/dataAccess';
+import { safeUpdate, logActivity, recalcNextHearing as recalcNextHearingShared } from '../../../shared/lib/dataAccess';
 import type { ClientRow, ProfileRow, CaseSessionRow } from '../../../types';
 import type { MappedCase } from '../../../hooks/useAppData';
 import type { EditingSessionForm } from '../case-detail/TimelineSection';
@@ -42,19 +42,7 @@ export function useCaseSessions(
   // دلوقتي: بعد أي إضافة/تعديل/حذف جلسة، بنجيب كل جلسات القضية
   // ونحسب أقرب تاريخ فعلي >= اليوم، ونحدّث next_hearing بيه (أو null
   // لو مفيش جلسات قادمة خالص).
-  const recalcNextHearing = async (caseId: string) => {
-    const { data: allSessions } = await db
-      .from('case_sessions')
-      .select('session_date')
-      .eq('case_id', caseId);
-    const todayStr = new Date().toISOString().slice(0, 10);
-    let nearest: string | null = null;
-    (allSessions || []).forEach((s) => {
-      if (!s.session_date || s.session_date < todayStr) return;
-      if (!nearest || s.session_date < nearest) nearest = s.session_date;
-    });
-    await db.from('cases').update({ next_hearing: nearest }).eq('id', caseId);
-  };
+  const recalcNextHearing = (caseId: string) => recalcNextHearingShared(db, caseId);
 
   const handleAddSession = async () => {
     if (!sessionForm.date) return;
