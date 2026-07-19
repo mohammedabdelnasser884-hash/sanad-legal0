@@ -1,7 +1,9 @@
 import { toast } from '../../../shared/lib/notifications';
+import { validateFullNameParts, checkClientDuplicate } from '../../../shared/lib/clientValidation';
 import { escapeTelegramHtml } from '../../../shared/lib/sanitize';
 import { logActivity } from '../../../shared/lib/dataAccess';
 import { db } from '../../../supabaseClient';
+import { getCurrentTenantId } from '../../../constants';
 import type { Dispatch, SetStateAction } from 'react';
 import type { ClientRow, ProfileRow } from '../../../types';
 import type { NavigationState } from '../../../useNavigation';
@@ -35,6 +37,9 @@ export interface CaseFormSubmitData {
     secretary_hall?: string;
     secretary_name?: string;
     secretary_mobile?: string;
+    plaintiff_national_id?: string;
+    plaintiff_power_of_attorney?: string;
+    defendant_national_id?: string;
 }
 
 // شكل بيانات مودال تأكيد الحذف/الأرشفة (زي ما بيتبنى في handleDeleteCase تحت)
@@ -136,6 +141,9 @@ export function useCaseActions(params: {
             secretary_hall: form.secretary_hall || null,
             secretary_name: form.secretary_name || null,
             secretary_mobile: form.secretary_mobile || null,
+            plaintiff_national_id: form.plaintiff_national_id || null,
+            plaintiff_power_of_attorney: form.plaintiff_power_of_attorney || null,
+            defendant_national_id: form.defendant_national_id || null,
             _offlineTempId: offlineTempId,
         };
         const offlineId = 'offline-' + Date.now();
@@ -346,6 +354,9 @@ export function useCaseActions(params: {
                 secretary_hall: form.secretary_hall || null,
                 secretary_name: form.secretary_name || null,
                 secretary_mobile: form.secretary_mobile || null,
+                plaintiff_national_id: form.plaintiff_national_id || null,
+                plaintiff_power_of_attorney: form.plaintiff_power_of_attorney || null,
+                defendant_national_id: form.defendant_national_id || null,
             };
             // FIX: Optimistic Locking لتعديل القضايا — كان `updated_at` بيتجاب
             // ويتخزّن في الـ state (شوف useAppData.ts) خصيصًا للاستخدام هنا، بس
@@ -472,5 +483,88 @@ export function useCaseActions(params: {
         fetchCases(0, casesFilter);
     };
 
-    return { handleLogout, handleSaveCase, handleDeleteCase, handlePermanentDeleteCase, handleRestoreCase, handleUpdateCase, handleLinkClient };
+    // ─ إنشاء موكل جديد من بيانات القضية (المدعي) وربطه بها مباشرة ─
+    // ⚡ NEW (19 يوليو 2026): نفس منطق handleAddAndLinkClient في
+    // useClientLinking.ts (تحويل جلسة مستقلة لقضية)، بس هنا القضية أصلاً
+    // موجودة ومحفوظة (مش بتتنشئ دلوقتي)، فمفيش حاجة زي createdCaseId أو
+    // sessionId نتعامل معاها — بس INSERT للعميل + UPDATE لـ client_id في
+    // القضية، بنفس نمط offlineTempId/_offlineFkTempId المستخدم في كل
+    // مكان تاني بيربط سطرين ممكن يكونوا لسه في طابور الأوفلاين.
+    const handleCreateAndLinkClient = async (caseId: string, plaintiffName: string, plaintiffNationalId?: string | null, plaintiffPoa?: string | null) => {
+        const name = plaintiffName.trim();
+        if (!name) return;
+        const nameErr = validateFullNameParts(name);
+        if (nameErr) { toast(nameErr, true); return; }
+        const tenantId = getCurrentTenantId();
+        if (!tenantId) { toast('❌ تعذر تحديد المكتب الحالي، أعد تحميل الصفحة وحاول مرة أخرى', true); return; }
+        // ⚡ تحقق موحّد: يرفض الإضافة لو نفس الاسم أو الرقم القومي أو رقم
+        // التوكيل مسجل لموكل موجود بالفعل (نفس المكتب) — راجع clientValidation.ts.
+        // ⚡ NEW (19 يوليو 2026): كنا بنبعت الاسم والرقم القومي بس، والتوكيل
+        // (plaintiff_power_of_attorney) مكانش بيتفحص خالص من هنا — دلوقتي
+        // بيتبعت كـ cr_number عشان يتفحص زي الفورم المباشر بالظبط.
+        const dup = await checkClientDuplicate(db, { full_name: name, national_id: plaintiffNationalId, cr_number: plaintiffPoa });
+        // ⚡ NEW: بدل ما نوقف بتوست جاف، بنرجّع بيانات الموكل المطابق نفسه
+        // لو موجود، عشان الواجهة تقدر تعرض زرار "ربط الآن" مباشرة بدل ما
+        // تسيب المستخدم يدوّر عليه يدويًا في قايمة الموكلين.
+        if (dup.duplicate) {
+            toast(dup.message!, true);
+            return dup.client ? { duplicate: true as const, client: dup.client, message: dup.message } : undefined;
+        }
+        const existingCase = cases.find((c) => c.id === caseId);
+        const knownUpdatedAt = existingCase?.updated_at
+            || (selectedCase?.id === caseId ? selectedCase?.updated_at : null)
+            || null;
+        const clientTempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        const { data, error: clientErr, offline: clientOffline, queued: clientQueued } = await window.__dbWrite({
+            type: 'INSERT',
+            table: 'clients',
+            // ⚠️ نفس ملاحظة client_name/full_name الموثّقة في useClientLinking.ts
+            // (client_name عمود إجباري NOT NULL، full_name عمود تاني بيتحدّث معاه).
+            // الرقم القومي بييجي من caseData.plaintiff_national_id لو موجود
+            // (متسجل وقت إنشاء/تعديل القضية — شوف NewCaseModal/EditCaseModal).
+            data: { client_name: name, full_name: name, tenant_id: tenantId, national_id: plaintiffNationalId || null, _offlineTempId: clientTempId },
+            returning: true,
+        });
+        if (clientErr) { toast('❌ تعذّر إضافة الموكل — تحقق من الاتصال وأعد المحاولة', true); return; }
+        const isTempClientId = clientOffline && clientQueued;
+        const realOrTempClientId = isTempClientId ? clientTempId : (data as { id: string } | null)?.id;
+        if (!realOrTempClientId) { toast('❌ تعذّر إضافة الموكل، حاول مرة أخرى', true); return; }
+        const { error, offline, queued, conflict, data: writtenRow } = await window.__dbWrite({
+            type: 'UPDATE', table: 'cases', id: caseId, knownUpdatedAt,
+            data: {
+                client_id: realOrTempClientId,
+                ...(isTempClientId ? { _offlineFkTempId: [{ field: 'client_id', tempId: clientTempId, table: 'clients' as const, fallbackNameValue: name }] } : {}),
+            },
+        });
+        if (conflict) {
+            toast('⚠️ هذه القضية عدّلها شخص آخر بعد ما فتحتها — أعد فتحها وحاول الربط مرة أخرى', true);
+            return;
+        }
+        if (error) {
+            toast('❌ تمت إضافة الموكل لكن تعذّر ربط القضية به — أعد فتح القضية وحاول الربط مرة أخرى', true);
+            return;
+        }
+        // ⚡ العميل الجديد بيتضاف لقائمة الموكلين المحلية فورًا (حتى لو
+        // تمبيد أوفلاين — بنفس منطق تحديث setClients المستخدم في
+        // useClientActions.ts.handleSaveClient) عشان يبان في أي مكان
+        // تاني بيعرض الموكلين قبل ما الصفحة تتعمل لها refresh.
+        setClients((prev) => [...prev, { id: realOrTempClientId, client_name: name, full_name: name, tenant_id: tenantId, national_id: plaintiffNationalId || null } as ClientRow]);
+        if (offline && queued) {
+            toast('📥 إضافة الموكل وربطه محفوظة محلياً — ستُزامن عند عودة الإنترنت');
+        } else {
+            toast('✅ تمت إضافة الموكل وربطه بالقضية');
+            logActivity(db, 'ربط قضية بموكل', {
+                userName: _userName,
+                entity_type: 'case', entity_id: caseId, details: existingCase?.title || null,
+                case_name: existingCase?.title || null,
+                client_name: name,
+            });
+        }
+        const freshFields2 = writtenRow?.updated_at ? { updated_at: writtenRow.updated_at } : {};
+        setCases((prev) => prev.map((c) => c.id === caseId ? { ...c, client_id: realOrTempClientId, ...freshFields2 } : c));
+        if (selectedCase?.id === caseId) setSelectedCase((p) => p ? { ...p, client_id: realOrTempClientId, ...freshFields2 } : p);
+        fetchCases(0, casesFilter);
+    };
+
+    return { handleLogout, handleSaveCase, handleDeleteCase, handlePermanentDeleteCase, handleRestoreCase, handleUpdateCase, handleLinkClient, handleCreateAndLinkClient };
 }
