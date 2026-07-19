@@ -14,6 +14,8 @@ import type { ClientRow } from '../../types';
 // ══════════════════════════════════════════════════════════════════
 afterEach(() => { cleanup(); });
 
+vi.mock('../../supabaseClient', () => ({ db: {} }));
+
 vi.mock('../../constants', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../constants')>();
   return { ...actual, loadOfficeSetting: vi.fn(() => Promise.resolve('مكتب المحامي سالم')) };
