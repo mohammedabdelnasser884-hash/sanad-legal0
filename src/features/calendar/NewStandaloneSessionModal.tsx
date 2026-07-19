@@ -24,6 +24,8 @@ export interface Form {
     case_type: string;
     case_type_custom: string;
     circuit_number: string;
+    court_level: string;
+    court_level_other: string;
     session_date: string;
     session_time: string;
     plaintiff: string;
@@ -34,9 +36,14 @@ export interface Form {
     defendant_role: string;
     defendant_national_id: string;
     next_action: string;
-    // محتفظ بيهم للحفظ في DB بس مش بيتعرضوا
-    session_floor: string;
+    // ⚡ موحّد مع cases.session_hall — نص واحد "الدور الأول - قاعة 5"،
+    // بدل session_floor/session_hall المنفصلين اللي كانوا هنا قبل كده
+    // (نفس النمط القديم اللي اتشال من جدول cases). session_floor
+    // اتسيب كعمود قديم في الداتابيز بس مبقاش بيتكتب فيه من هنا.
     session_hall: string;
+    secretary_hall: string;
+    secretary_name: string;
+    secretary_mobile: string;
     description: string;
     result: string;
 }
@@ -49,6 +56,8 @@ const EMPTY: Form = {
     case_type: '',
     case_type_custom: '',
     circuit_number: '',
+    court_level: '',
+    court_level_other: '',
     session_date: '',
     session_time: 'صباحي',
     plaintiff: '',
@@ -59,11 +68,18 @@ const EMPTY: Form = {
     defendant_role: '',
     defendant_national_id: '',
     next_action: '',
-    session_floor: '',
     session_hall: '',
+    secretary_hall: '',
+    secretary_name: '',
+    secretary_mobile: '',
     description: '',
     result: '',
 };
+
+const COURT_LEVELS = ['ابتدائي', 'استئناف', 'نقض', 'أخرى'];
+
+// أرقام بس، وبالظبط 14 رقم — بيتقص أي حرف مش رقم أول بأول
+const onlyDigits = (v: string, max = 14) => v.replace(/\D/g, '').slice(0, max);
 
 function SectionTitle({ children }: { children: string }) {
     return React.createElement('p', {
@@ -97,7 +113,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
     const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
     const [postSaveModal, setPostSaveModal] = useState(false);
-    const [savedFormData, setSavedFormData] = useState<{ form: Form; finalCaseType: string; fullCaseNumber: string; sessionId: string | null } | null>(null);
+    const [savedFormData, setSavedFormData] = useState<{ form: Form; finalCaseType: string; finalCourtLevel: string; fullCaseNumber: string; sessionId: string | null } | null>(null);
     const {
         linkingCase, linkingClient, linkingToCase,
         createdCaseId, setCreatedCaseId,
@@ -109,6 +125,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
     const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((f: Form) => ({ ...f, [k]: e.target.value }));
 
     const finalCaseType = form.case_type === 'أخرى' ? (form.case_type_custom || 'أخرى') : form.case_type;
+    const finalCourtLevel = form.court_level === 'أخرى' ? (form.court_level_other || '') : form.court_level;
     const fullCaseNumber = [form.case_number, form.case_year].filter(Boolean).join('/');
     const selectedCase = cases.find((c: MappedCase) => c.id === selectedCaseId) || null;
     const filteredCases = !caseSearch ? cases : cases.filter((c: MappedCase) =>
@@ -124,6 +141,18 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                 toast('⚠️ يجب ملء الحقول الإجبارية المحددة بعلامة (*)', true);
                 return;
             }
+            if (!form.plaintiff_role?.trim() || !form.defendant_role?.trim()) {
+                toast('⚠️ صفة الموكل وصفة الخصم إجبارية', true);
+                return;
+            }
+            if (form.plaintiff_national_id && form.plaintiff_national_id.length !== 14) {
+                toast('⚠️ الرقم القومي للموكل لازم يكون 14 رقم بالظبط', true);
+                return;
+            }
+            if (form.defendant_national_id && form.defendant_national_id.length !== 14) {
+                toast('⚠️ الرقم القومي للخصم لازم يكون 14 رقم بالظبط', true);
+                return;
+            }
         }
         setSaving(true);
         try {
@@ -131,8 +160,11 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                 case_id: linkMode === 'existing' ? selectedCaseId : null,
                 session_date: form.session_date,
                 session_time: form.session_time || null,
-                session_floor: form.session_floor || null,
+                court_level: finalCourtLevel || null,
                 session_hall: form.session_hall || null,
+                secretary_hall: form.secretary_hall || null,
+                secretary_name: form.secretary_name || null,
+                secretary_mobile: form.secretary_mobile || null,
                 title: form.title || null,
                 case_number: fullCaseNumber || null,
                 court: form.court || null,
@@ -197,7 +229,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
 
             toast('✅ تمت إضافة الجلسة المستقلة');
             onSaved();
-            setSavedFormData({ form, finalCaseType, fullCaseNumber, sessionId: sessionData?.id || null });
+            setSavedFormData({ form, finalCaseType, finalCourtLevel, fullCaseNumber, sessionId: sessionData?.id || null });
             setPostSaveModal(true);
         } catch {
             toast('❌ حدث خطأ غير متوقع، حاول مرة أخرى', true);
@@ -453,6 +485,55 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                 })
                 ),
 
+                // درجة التقاضي — نفس أزرار مودال إنشاء القضية بالظبط
+                React.createElement(Field, { label: 'درجة التقاضي' },
+                    React.createElement('div', { className: 'flex gap-2' },
+                        COURT_LEVELS.map((lvl: string) => React.createElement('button', {
+                            key: lvl,
+                            type: 'button',
+                            onClick: () => setForm((f: Form) => ({ ...f, court_level: lvl })),
+                            className: `flex-1 py-2.5 rounded-xl text-[10px] font-black transition-all active:scale-95 ${form.court_level === lvl ? 'bg-premium-gold text-premium-bg' : 'bg-white/5 border border-white/10 text-slate-400'}`
+                        }, lvl))
+                    ),
+                    form.court_level === 'أخرى' && React.createElement('input', {
+                        value: form.court_level_other,
+                        onChange: set('court_level_other'),
+                        placeholder: 'اكتب درجة التقاضي',
+                        className: `${inputCls} mt-2`,
+                        style: inputStyle
+                    })
+                ),
+
+                // الطابق وقاعة الجلسة + قاعة/اسم/موبايل سكرتير الجلسة
+                React.createElement(Inp, {
+                    label: 'الطابق وقاعة الجلسة',
+                    value: form.session_hall,
+                    onChange: set('session_hall'),
+                    placeholder: 'مثال: الدور الأول - قاعة 5'
+                }),
+                React.createElement(Inp, {
+                    label: 'قاعة سكرتير الجلسة',
+                    value: form.secretary_hall,
+                    onChange: set('secretary_hall'),
+                    placeholder: 'رقم أو اسم قاعة السكرتير'
+                }),
+                React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
+                    React.createElement(Inp, {
+                        label: 'اسم سكرتير الجلسة',
+                        value: form.secretary_name,
+                        onChange: set('secretary_name'),
+                        placeholder: 'اسم السكرتير'
+                    }),
+                    React.createElement(Inp, {
+                        label: 'موبايل السكرتير',
+                        value: form.secretary_mobile,
+                        onChange: (e: React.ChangeEvent<HTMLInputElement>) => setForm((f: Form) => ({ ...f, secretary_mobile: onlyDigits(e.target.value, 11) })),
+                        placeholder: 'رقم الموبايل',
+                        inputMode: 'numeric',
+                        maxLength: 11
+                    })
+                ),
+
                 // تاريخ الجلسة + توقيت الجلسة
                 React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
                     React.createElement(Field, { label: 'تاريخ الجلسة', required: true },
@@ -490,6 +571,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                     }),
                     React.createElement(Inp, {
                         label: 'الصفة',
+                        required: true,
                         value: form.plaintiff_role,
                         onChange: set('plaintiff_role'),
                         placeholder: 'مثال: مدعي، مستأنف'
@@ -500,8 +582,10 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                     React.createElement(Inp, {
                         label: 'الرقم القومي',
                         value: form.plaintiff_national_id,
-                        onChange: set('plaintiff_national_id'),
-                        placeholder: '14 رقم'
+                        onChange: (e: React.ChangeEvent<HTMLInputElement>) => setForm((f: Form) => ({ ...f, plaintiff_national_id: onlyDigits(e.target.value) })),
+                        placeholder: '14 رقم',
+                        inputMode: 'numeric',
+                        maxLength: 14
                     }),
                     React.createElement(Inp, {
                         label: 'رقم التوكيل',
@@ -524,6 +608,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                     }),
                     React.createElement(Inp, {
                         label: 'الصفة',
+                        required: true,
                         value: form.defendant_role,
                         onChange: set('defendant_role'),
                         placeholder: 'مثال: مدعى عليه، مستأنف ضده'
@@ -533,8 +618,10 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                 React.createElement(Inp, {
                     label: 'الرقم القومي',
                     value: form.defendant_national_id,
-                    onChange: set('defendant_national_id'),
-                    placeholder: '14 رقم'
+                    onChange: (e: React.ChangeEvent<HTMLInputElement>) => setForm((f: Form) => ({ ...f, defendant_national_id: onlyDigits(e.target.value) })),
+                    placeholder: '14 رقم',
+                    inputMode: 'numeric',
+                    maxLength: 14
                 })
                 ),
 
