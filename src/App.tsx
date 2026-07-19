@@ -31,6 +31,7 @@ import { useAppData } from './hooks/useAppData';
 import { useTelegramAlerts } from './hooks/useTelegramAlerts';
 import { useCaseActions } from '@/features/cases/hooks/useCaseActions';
 import { useClientActions } from '@/features/clients/hooks/useClientActions';
+import type { ClientModalContext } from '@/features/clients/hooks/useClientActions';
 import { useAutoLogout } from './hooks/useAutoLogout';
 import { useAuthProfile } from './hooks/useAuthProfile';
 import { useThemeMode } from './hooks/useThemeMode';
@@ -54,7 +55,21 @@ function App() {
 
     const setShowCaseModal   = useCallback((v: boolean) => v ? nav.openModal('newCase')    : nav.closeModal('newCase'),    [nav]);
     const setShowLawyerModal = useCallback((v: boolean) => v ? nav.openModal('newLawyer')  : nav.closeModal('newLawyer'),  [nav]);
-    const setShowClientModal = useCallback((v: boolean) => v ? nav.openModal('newClient')  : nav.closeModal('newClient'),  [nav]);
+    // ⚡ NEW: سياق فتح موديل "إنشاء موكل جديد" (بيانات مبدئية + هدف ربط
+    // تلقائي + كول-باك بعد الربط) — بيتصفّر عند أي فتح/إغلاق مباشر للموديل
+    // من غير سياق (زرار "إضافة موكل" العادي في لوحة التحكم/قسم الموكلين)،
+    // عشان مايفضلش شايل هدف ربط قديم غلط.
+    const [clientModalContext, setClientModalContext] = useState<ClientModalContext | null>(null);
+    const setShowClientModal = useCallback((v: boolean) => {
+        if (v) { setClientModalContext(null); nav.openModal('newClient'); }
+        else   { nav.closeModal('newClient'); setClientModalContext(null); }
+    }, [nav]);
+    // ⚡ NEW: بتُستخدم في Phase 1/2/3 لفتح نفس موديل "إضافة موكل جديد" من
+    // جوه قضية/جلسة، مليان ببياناتها ومربوط بيها تلقائيًا بعد الحفظ.
+    const openNewClientModal = useCallback((ctx: ClientModalContext) => {
+        setClientModalContext(ctx);
+        nav.openModal('newClient');
+    }, [nav]);
     const setShowSearch      = useCallback((v: boolean) => v ? nav.openModal('search')     : nav.closeModal('search'),     [nav]);
     const setShowAI          = useCallback((v: boolean) => v ? nav.openModal('ai')         : nav.closeModal('ai'),         [nav]);
     const showNewSessionModal    = nav.isOpen('newSession');
@@ -136,7 +151,7 @@ function App() {
         else   { _setDeleteConfirm(null); }
     }, [nav]);
 
-    const { handleLogout, handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleCreateAndLinkClient } = useCaseActions({
+    const { handleLogout, handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient } = useCaseActions({
         sendTelegram, fetchCases, cases, lawyers, clients, selectedCase,
         setCases, setLawyers, setClients, setProfile, setAuthUser,
         setSelectedCase, setDeleteConfirm, setSavingCase, setShowCaseModal,
@@ -146,7 +161,68 @@ function App() {
         sendTelegram, fetchClients, fetchLawyers, clients, clientSearch,
         setClients, setSelectedClient, setDeleteConfirm, setSavingClient,
         setSavingLawyer, setShowClientModal, setShowLawyerModal, nav, profile,
+        clientLinkTarget: clientModalContext?.linkTarget ?? null,
+        onClientLinked: clientModalContext?.onLinked,
     });
+
+    // ⚡ NEW (خطة توحيد إنشاء الموكل، Phase 1): زرار "➕ إنشاء موكل جديد"
+    // في تفاصيل القضية (InfoSection) بقى بيفتح NewClientModal الكامل —
+    // نفس موديل قسم الموكلين — مليان ببيانات المدعي من القضية، بدل ما
+    // يعمل INSERT مباشر بحقول ناقصة (اسم + رقم قومي بس).
+    const handleOpenCreateClientForCase = useCallback((
+        caseId: string, plaintiffName: string, plaintiffNationalId?: string | null, plaintiffPoa?: string | null,
+        // ⚡ NEW (Phase 2): لو القضية المستهدفة نفسها لسه معرّف مؤقت أوفلاين
+        // (تم إنشاؤها من جلسة مستقلة ولسه ما اتزامنتش) — شوف
+        // handleAddAndLinkClient في useClientLinking.ts. فاضي دايمًا لمسار
+        // Phase 1 (قضية محفوظة بالفعل ليها id حقيقي).
+        caseOfflineInfo?: { isOfflineTemp: boolean; fallbackTitle?: string },
+    ) => {
+        openNewClientModal({
+            initialData: {
+                full_name: plaintiffName || '',
+                national_id: plaintiffNationalId || '',
+                cr_number: plaintiffPoa || '',
+            },
+            linkTarget: {
+                type: 'case', caseId,
+                caseIsOfflineTemp: caseOfflineInfo?.isOfflineTemp,
+                caseFallbackTitle: caseOfflineInfo?.fallbackTitle,
+            },
+            contextLabel: 'هيتربط الموكل تلقائيًا بهذه القضية بعد الحفظ',
+            onLinked: (target, clientId) => {
+                if (target.type !== 'case') return;
+                setCases((prev) => prev.map((c) => (c.id === target.caseId ? { ...c, client_id: clientId } : c)));
+                setSelectedCase((prev) => (prev && prev.id === target.caseId ? { ...prev, client_id: clientId } : prev));
+                fetchCases(casesPage, casesFilter);
+                fetchClients(0, clientSearch);
+            },
+        });
+    }, [openNewClientModal, fetchCases, casesPage, casesFilter, fetchClients, clientSearch, setSelectedCase, setCases]);
+
+    // ⚡ NEW (خطة توحيد إنشاء الموكل، Phase 3): زرار "إضافة الموكل لقائمة
+    // الموكلين فقط" (جلسة مستقلة بعد حفظها) بقى بيفتح NewClientModal
+    // الكامل — بدل INSERT مباشر بحقلين بس (اسم + رقم قومي)، مليان ببيانات
+    // المدعي من الجلسة. لو sessionId فاضي (الجلسة لسه ما اتحفظتش أونلاين)
+    // بنفتح الموديل من غير target ربط، زي السلوك القديم بالظبط.
+    const handleOpenCreateClientForSession = useCallback((
+        sessionId: string | null, plaintiffName: string, plaintiffNationalId?: string | null, plaintiffPoa?: string | null,
+    ) => {
+        openNewClientModal({
+            initialData: {
+                full_name: plaintiffName || '',
+                national_id: plaintiffNationalId || '',
+                cr_number: plaintiffPoa || '',
+            },
+            linkTarget: sessionId ? { type: 'session', sessionId } : undefined,
+            contextLabel: sessionId ? 'هيتربط الموكل تلقائيًا بالجلسة الحالية' : undefined,
+            onLinked: (target) => {
+                if (target.type !== 'session') return;
+                fetchTodaySessions();
+                fetchUpcomingSessions();
+                fetchClients(0, clientSearch);
+            },
+        });
+    }, [openNewClientModal, fetchTodaySessions, fetchUpcomingSessions, fetchClients, clientSearch]);
 
     const handleAutoLogout = useCallback(() => {
         setCases([]); setLawyers([]); setClients([]);
@@ -267,6 +343,7 @@ function App() {
             showSearch, showAI, showCaseModal, showNewSessionModal,
             showLawyerModal, showClientModal, savingCase, savingLawyer, savingClient,
             deleteConfirm, selectedClient, selectedCase, selectedCaseInitialTab,
+            clientModalContext, openNewClientModal,
             setShowSearch, setShowAI, setShowCaseModal, setShowNewSessionModal,
             setShowLawyerModal, setShowClientModal, setTab,
             setSelectedCase, setSelectedClient,
@@ -274,7 +351,8 @@ function App() {
             setCases, setCasesFilter, setCasesPage,
             fetchCases, fetchTodaySessions, fetchUpcomingSessions,
             fetchClients, clientSearch,
-            handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleCreateAndLinkClient,
+            handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleCreateAndLinkClient: handleOpenCreateClientForCase,
+            handleOpenCreateClientForSession, handleOpenCreateClientForSessionCase: handleOpenCreateClientForCase,
             handleSaveClient, handleDeleteClient, handleUpdateClient, handleSaveLawyer,
             sendTelegram,
         }),
