@@ -42,6 +42,7 @@ export interface MappedCase {
     session_hall: string | null;
     secretary_hall: string | null;
     secretary_name: string | null;
+    secretary_mobile: string | null;
     session_time: string | null;
 }
 
@@ -164,6 +165,7 @@ export function useAppData(profile: ProfileRow | null) {
             session_hall:   r.session_hall || null,
             secretary_hall: r.secretary_hall || null,
             secretary_name: r.secretary_name || null,
+            secretary_mobile: r.secretary_mobile || null,
             session_time:   r.session_time || null,
         }));
 
@@ -244,6 +246,7 @@ export function useAppData(profile: ProfileRow | null) {
             session_hall:   r.session_hall || null,
             secretary_hall: r.secretary_hall || null,
             secretary_name: r.secretary_name || null,
+            secretary_mobile: r.secretary_mobile || null,
             session_time:   r.session_time || null,
         }));
 
