@@ -120,7 +120,7 @@ export function ErrorState({ message, onRetry }: ErrorStateProps) {
 // (المرحلة 3، بند "fallback واضح عند غياب رصيد AI"، sanad-ai-assistant-plan-19.md)
 // نفس النص الحرفي في الإيدج فانكشن — لو تغيّر هناك، يتغيّر هنا معه.
 export function isQuotaExceededMessage(message: string): boolean {
-  return message.includes('الحد المجاني اليومي');
+  return message.includes('للحد المجاني اليومي') || message.includes('الحد المجاني اليومي');
 }
 
 // ── حالة خاصة لنفاد السقف اليومي — مختلفة بصريًا عن ErrorState العادية:
