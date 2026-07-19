@@ -15,6 +15,9 @@ export interface CalendarSessionRow {
     id: string;
     session_date: string | null;
     case_id: string | null;
+    // ⚡ FIX: client_id بتاع الجلسة نفسها — كان ناقص، فشارة "👤 الموكل" ما
+    // كانتش بتظهر للجلسات المربوطة مباشرة بموكل من غير قضية.
+    client_id: string | null;
     description: string | null;
     result: string | null;
     next_action: string | null;
@@ -63,7 +66,7 @@ function CalendarTab({ cases, clients, onOpenCase, onOpenStandalone, refreshKey 
         const mm   = String(viewMonth+1).padStart(2,'0');
         const last = new Date(viewYear, viewMonth+1, 0).getDate();
         db.from('case_sessions')
-          .select('id,session_date,case_id,description,result,next_action,session_time,session_floor,session_hall,title,case_number,court,case_type,plaintiff,defendant,circuit_number,plaintiff_role,defendant_role,cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
+          .select('id,session_date,case_id,client_id,description,result,next_action,session_time,session_floor,session_hall,title,case_number,court,case_type,plaintiff,defendant,circuit_number,plaintiff_role,defendant_role,cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
           .gte('session_date', `${viewYear}-${mm}-01`)
           .lte('session_date', `${viewYear}-${mm}-${String(last).padStart(2,'0')}`)
           .then(({ data }) => {
@@ -90,7 +93,9 @@ function CalendarTab({ cases, clients, onOpenCase, onOpenStandalone, refreshKey 
     const handleExportToGoogle = (s: CalendarSessionRow, e: React.MouseEvent) => {
         e.stopPropagation();
         const lc = cases.find((c: MappedCase) => c.id === s.case_id);
-        const lcl = lc ? clients.find((cl: MappedClient) => cl.id === lc.client_id) : null;
+        const lcl = lc
+            ? clients.find((cl: MappedClient) => cl.id === lc.client_id)
+            : (s.client_id ? clients.find((cl: MappedClient) => cl.id === s.client_id) : null);
         exportSessionToGoogleCalendar(s, lc?.title||'جلسة قانونية', lc?.court||'', lcl?.full_name||'');
         toast('🗓 جاري الفتح في Google Calendar...');
     };
@@ -116,14 +121,16 @@ function CalendarTab({ cases, clients, onOpenCase, onOpenStandalone, refreshKey 
             // أيقونة الربط بتقويم الهاتف
             React.createElement('button', {
                 onClick: () => {
-                    db.from('case_sessions').select('id,session_date,case_id,description,result,next_action,title,case_number,court,case_type,plaintiff,defendant,cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
+                    db.from('case_sessions').select('id,session_date,case_id,client_id,description,result,next_action,title,case_number,court,case_type,plaintiff,defendant,cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
                       .then(({ data }) => {
                           const sessions = (data || []) as unknown as CalendarSessionRow[];
                           if (!sessions.length) { toast('لا توجد جلسات', true); return; }
                           const up = sessions.filter((s: CalendarSessionRow) => (s.session_date as string) >= todayStr).sort((a: CalendarSessionRow,b: CalendarSessionRow) => (a.session_date as string).localeCompare(b.session_date as string));
                           if (!up.length) { toast('لا توجد جلسات قادمة', true); return; }
                           const lc = cases.find((c: MappedCase) => c.id === up[0].case_id);
-                          const lcl = lc ? clients.find((cl: MappedClient) => cl.id === lc.client_id) : null;
+                          const lcl = lc
+                              ? clients.find((cl: MappedClient) => cl.id === lc.client_id)
+                              : (up[0].client_id ? clients.find((cl: MappedClient) => cl.id === up[0].client_id) : null);
                           exportSessionToGoogleCalendar(up[0], lc?.title||'جلسة', lc?.court||'', lcl?.full_name||'');
                           toast('🗓 تم فتح أقرب جلسة في Google Calendar');
                       });
