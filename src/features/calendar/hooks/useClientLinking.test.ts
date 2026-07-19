@@ -106,7 +106,7 @@ function makeSavedFormData(overrides: Partial<Form> = {}, caseOverrides: Partial
     plaintiff_power_of_attorney: '', defendant: '', defendant_national_id: '', circuit_number: '',
     ...overrides,
   } as Form;
-  return { form, finalCaseType: 'مدني', fullCaseNumber: '10 لسنة 2026', sessionId: null, ...caseOverrides };
+  return { form, finalCaseType: 'مدني', finalCourtLevel: '', fullCaseNumber: '10 لسنة 2026', sessionId: null, ...caseOverrides };
 }
 
 describe('useClientLinking', () => {
