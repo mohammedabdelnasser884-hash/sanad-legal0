@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../../supabaseClient';
 import { formatArDate } from '../../shared/ui/arabicLocale';
 import { CasePicker, EmptyState, SectionCard, InfoRow, CopyButton, ErrorState } from '../../shared/ui/TaskResultKit';
+import { recordError } from '../../systemHealth';
 import type { MappedCase, MappedClient } from '../../hooks/useAppData';
 
 // ─────────────────────────────────────────────────────────
@@ -62,9 +63,12 @@ function CaseDataExtract({ cases, clients }: CaseDataExtractProps) {
       if (cancelled) return;
       setCounts({ sessions: sessRes.count || 0, documents: docRes.count || 0 });
       setLoadingCounts(false);
-    }).catch(() => {
+    }).catch((e) => {
       if (cancelled) return;
-      setCountsError('تعذّر تحميل إحصائيات القضية. جرّب تاني.');
+      const _msg = e instanceof Error ? e.message : String(e);
+      const displayMsg = 'تعذّر تحميل إحصائيات القضية. جرّب تاني.';
+      recordError('ai_case_data_extract', _msg, { label: 'بيانات القضية (إحصائيات)', message: displayMsg });
+      setCountsError(displayMsg);
       setLoadingCounts(false);
     });
     return () => { cancelled = true; };
