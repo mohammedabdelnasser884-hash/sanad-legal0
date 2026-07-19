@@ -71,6 +71,18 @@ const I={
         React.createElement('path',{strokeLinecap:"round",strokeLinejoin:"round",d:"M9 3.75 12 8.25l3-4.5M9.75 4.85l1.85 3.1M14.25 4.85l-1.85 3.1"}),
         React.createElement('path',{strokeLinecap:"round",strokeLinejoin:"round",d:"M11.25 8.1 12 9.3l.75-1.2-.2 8.4L12 18l-.55-1.5-.2-8.4"})
     ),
+    // ── أيقونات مضافة لتوحيد لغة الأيقونات في شاشة "المساعد القانوني" —
+    //    بديل الإيموجي (💬📑🧭) اللي كانت بتدي شكل غير متسق مع باقي التطبيق ──
+    Chat:({className="w-5 h-5"}:{className?: string})=>React.createElement('svg',{className,fill:"none",viewBox:"0 0 24 24",strokeWidth:"1.5",stroke:"currentColor"},
+        React.createElement('path',{strokeLinecap:"round",strokeLinejoin:"round",d:"M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.184a1.14 1.14 0 0 1 .778-.332 48.294 48.294 0 0 0 5.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z"})
+    ),
+    ClipboardList:({className="w-5 h-5"}:{className?: string})=>React.createElement('svg',{className,fill:"none",viewBox:"0 0 24 24",strokeWidth:"1.5",stroke:"currentColor"},
+        React.createElement('path',{strokeLinecap:"round",strokeLinejoin:"round",d:"M9 12h6m-6 4h6m-7 5h8a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08M9.26 3.836c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.18a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664M9.26 3.836A2.251 2.251 0 0 1 11.5 2.25h1a2.25 2.25 0 0 1 2.24 1.586m-5.98 0c-.376.023-.75.05-1.124.08C6.505 4.014 5.66 4.977 5.66 6.108V19.5A2.25 2.25 0 0 0 7.91 21.75"})
+    ),
+    Compass:({className="w-5 h-5"}:{className?: string})=>React.createElement('svg',{className,fill:"none",viewBox:"0 0 24 24",strokeWidth:"1.5",stroke:"currentColor"},
+        React.createElement('path',{strokeLinecap:"round",strokeLinejoin:"round",d:"M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"}),
+        React.createElement('path',{strokeLinecap:"round",strokeLinejoin:"round",d:"m14.5 9.5-2.1 4.9-4.9 2.1 2.1-4.9 4.9-2.1Z"})
+    ),
 };
 
 // ══════════════════════════════════════════
