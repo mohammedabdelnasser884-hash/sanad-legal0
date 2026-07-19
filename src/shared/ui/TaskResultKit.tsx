@@ -120,7 +120,7 @@ export function ErrorState({ message, onRetry }: ErrorStateProps) {
 interface SectionCardProps {
   title: string;
   tone?: ResultTone;
-  children: React.ReactNode;
+  children?: React.ReactNode;
 }
 export function SectionCard({ title, tone = 'neutral', children }: SectionCardProps) {
   return React.createElement('div', { className: `rounded-2xl p-4 border ${tone === 'neutral' ? 'bg-premium-card border-white/5' : TONE_BANNER[tone]}` },
