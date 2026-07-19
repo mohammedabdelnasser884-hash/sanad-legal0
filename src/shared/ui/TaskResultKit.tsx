@@ -116,6 +116,24 @@ export function ErrorState({ message, onRetry }: ErrorStateProps) {
   );
 }
 
+// ── كشف رسالة "وصلت للحد المجاني اليومي" الآتية من ai-chat/index.ts ──
+// (المرحلة 3، بند "fallback واضح عند غياب رصيد AI"، sanad-ai-assistant-plan-19.md)
+// نفس النص الحرفي في الإيدج فانكشن — لو تغيّر هناك، يتغيّر هنا معه.
+export function isQuotaExceededMessage(message: string): boolean {
+  return message.includes('الحد المجاني اليومي');
+}
+
+// ── حالة خاصة لنفاد السقف اليومي — مختلفة بصريًا عن ErrorState العادية:
+//    بدون زرار "إعادة المحاولة" (مضمون يفشل بنفس الرسالة)، مع تلميح BYOK ──
+interface UsageLimitStateProps { message: string }
+export function UsageLimitState({ message }: UsageLimitStateProps) {
+  return React.createElement('div', { className: 'flex flex-col items-center justify-center gap-3 py-12 px-6 text-center' },
+    React.createElement('span', { className: 'text-2xl' }, '⏳'),
+    React.createElement('p', { className: 'text-xs font-bold text-amber-300 leading-relaxed' }, message),
+    React.createElement('p', { className: 'text-[10px] text-slate-500 leading-relaxed' }, 'السقف بيترجع تلقائيًا بكرة. لو عايز تستخدم أكتر دلوقتي، تقدر تضيف مفتاح Groq شخصي مجاني من الإعدادات.')
+  );
+}
+
 // ── بطاقة قسم بعنوان علوي رفيع (— العنوان —) ──
 interface SectionCardProps {
   title: string;
