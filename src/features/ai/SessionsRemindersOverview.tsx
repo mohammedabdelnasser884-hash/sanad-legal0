@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../../supabaseClient';
 import { toDateStr } from '../calendar/sessions-calendar/constants';
 import { LoadingState, ErrorState, SummaryBanner, SectionCard, CopyButton } from '../../shared/ui/TaskResultKit';
+import { recordError } from '../../systemHealth';
 import type { MappedCase } from '../../hooks/useAppData';
 
 // ─────────────────────────────────────────────────────────
@@ -142,9 +143,12 @@ function SessionsRemindersOverview({ cases, onOpenCase }: SessionsRemindersOverv
       setOverdueReminders((overdueRes.data || []) as unknown as OverviewReminderRow[]);
       setUpcomingReminders((upRes.data || []) as unknown as OverviewReminderRow[]);
       setLoading(false);
-    }).catch(() => {
+    }).catch((e) => {
       if (cancelled) return;
-      setError('تعذّر تحميل الجلسات والتذكيرات. جرّب تاني.');
+      const _msg = e instanceof Error ? e.message : String(e);
+      const displayMsg = 'تعذّر تحميل الجلسات والتذكيرات. جرّب تاني.';
+      recordError('ai_sessions_reminders', _msg, { label: 'الجلسات والتذكيرات', message: displayMsg });
+      setError(displayMsg);
       setLoading(false);
     });
     return () => { cancelled = true; };
