@@ -203,7 +203,7 @@ describe('ai-chat — مسار النجاح ونداء Groq', () => {
     const res = await handler(req({ messages: [{ role: 'user', content: 'ما هي مدة الاستئناف؟' }] }));
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data).toEqual({ ok: true, content: 'ردّ المساعد القانوني' });
+    expect(data).toEqual({ ok: true, content: 'ردّ المساعد القانوني', source: 'byok' });
   });
 
   it('system_prompt بيتحط كأول رسالة، وباقي الرسائل بعده بنفس الترتيب', async () => {
@@ -263,7 +263,7 @@ describe('ai-chat — مسار النجاح ونداء Groq', () => {
     const res = await handler(req({ messages: [{ role: 'user', content: 'سؤال' }] }));
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data).toEqual({ ok: true, content: '' });
+    expect(data).toEqual({ ok: true, content: '', source: 'byok' });
   });
 });
 
