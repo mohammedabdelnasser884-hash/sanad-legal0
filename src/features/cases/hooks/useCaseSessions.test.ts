@@ -65,7 +65,15 @@ const logActivity = vi.fn();
 vi.mock('../../../shared/lib/dataAccess', () => ({
   safeUpdate: (...a: unknown[]) => safeUpdate(...a),
   logActivity: (...a: unknown[]) => logActivity(...a),
-  recalcNextHearing: async (db: { from: (table: string) => any }, caseId: string) => {
+  recalcNextHearing: async (
+    db: {
+      from: (table: string) => {
+        select: (col: string) => { eq: (col: string, val: string) => Promise<{ data: { session_date: string | null }[] | null }> };
+        update: (payload: { next_hearing: string | null }) => { eq: (col: string, val: string) => Promise<unknown> };
+      };
+    },
+    caseId: string,
+  ) => {
     const { data: allSessions } = await db.from('case_sessions').select('session_date').eq('case_id', caseId);
     const todayStr = new Date().toISOString().slice(0, 10);
     let nearest: string | null = null;
