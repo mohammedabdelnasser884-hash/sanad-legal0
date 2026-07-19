@@ -599,5 +599,40 @@ describe('useClientLinking', () => {
       expect(toast).toHaveBeenCalledWith('❌ تعذر تحديد المكتب الحالي، أعد تحميل الصفحة وحاول مرة أخرى', true);
       expect(dbWrite.callsFor('INSERT:clients')).toHaveLength(0);
     });
+
+    // 🆕 FIX: قبل كده كان بيضيف الموكل من غير ما يربطه بالجلسة اللي اتحفظت
+    // لسه (sessionId) — فزرار "🔗 ربط" كان يفضل ظاهر تاني ويسمح بتكرار
+    // نفس الموكل. التستات دي بتتأكد إن الجلسة بقت مربوطة فعليًا لما
+    // sessionId يكون متاح.
+    it('🆕 sessionId متاح (الجلسة اتحفظت أونلاين) → بعد إضافة الموكل، UPDATE:case_sessions بـ client_id، وتوست يوضّح الربط', async () => {
+      dbWrite.setResult('INSERT:clients', { error: null, offline: false, data: { id: 'new-client-linked' } });
+      const onSaved = vi.fn();
+      const onClientAdded = vi.fn();
+      const saved = makeSavedFormData({ plaintiff: 'موكل مربوط' }, { sessionId: 'session-just-saved' });
+      const { result } = renderHook(() => useClientLinking(saved, onSaved, onClientAdded));
+
+      await act(async () => { await result.current.handleAddClientOnly(); });
+
+      expect(dbWrite.callsFor('UPDATE:case_sessions')[0]).toEqual(expect.objectContaining({
+        type: 'UPDATE', table: 'case_sessions', id: 'session-just-saved',
+        data: expect.objectContaining({ client_id: 'new-client-linked' }),
+      }));
+      expect(toast).toHaveBeenCalledWith('✅ تمت إضافة الموكل وربطه بالجلسة');
+      expect(result.current.clientStep).toBe('done');
+      expect(onSaved).toHaveBeenCalled();
+      expect(onClientAdded).toHaveBeenCalled();
+    });
+
+    it('🆕 sessionId فاضي (الجلسة أوفلاين، لسه من غير id حقيقي) → مفيش أي UPDATE:case_sessions، والرسالة القديمة تفضل زي ما هي', async () => {
+      dbWrite.setResult('INSERT:clients', { error: null, offline: false, data: { id: 'new-client-nolink' } });
+      const saved = makeSavedFormData({ plaintiff: 'موكل بدون ربط' }, { sessionId: null });
+      const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
+
+      await act(async () => { await result.current.handleAddClientOnly(); });
+
+      expect(dbWrite.callsFor('UPDATE:case_sessions')).toHaveLength(0);
+      expect(toast).toHaveBeenCalledWith('✅ تمت إضافة الموكل لقائمة الموكلين');
+      expect(result.current.clientStep).toBe('done');
+    });
   });
 });
