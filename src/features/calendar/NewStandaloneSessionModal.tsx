@@ -156,34 +156,54 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
         }
         setSaving(true);
         try {
-            const { data: sessionData, error } = await db.from('case_sessions').insert([{
-                case_id: linkMode === 'existing' ? selectedCaseId : null,
-                session_date: form.session_date,
-                session_time: form.session_time || null,
-                court_level: finalCourtLevel || null,
-                session_hall: form.session_hall || null,
-                secretary_hall: form.secretary_hall || null,
-                secretary_name: form.secretary_name || null,
-                secretary_mobile: form.secretary_mobile || null,
-                title: form.title || null,
-                case_number: fullCaseNumber || null,
-                court: form.court || null,
-                case_type: finalCaseType || null,
-                circuit_number: form.circuit_number || null,
-                plaintiff: form.plaintiff || null,
-                plaintiff_role: form.plaintiff_role || null,
-                plaintiff_national_id: form.plaintiff_national_id || null,
-                plaintiff_power_of_attorney: form.plaintiff_power_of_attorney || null,
-                defendant: form.defendant || null,
-                defendant_role: form.defendant_role || null,
-                defendant_national_id: form.defendant_national_id || null,
-                description: form.description || null,
-                result: form.result || null,
-                next_action: form.next_action || null,
-            }]).select('id').single();
+            // ⚡ FIX (مرحلة 0 — توسيع الأوفلاين): تحويل من db.from() المباشر لـ
+            // __dbWrite. النداء ده مستقل تمامًا (case_id إما null أو id قضية
+            // حقيقي مُختار من الدروب داون في وضع "existing" — مفيش سلسلة
+            // تعتمد على id لسه في الطابور)، فآمن يتحول فورًا من غير أي توسيع
+            // في نظام الطابور نفسه. لو أوفلاين، sessionData.id هيبقى مفقود
+            // (العملية اتقيدت بس)، فـ savedFormData.sessionId هيبقى null —
+            // ده متعامل معاه بالفعل في useClientLinking.ts (خطوة ربط الجلسة
+            // بالقضية بتتخطى لو sessionId فاضي)، صفر تغيير سلوك إضافي مطلوب.
+            const { data: sessionData, error, offline, queued } = await window.__dbWrite({
+                type: 'INSERT',
+                table: 'case_sessions',
+                data: {
+                    case_id: linkMode === 'existing' ? selectedCaseId : null,
+                    session_date: form.session_date,
+                    session_time: form.session_time || null,
+                    court_level: finalCourtLevel || null,
+                    session_hall: form.session_hall || null,
+                    secretary_hall: form.secretary_hall || null,
+                    secretary_name: form.secretary_name || null,
+                    secretary_mobile: form.secretary_mobile || null,
+                    title: form.title || null,
+                    case_number: fullCaseNumber || null,
+                    court: form.court || null,
+                    case_type: finalCaseType || null,
+                    circuit_number: form.circuit_number || null,
+                    plaintiff: form.plaintiff || null,
+                    plaintiff_role: form.plaintiff_role || null,
+                    plaintiff_national_id: form.plaintiff_national_id || null,
+                    plaintiff_power_of_attorney: form.plaintiff_power_of_attorney || null,
+                    defendant: form.defendant || null,
+                    defendant_role: form.defendant_role || null,
+                    defendant_national_id: form.defendant_national_id || null,
+                    description: form.description || null,
+                    result: form.result || null,
+                    next_action: form.next_action || null,
+                },
+                returning: true,
+            });
 
             if (error) {
                 showErrorToast('session_save', error, 'تعذّر حفظ الجلسة. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'حفظ الجلسة');
+                return;
+            }
+
+            if (offline && queued) {
+                toast(linkMode === 'existing' ? '📥 الجلسة محفوظة محلياً — ستُضاف فور عودة الإنترنت' : '📥 الجلسة المستقلة محفوظة محلياً — ستُضاف فور عودة الإنترنت');
+                onSaved();
+                onClose();
                 return;
             }
 
