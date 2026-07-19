@@ -6,6 +6,7 @@ import { logActivity } from '../../shared/lib/dataAccess';
 import { db } from '../../supabaseClient';
 import { showErrorToast } from '../../shared/lib/errorReporting';
 import { Inp } from '@/shared/ui/Inp';
+import { PoaInput } from '@/shared/ui/PoaInput';
 import { Sel } from '@/shared/ui/Sel';
 import type { MappedCase } from '../../hooks/useAppData';
 import { useClientLinking } from './hooks/useClientLinking';
@@ -120,6 +121,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
         clientStep, setClientStep,
         foundClient, setFoundClient,
         handleLinkCase, handleLinkExistingClient, handleAddAndLinkClient, handleAddClientOnly,
+        handleLinkFoundClientToSession,
     } = useClientLinking(savedFormData, onSaved, onClientAdded);
 
     const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((f: Form) => ({ ...f, [k]: e.target.value }));
@@ -331,6 +333,32 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                     }, 'تخطي')
                 ),
 
+                // ── Step 2a-bis: "إضافة الموكل لقائمة الموكلين فقط" اكتشفت تكرار ──
+                // ⚡ NEW (19 يوليو 2026): موكل موجود بالفعل بنفس الاسم/الرقم القومي/
+                // التوكيل — بدل توست يوقف الموضوع، بنعرض زرار ربط الجلسة بيه مباشرة.
+                clientStep === 'duplicateSession' && React.createElement(React.Fragment, null,
+                    React.createElement('div', { className: 'text-center space-y-1' },
+                        React.createElement('div', { className: 'text-2xl' }, '⚠️'),
+                        React.createElement('h3', { className: 'text-sm font-black text-white' }, 'فيه موكل مطابق بالفعل'),
+                        React.createElement('p', { className: 'text-[11px] text-slate-400' }, 'هل تريد ربط الجلسة بـ'),
+                        React.createElement('p', { className: 'text-xs font-bold text-premium-gold mt-1' }, foundClient?.full_name)
+                    ),
+                    React.createElement('div', { className: 'space-y-2 pt-1' },
+                        React.createElement('button', {
+                            onClick: handleLinkFoundClientToSession,
+                            disabled: linkingClient,
+                            className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2'
+                        },
+                            React.createElement('span', null, '🔗'),
+                            React.createElement('span', null, linkingClient ? '⏳ جاري الربط...' : 'نعم، ربط بهذا الموكل')
+                        )
+                    ),
+                    React.createElement('button', {
+                        onClick: onClose,
+                        className: 'w-full py-2.5 rounded-2xl text-xs font-bold text-slate-500 hover:text-slate-300 transition-all'
+                    }, 'تخطي')
+                ),
+
                 // ── Step 2b: مفيش موكل ──
                 clientStep === 'notfound' && React.createElement(React.Fragment, null,
                     React.createElement('div', { className: 'text-center space-y-1' },
@@ -361,7 +389,9 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                     React.createElement('div', { className: 'text-center space-y-2 py-2' },
                         React.createElement('div', { className: 'text-3xl' }, '🎉'),
                         React.createElement('h3', { className: 'text-sm font-black text-white' }, 'تم بنجاح'),
-                        React.createElement('p', { className: 'text-[11px] text-slate-400' }, 'تمت إضافة الجلسة وإنشاء القضية وربط الموكل')
+                        React.createElement('p', { className: 'text-[11px] text-slate-400' }, createdCaseId
+                            ? 'تمت إضافة الجلسة وإنشاء القضية وربط الموكل'
+                            : 'تمت إضافة الجلسة وربط الموكل بها')
                     ),
                     React.createElement('button', {
                         onClick: onClose,
@@ -524,36 +554,6 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                     })
                 ),
 
-                // الطابق وقاعة الجلسة + قاعة/اسم/موبايل سكرتير الجلسة
-                React.createElement(Inp, {
-                    label: 'الطابق وقاعة الجلسة',
-                    value: form.session_hall,
-                    onChange: set('session_hall'),
-                    placeholder: 'مثال: الدور الأول - قاعة 5'
-                }),
-                React.createElement(Inp, {
-                    label: 'قاعة سكرتير الجلسة',
-                    value: form.secretary_hall,
-                    onChange: set('secretary_hall'),
-                    placeholder: 'رقم أو اسم قاعة السكرتير'
-                }),
-                React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
-                    React.createElement(Inp, {
-                        label: 'اسم سكرتير الجلسة',
-                        value: form.secretary_name,
-                        onChange: set('secretary_name'),
-                        placeholder: 'اسم السكرتير'
-                    }),
-                    React.createElement(Inp, {
-                        label: 'موبايل السكرتير',
-                        value: form.secretary_mobile,
-                        onChange: (e: React.ChangeEvent<HTMLInputElement>) => setForm((f: Form) => ({ ...f, secretary_mobile: onlyDigits(e.target.value, 11) })),
-                        placeholder: 'رقم الموبايل',
-                        inputMode: 'numeric',
-                        maxLength: 11
-                    })
-                ),
-
                 // تاريخ الجلسة + توقيت الجلسة
                 React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
                     React.createElement(Field, { label: 'تاريخ الجلسة', required: true },
@@ -597,23 +597,20 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                         placeholder: 'مثال: مدعي، مستأنف'
                     })
                 ),
-                // رقم قومي + رقم توكيل
-                React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
-                    React.createElement(Inp, {
-                        label: 'الرقم القومي',
-                        value: form.plaintiff_national_id,
-                        onChange: (e: React.ChangeEvent<HTMLInputElement>) => setForm((f: Form) => ({ ...f, plaintiff_national_id: onlyDigits(e.target.value) })),
-                        placeholder: '14 رقم',
-                        inputMode: 'numeric',
-                        maxLength: 14
-                    }),
-                    React.createElement(Inp, {
-                        label: 'رقم التوكيل',
-                        value: form.plaintiff_power_of_attorney,
-                        onChange: set('plaintiff_power_of_attorney'),
-                        placeholder: 'رقم التوكيل'
-                    })
-                ),
+                // رقم قومي الموكل
+                React.createElement(Inp, {
+                    label: 'الرقم القومي',
+                    value: form.plaintiff_national_id,
+                    onChange: (e: React.ChangeEvent<HTMLInputElement>) => setForm((f: Form) => ({ ...f, plaintiff_national_id: onlyDigits(e.target.value) })),
+                    placeholder: '14 رقم',
+                    inputMode: 'numeric',
+                    maxLength: 14
+                }),
+                // بيانات التوكيل — سطر كامل: رقم / حرف / سنة / مكتب توثيق
+                React.createElement(PoaInput, {
+                    value: form.plaintiff_power_of_attorney,
+                    onChange: (v: string) => setForm((f: Form) => ({ ...f, plaintiff_power_of_attorney: v }))
+                }),
 
                 React.createElement('div', { className: 'border-t border-white/5 my-1' }),
 
@@ -653,6 +650,36 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                     onChange: set('next_action'),
                     placeholder: 'مثال: تقديم مذكرة دفاع'
                 }),
+
+                // الطابق وقاعة الجلسة + قاعة/اسم/موبايل سكرتير الجلسة
+                React.createElement(Inp, {
+                    label: 'الطابق وقاعة الجلسة',
+                    value: form.session_hall,
+                    onChange: set('session_hall'),
+                    placeholder: 'مثال: الدور الأول - قاعة 5'
+                }),
+                React.createElement(Inp, {
+                    label: 'قاعة سكرتير الجلسة',
+                    value: form.secretary_hall,
+                    onChange: set('secretary_hall'),
+                    placeholder: 'رقم أو اسم قاعة السكرتير'
+                }),
+                React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
+                    React.createElement(Inp, {
+                        label: 'اسم سكرتير الجلسة',
+                        value: form.secretary_name,
+                        onChange: set('secretary_name'),
+                        placeholder: 'اسم السكرتير'
+                    }),
+                    React.createElement(Inp, {
+                        label: 'موبايل السكرتير',
+                        value: form.secretary_mobile,
+                        onChange: (e: React.ChangeEvent<HTMLInputElement>) => setForm((f: Form) => ({ ...f, secretary_mobile: onlyDigits(e.target.value, 11) })),
+                        placeholder: 'رقم الموبايل',
+                        inputMode: 'numeric',
+                        maxLength: 11
+                    })
+                ),
 
                 React.createElement('div', { className: 'h-4' })
             ),
