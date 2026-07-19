@@ -22,7 +22,7 @@ interface EditCaseForm {
     court_level: string; court_level_other: string; circuit_number: string;
     status: string; date: string; session_time: string;
     client_name: string; client_capacity: string; opponent: string; opponent_capacity: string;
-    session_hall: string; secretary_hall: string; secretary_name: string;
+    session_hall: string; secretary_hall: string; secretary_name: string; secretary_mobile: string;
 }
 
 function EditCaseModal({caseData, onClose, onSave, countryCourts, countryCaseTypes}: EditCaseModalProps){
@@ -105,6 +105,7 @@ function EditCaseModal({caseData, onClose, onSave, countryCourts, countryCaseTyp
         session_hall: mergedSessionHall,
         secretary_hall: caseData.secretary_hall || '',
         secretary_name: caseData.secretary_name || '',
+        secretary_mobile: caseData.secretary_mobile || '',
     });
     const s = <K extends keyof EditCaseForm>(k: K,v: EditCaseForm[K]) => setForm((p) =>({...p,[k]:v}));
 
@@ -278,6 +279,10 @@ function EditCaseModal({caseData, onClose, onSave, countryCourts, countryCaseTyp
             React.createElement('div', null,
                 React.createElement('label', {className:"block text-[10px] font-bold text-slate-400 mb-1.5"}, "اسم سكرتير الجلسة"),
                 React.createElement('input', {value:form.secretary_name, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('secretary_name',e.target.value), placeholder:"اسم السكرتير", className:inputCls, style:inpStyle})
+            ),
+            React.createElement('div', null,
+                React.createElement('label', {className:"block text-[10px] font-bold text-slate-400 mb-1.5"}, "موبايل سكرتير الجلسة"),
+                React.createElement('input', {value:form.secretary_mobile, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('secretary_mobile',e.target.value.replace(/\D/g,'').slice(0,11)), placeholder:"رقم الموبايل", inputMode:"numeric", maxLength:11, className:inputCls, style:inpStyle})
             ),
 
             // زر الحفظ
