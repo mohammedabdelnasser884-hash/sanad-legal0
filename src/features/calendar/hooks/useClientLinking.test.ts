@@ -2,59 +2,40 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 
 // ══════════════════════════════════════════════════════════════════
-// Mock db (supabaseClient) — بيغطي سلاسل الاستدعاءات المباشرة الموجودة
-// فعليًا في useClientLinking.ts (اتأكدت منها بقراءة الكود، مفيش تخمين):
-//   - db.from('cases').insert([...]).select('id').single()             [handleLinkCase]
-//   - db.from('clients').select('id,full_name').ilike(...).limit(3)    [handleLinkCase — بحث عن الموكل]
-//   - db.from('cases').update({client_id}).eq('id', x)                 [handleLinkExistingClient/handleAddAndLinkClient]
-//   - db.from('clients').insert([...]).select('id').single()           [handleAddAndLinkClient]
-//   - db.from('clients').insert([...])  (من غير select/single)         [handleAddClientOnly]
+// 🔒 FIX (مراجعة قبل المرحلة 2): الملف ده كان بيعمل mock لـ db.from()
+// فقط، لكن handleLinkCase وhandleAddClientOnly بيمروا فعليًا على
+// window.__dbWrite (Global function من src/lib/offlineQueue.ts) — مش
+// db.from() مباشرة. من غير mock مباشر لـ window.__dbWrite، أي نداء ليه
+// كان بيرمي "window.__dbWrite is not a function" فعليًا وقت التشغيل
+// (بيتلقّط في catch العام، فيظهر توست "❌ خطأ غير متوقع" بدل توست
+// النجاح المتوقع) — يعني تستات handleAddClientOnly (وبعد التعديل هنا،
+// handleLinkCase كمان) كانت هتفشل فعليًا. اتصلح بنفس النمط المتبع في
+// useCaseActions.test.ts بالظبط: window.__dbWrite بيتعمل mock مباشر
+// كـ vi.fn() مُوجَّه (router) حسب type/table، بدل ما نعتمد على db.from.
+//
+// 🆕 المرحلة 3-1: handleLinkExistingClient اتحوّل هو كمان لـ __dbWrite
+// (UPDATE:cases، مع _offlineSelfTempId لو createdCaseId لسه تمبيد — شوف
+// resolveOfflineSelfId في offlineQueue.ts).
+//
+// 🆕 المرحلة 3-2: handleAddAndLinkClient اتحوّل هو كمان بالكامل لـ
+// __dbWrite (INSERT:clients بتمبيد + UPDATE:cases بـ _offlineSelfTempId
+// و/أو _offlineFkTempId حسب الحالة — شوف تعليقات useClientLinking.ts).
+// db.from() فضل مستخدم مباشرة بس في البحث عن موكل مطابق (ilike، read-only)
+// في handleLinkCase — ده مقصود ومش هيتحول (زي ما الخطة نصّت).
 // ══════════════════════════════════════════════════════════════════
 type Result = { data?: unknown; error?: unknown };
 
 function makeMockDb() {
   const configured: Record<string, Result> = {};
-  const casesInsertSpy = vi.fn();
-  const clientsInsertSpy = vi.fn();
-  const casesUpdateSpy = vi.fn();
   const clientsIlikeSpy = vi.fn();
-  const sessionsUpdateSpy = vi.fn();
 
   const setResult = (key: string, result: Result) => { configured[key] = result; };
   const get = (key: string, fallback: Result) => configured[key] ?? fallback;
 
   const from = vi.fn((table: string) => {
-    if (table === 'cases') {
-      return {
-        insert: vi.fn((payload: unknown) => {
-          casesInsertSpy(payload);
-          return {
-            select: vi.fn(() => ({
-              single: vi.fn(() => Promise.resolve(get('cases:insert', { data: { id: 'new-case-1' }, error: null }))),
-            })),
-          };
-        }),
-        update: vi.fn((payload: unknown) => {
-          casesUpdateSpy(payload);
-          return { eq: vi.fn(() => Promise.resolve(get('cases:update', { error: null }))) };
-        }),
-      };
-    }
     if (table === 'clients') {
       return {
-        insert: vi.fn((payload: unknown) => {
-          clientsInsertSpy(payload);
-          return {
-            // handleAddAndLinkClient بيستخدم .select('id').single()، بينما
-            // handleAddClientOnly بيستخدم النتيجة على طول من غير .select() —
-            // بنرجّع object فيه الاتنين، وهو await-able مباشرة (thenable)
-            // عشان تغطي حالة استخدامه من غير .select() كمان.
-            select: vi.fn(() => ({
-              single: vi.fn(() => Promise.resolve(get('clients:insert:single', { data: { id: 'new-client-1' }, error: null }))),
-            })),
-            then: (resolve: (v: unknown) => unknown) => resolve(get('clients:insert:plain', { error: null })),
-          };
-        }),
+        // البحث عن موكل مطابق — read-only، لسه db.from مباشر (زي ما الخطة نصّت)
         select: vi.fn(() => ({
           ilike: vi.fn((col: string, val: string) => {
             clientsIlikeSpy(col, val);
@@ -63,18 +44,10 @@ function makeMockDb() {
         })),
       };
     }
-    if (table === 'case_sessions') {
-      return {
-        update: vi.fn((payload: unknown) => {
-          sessionsUpdateSpy(payload);
-          return { eq: vi.fn(() => Promise.resolve(get('sessions:update', { error: null }))) };
-        }),
-      };
-    }
     return {};
   });
 
-  return { from, setResult, casesInsertSpy, clientsInsertSpy, casesUpdateSpy, clientsIlikeSpy, sessionsUpdateSpy };
+  return { from, setResult, clientsIlikeSpy };
 }
 
 let mockDb = makeMockDb();
@@ -91,8 +64,41 @@ vi.mock('../../../systemHealth', () => ({ recordError: (...a: unknown[]) => reco
 const getCurrentTenantId = vi.fn();
 vi.mock('../../../constants', () => ({ getCurrentTenantId: () => getCurrentTenantId() }));
 
+const recalcNextHearing = vi.fn();
+vi.mock('../../../shared/lib/dataAccess', () => ({ recalcNextHearing: (...a: unknown[]) => recalcNextHearing(...a) }));
+
 import { useClientLinking, type SavedFormData } from './useClientLinking';
 import type { Form } from '../NewStandaloneSessionModal';
+
+// ══════════════════════════════════════════════════════════════════
+// mock مباشر لـ window.__dbWrite — نفس نمط useCaseActions.test.ts
+// (dbWriteMock helper هناك) بالظبط. بيوجّه حسب `${type}:${table}` عشان
+// نقدر نتحكم في نتيجة كل نداء لوحده (INSERT:cases لإنشاء القضية،
+// UPDATE:case_sessions لربط الجلسة، INSERT:clients لـ handleAddClientOnly).
+// ══════════════════════════════════════════════════════════════════
+type DbWriteOp = { type: 'INSERT' | 'UPDATE' | 'DELETE'; table: string; data?: Record<string, unknown>; id?: string; returning?: boolean };
+type DbWriteResult = { error: unknown; offline?: boolean; queued?: boolean; data?: unknown };
+
+function makeDbWriteMock() {
+  const configured: Record<string, DbWriteResult> = {};
+  const calls: DbWriteOp[] = [];
+  const setResult = (key: string, result: DbWriteResult) => { configured[key] = result; };
+  const defaults: Record<string, DbWriteResult> = {
+    'INSERT:cases': { error: null, offline: false, data: { id: 'new-case-1' } },
+    'UPDATE:case_sessions': { error: null, offline: false },
+    'INSERT:clients': { error: null, offline: false, data: { id: 'new-client-1' } },
+    'UPDATE:cases': { error: null, offline: false },
+  };
+  const fn = vi.fn(async (op: DbWriteOp): Promise<DbWriteResult> => {
+    calls.push(op);
+    const key = `${op.type}:${op.table}`;
+    return configured[key] ?? defaults[key] ?? { error: null, offline: false };
+  });
+  const callsFor = (key: string) => calls.filter((c) => `${c.type}:${c.table}` === key);
+  return { fn, setResult, calls, callsFor };
+}
+
+let dbWrite = makeDbWriteMock();
 
 function makeSavedFormData(overrides: Partial<Form> = {}, caseOverrides: Partial<Omit<SavedFormData, 'form'>> = {}): SavedFormData {
   const form: Form = {
@@ -106,23 +112,25 @@ function makeSavedFormData(overrides: Partial<Form> = {}, caseOverrides: Partial
 describe('useClientLinking', () => {
   beforeEach(() => {
     mockDb = makeMockDb();
+    dbWrite = makeDbWriteMock();
+    window.__dbWrite = dbWrite.fn as unknown as typeof window.__dbWrite;
     vi.clearAllMocks();
     getCurrentTenantId.mockReturnValue('tenant-1');
   });
 
   describe('handleLinkCase', () => {
-    it('savedFormData فاضي (null) → لا تفعل شيئًا، ومفيش أي استدعاء INSERT', async () => {
+    it('savedFormData فاضي (null) → لا تفعل شيئًا، ومفيش أي نداء __dbWrite', async () => {
       const onSaved = vi.fn();
       const { result } = renderHook(() => useClientLinking(null, onSaved));
 
       await act(async () => { await result.current.handleLinkCase(); });
 
-      expect(mockDb.casesInsertSpy).not.toHaveBeenCalled();
+      expect(dbWrite.fn).not.toHaveBeenCalled();
       expect(onSaved).not.toHaveBeenCalled();
     });
 
-    it('نجاح إنشاء القضية ولقاء موكل مطابق → toast نجاح، onSaved، تخزين createdCaseId، والبحث عن الموكل بيلاقي نتيجة → clientStep=found', async () => {
-      mockDb.setResult('cases:insert', { data: { id: 'new-case-1' }, error: null });
+    it('نجاح إنشاء القضية (أونلاين) ولقاء موكل مطابق → toast نجاح، onSaved، تخزين createdCaseId (id حقيقي)، recalcNextHearing، والبحث عن الموكل بيلاقي نتيجة → clientStep=found', async () => {
+      dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'new-case-1' } });
       mockDb.setResult('clients:select', { data: [{ id: 'client-1', full_name: 'أحمد محمد' }], error: null });
       const onSaved = vi.fn();
       const saved = makeSavedFormData();
@@ -130,9 +138,14 @@ describe('useClientLinking', () => {
 
       await act(async () => { await result.current.handleLinkCase(); });
 
-      expect(mockDb.casesInsertSpy).toHaveBeenCalledWith([expect.objectContaining({
-        case_number_official: '10 لسنة 2026', case_type: 'مدني', plaintiff: 'أحمد محمد', status: 'نشطة',
-      })]);
+      expect(dbWrite.callsFor('INSERT:cases')[0]).toEqual(expect.objectContaining({
+        type: 'INSERT', table: 'cases',
+        data: expect.objectContaining({
+          case_number_official: '10 لسنة 2026', case_type: 'مدني', plaintiff: 'أحمد محمد', status: 'نشطة',
+          _offlineTempId: expect.stringMatching(/^tmp-/),
+        }),
+        returning: true,
+      }));
       expect(toast).toHaveBeenCalledWith('✅ تم إنشاء ملف القضية');
       expect(onSaved).toHaveBeenCalled();
       expect(result.current.createdCaseId).toBe('new-case-1');
@@ -143,7 +156,7 @@ describe('useClientLinking', () => {
     });
 
     it('نجاح إنشاء القضية لكن مفيش موكل مطابق في البحث → clientStep=notfound', async () => {
-      mockDb.setResult('cases:insert', { data: { id: 'new-case-2' }, error: null });
+      dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'new-case-2' } });
       mockDb.setResult('clients:select', { data: [], error: null });
       const saved = makeSavedFormData();
       const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
@@ -155,7 +168,7 @@ describe('useClientLinking', () => {
     });
 
     it('اسم المدعي فاضي/مسافات بس بعد trim → مفيش أي بحث عن موكل، clientStep=notfound فورًا', async () => {
-      mockDb.setResult('cases:insert', { data: { id: 'new-case-3' }, error: null });
+      dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'new-case-3' } });
       const saved = makeSavedFormData({ plaintiff: '   ' });
       const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
 
@@ -166,18 +179,18 @@ describe('useClientLinking', () => {
     });
 
     it('العنوان الفاضي في الفورم → بيستخدم fullCaseNumber كعنوان (fallback)', async () => {
-      mockDb.setResult('cases:insert', { data: { id: 'new-case-4' }, error: null });
+      dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'new-case-4' } });
       mockDb.setResult('clients:select', { data: [], error: null });
       const saved = makeSavedFormData({ title: '' }, { fullCaseNumber: '20 لسنة 2026' });
       const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
 
       await act(async () => { await result.current.handleLinkCase(); });
 
-      expect(mockDb.casesInsertSpy).toHaveBeenCalledWith([expect.objectContaining({ title: '20 لسنة 2026' })]);
+      expect(dbWrite.callsFor('INSERT:cases')[0].data).toEqual(expect.objectContaining({ title: '20 لسنة 2026' }));
     });
 
     it('🆕 فشل إنشاء القضية (error) → الرسالة الموحدة تتعرض، والخام يتسجل عبر recordError، وقف فوري من غير onSaved أو بحث عن موكل', async () => {
-      mockDb.setResult('cases:insert', { data: null, error: { message: 'insert failed' } });
+      dbWrite.setResult('INSERT:cases', { error: { message: 'insert failed' }, offline: false });
       const onSaved = vi.fn();
       const saved = makeSavedFormData();
       const { result } = renderHook(() => useClientLinking(saved, onSaved));
@@ -191,8 +204,8 @@ describe('useClientLinking', () => {
       expect(result.current.linkingCase).toBe(false);
     });
 
-    it('استثناء غير متوقع (db.from ترمي) → يتلقّط في catch، توست خطأ عام، وlinkingCase بترجع false', async () => {
-      mockDb.from.mockImplementationOnce(() => { throw new Error('boom'); });
+    it('استثناء غير متوقع (__dbWrite ترمي) → يتلقّط في catch، توست خطأ عام، وlinkingCase بترجع false', async () => {
+      dbWrite.fn.mockImplementationOnce(() => { throw new Error('boom'); });
       const saved = makeSavedFormData();
       const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
 
@@ -202,26 +215,49 @@ describe('useClientLinking', () => {
       expect(result.current.linkingCase).toBe(false);
     });
 
-    it('🆕 لو savedFormData فيه sessionId (الجلسة الأصلية) → بعد إنشاء القضية بينفذ UPDATE على case_sessions.case_id بقيمة القضية الجديدة', async () => {
-      mockDb.setResult('cases:insert', { data: { id: 'case-linked-1' }, error: null });
+    it('🆕 لو savedFormData فيه sessionId (الجلسة الأصلية) → بعد إنشاء القضية بينفذ UPDATE على case_sessions.case_id بقيمة القضية الجديدة (id حقيقي)، وبينادي recalcNextHearing (أونلاين)', async () => {
+      dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-linked-1' } });
       mockDb.setResult('clients:select', { data: [], error: null });
       const saved = makeSavedFormData({}, { sessionId: 'session-abc' });
       const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
 
       await act(async () => { await result.current.handleLinkCase(); });
 
-      expect(mockDb.sessionsUpdateSpy).toHaveBeenCalledWith({ case_id: 'case-linked-1' });
+      expect(dbWrite.callsFor('UPDATE:case_sessions')[0]).toEqual(expect.objectContaining({
+        type: 'UPDATE', table: 'case_sessions', id: 'session-abc', data: { case_id: 'case-linked-1' },
+      }));
+      expect(recalcNextHearing).toHaveBeenCalledWith(expect.anything(), 'case-linked-1');
     });
 
-    it('🆕 مفيش sessionId (جلسة اتعملها case مباشرة من غير مرور بالمودال ده) → مفيش أي UPDATE على case_sessions', async () => {
-      mockDb.setResult('cases:insert', { data: { id: 'case-nolink-1' }, error: null });
+    it('🆕 مفيش sessionId (جلسة اتعملها case مباشرة من غير مرور بالمودال ده) → مفيش أي UPDATE على case_sessions ومفيش recalcNextHearing', async () => {
+      dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-nolink-1' } });
       mockDb.setResult('clients:select', { data: [], error: null });
       const saved = makeSavedFormData({}, { sessionId: null });
       const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
 
       await act(async () => { await result.current.handleLinkCase(); });
 
-      expect(mockDb.sessionsUpdateSpy).not.toHaveBeenCalled();
+      expect(dbWrite.callsFor('UPDATE:case_sessions')).toHaveLength(0);
+      expect(recalcNextHearing).not.toHaveBeenCalled();
+    });
+
+    it('🆕 (المرحلة 2) أوفلاين بالكامل: إنشاء القضية بيترجع queued من غير id حقيقي → createdCaseId بيتخزّن كتمبيد، وUPDATE الجلسة بيتبعت بـ _offlineFkTempId، ومفيش recalcNextHearing (هتتحسب بعد المزامنة)', async () => {
+      dbWrite.setResult('INSERT:cases', { error: null, offline: true, queued: true });
+      mockDb.setResult('clients:select', { data: [], error: null });
+      const saved = makeSavedFormData({ title: 'قضية أوفلاين' }, { sessionId: 'session-offline-1' });
+      const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
+
+      await act(async () => { await result.current.handleLinkCase(); });
+
+      expect(toast).toHaveBeenCalledWith('📥 القضية محفوظة محلياً — ستُضاف فور عودة الإنترنت');
+      expect(result.current.createdCaseId).toMatch(/^tmp-/);
+      const sessionUpdateCall = dbWrite.callsFor('UPDATE:case_sessions')[0];
+      expect(sessionUpdateCall.id).toBe('session-offline-1');
+      expect(sessionUpdateCall.data?.case_id).toBe(result.current.createdCaseId);
+      expect(sessionUpdateCall.data?._offlineFkTempId).toEqual([
+        { field: 'case_id', tempId: result.current.createdCaseId, table: 'cases', fallbackNameValue: 'قضية أوفلاين' },
+      ]);
+      expect(recalcNextHearing).not.toHaveBeenCalled();
     });
   });
 
@@ -231,28 +267,49 @@ describe('useClientLinking', () => {
 
       await act(async () => { await result.current.handleLinkExistingClient(); });
 
-      expect(mockDb.casesUpdateSpy).not.toHaveBeenCalled();
+      expect(dbWrite.callsFor('UPDATE:cases')).toHaveLength(0);
     });
 
-    it('نجاح الربط (بعد ما يبقى فيه createdCaseId وfoundClient من handleLinkCase) → UPDATE للقضية بـ client_id، توست نجاح، clientStep=done', async () => {
-      mockDb.setResult('cases:insert', { data: { id: 'case-x' }, error: null });
+    it('🆕 المرحلة 3-1: نجاح الربط (createdCaseId id حقيقي من handleLinkCase أونلاين) → __dbWrite بـ UPDATE:cases id حقيقي من غير أي sentinel تمبيد، توست نجاح، clientStep=done', async () => {
+      dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-x' } });
       mockDb.setResult('clients:select', { data: [{ id: 'client-found-1', full_name: 'أحمد محمد' }], error: null });
-      mockDb.setResult('cases:update', { error: null });
       const { result } = renderHook(() => useClientLinking(makeSavedFormData(), vi.fn()));
       await act(async () => { await result.current.handleLinkCase(); });
 
       await act(async () => { await result.current.handleLinkExistingClient(); });
 
-      expect(mockDb.casesUpdateSpy).toHaveBeenCalledWith({ client_id: 'client-found-1' });
+      expect(dbWrite.callsFor('UPDATE:cases')[0]).toEqual({
+        type: 'UPDATE', table: 'cases', id: 'case-x', data: { client_id: 'client-found-1' },
+      });
       expect(toast).toHaveBeenCalledWith('✅ تم ربط الموكل بالقضية');
       expect(result.current.clientStep).toBe('done');
       expect(result.current.linkingToCase).toBe(false);
     });
 
+    it('🆕 المرحلة 3-1: createdCaseId لسه تمبيد (القضية اتقيدت أوفلاين في handleLinkCase) → __dbWrite بـ _offlineSelfTempId + _offlineSelfFallbackName (عنوان القضية)، وتوست "محفوظ محلياً" لو رجع queued', async () => {
+      dbWrite.setResult('INSERT:cases', { error: null, offline: true, queued: true });
+      dbWrite.setResult('UPDATE:cases', { error: null, offline: true, queued: true });
+      mockDb.setResult('clients:select', { data: [{ id: 'client-found-offline', full_name: 'أحمد محمد' }], error: null });
+      const saved = makeSavedFormData({ title: 'قضية أوفلاين للربط' });
+      const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
+      await act(async () => { await result.current.handleLinkCase(); });
+      const tempCaseId = result.current.createdCaseId as string;
+      expect(tempCaseId).toMatch(/^tmp-/);
+
+      await act(async () => { await result.current.handleLinkExistingClient(); });
+
+      expect(dbWrite.callsFor('UPDATE:cases')[0]).toEqual({
+        type: 'UPDATE', table: 'cases', id: tempCaseId,
+        data: { client_id: 'client-found-offline', _offlineSelfTempId: tempCaseId, _offlineSelfFallbackName: 'قضية أوفلاين للربط' },
+      });
+      expect(toast).toHaveBeenCalledWith('📥 الربط محفوظ محلياً — سيُزامن عند عودة الإنترنت');
+      expect(result.current.clientStep).toBe('done');
+    });
+
     it('🆕 فشل الربط (error) → الرسالة الموحدة تتعرض، والخام يتسجل عبر recordError، من غير تغيير clientStep', async () => {
-      mockDb.setResult('cases:insert', { data: { id: 'case-y' }, error: null });
+      dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-y' } });
+      dbWrite.setResult('UPDATE:cases', { error: { message: 'update failed' } });
       mockDb.setResult('clients:select', { data: [{ id: 'client-found-2', full_name: 'محمد' }], error: null });
-      mockDb.setResult('cases:update', { error: { message: 'update failed' } });
       const { result } = renderHook(() => useClientLinking(makeSavedFormData(), vi.fn()));
       await act(async () => { await result.current.handleLinkCase(); });
 
@@ -263,12 +320,12 @@ describe('useClientLinking', () => {
       expect(result.current.clientStep).toBe('found');
     });
 
-    it('استثناء غير متوقع → توست خطأ عام، linkingToCase ترجع false', async () => {
-      mockDb.setResult('cases:insert', { data: { id: 'case-z' }, error: null });
+    it('استثناء غير متوقع (__dbWrite ترمي) → توست خطأ عام، linkingToCase ترجع false', async () => {
+      dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-z' } });
       mockDb.setResult('clients:select', { data: [{ id: 'client-found-3', full_name: 'سالم' }], error: null });
       const { result } = renderHook(() => useClientLinking(makeSavedFormData(), vi.fn()));
       await act(async () => { await result.current.handleLinkCase(); });
-      mockDb.from.mockImplementationOnce(() => { throw new Error('boom'); });
+      dbWrite.fn.mockImplementationOnce(() => { throw new Error('boom'); });
 
       await act(async () => { await result.current.handleLinkExistingClient(); });
 
@@ -283,44 +340,133 @@ describe('useClientLinking', () => {
 
       await act(async () => { await result.current.handleAddAndLinkClient(); });
 
-      expect(mockDb.clientsInsertSpy).not.toHaveBeenCalled();
+      expect(dbWrite.callsFor('INSERT:clients')).toHaveLength(0);
     });
 
     it('اسم المدعي فاضي بعد trim → لا تفعل شيئًا حتى لو فيه createdCaseId', async () => {
-      mockDb.setResult('cases:insert', { data: { id: 'case-empty' }, error: null });
+      dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-empty' } });
       const saved = makeSavedFormData({ plaintiff: '  ' });
       const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
       await act(async () => { await result.current.handleLinkCase(); });
 
       await act(async () => { await result.current.handleAddAndLinkClient(); });
 
-      expect(mockDb.clientsInsertSpy).not.toHaveBeenCalled();
+      expect(dbWrite.callsFor('INSERT:clients')).toHaveLength(0);
     });
 
-    it('نجاح كامل (إضافة موكل جديد + ربط) → INSERT بـ full_name/national_id، UPDATE للقضية بـ client_id الجديد، توست نجاح، clientStep=done', async () => {
-      mockDb.setResult('cases:insert', { data: { id: 'case-add-1' }, error: null });
+    // 🆕 المرحلة 3-2: 4 سيناريوهات معيار القبول — (أ) أونلاين بالكامل،
+    // (ب) قضية أوفلاين فقط + عميل أونلاين، (جـ) قضية أونلاين + عميل أوفلاين
+    // فقط، (د) الاتنين أوفلاين مع بعض (التمبيدين المتزامنين).
+
+    it('🆕 (أ) أونلاين بالكامل: القضية والعميل معهم id حقيقي → INSERT:clients بتمبيد (بيتشال قبل الإرسال الحقيقي)، UPDATE:cases بـ client_id الحقيقي من غير أي sentinel، توست نجاح', async () => {
+      dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-add-1' } });
       mockDb.setResult('clients:select', { data: [], error: null });
-      mockDb.setResult('clients:insert:single', { data: { id: 'new-client-99' }, error: null });
-      mockDb.setResult('cases:update', { error: null });
+      dbWrite.setResult('INSERT:clients', { error: null, offline: false, data: { id: 'new-client-99' } });
+      dbWrite.setResult('UPDATE:cases', { error: null, offline: false });
       const saved = makeSavedFormData({ plaintiff: 'موكل جديد', plaintiff_national_id: '12345' });
       const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
       await act(async () => { await result.current.handleLinkCase(); });
 
       await act(async () => { await result.current.handleAddAndLinkClient(); });
 
-      expect(mockDb.clientsInsertSpy).toHaveBeenCalledWith([expect.objectContaining({
-        full_name: 'موكل جديد', client_name: 'موكل جديد', tenant_id: 'tenant-1', national_id: '12345',
-      })]);
-      expect(mockDb.casesUpdateSpy).toHaveBeenCalledWith({ client_id: 'new-client-99' });
+      expect(dbWrite.callsFor('INSERT:clients')[0]).toEqual(expect.objectContaining({
+        type: 'INSERT', table: 'clients',
+        data: expect.objectContaining({
+          full_name: 'موكل جديد', client_name: 'موكل جديد', tenant_id: 'tenant-1', national_id: '12345',
+          _offlineTempId: expect.stringMatching(/^tmp-/),
+        }),
+        returning: true,
+      }));
+      expect(dbWrite.callsFor('UPDATE:cases')[0]).toEqual({
+        type: 'UPDATE', table: 'cases', id: 'case-add-1', data: { client_id: 'new-client-99' },
+      });
       expect(toast).toHaveBeenCalledWith('✅ تمت إضافة الموكل وربطه بالقضية');
       expect(result.current.clientStep).toBe('done');
       expect(result.current.linkingToCase).toBe(false);
     });
 
-    it('🆕 فشل إضافة الموكل → الرسالة الموحدة تتعرض، والخام يتسجل عبر recordError، من غير أي محاولة ربط (مفيش UPDATE)', async () => {
-      mockDb.setResult('cases:insert', { data: { id: 'case-add-2' }, error: null });
+    it('🆕 (ب) قضية أوفلاين فقط (createdCaseId تمبيد من handleLinkCase) + عميل أونلاين → UPDATE:cases بـ _offlineSelfTempId/_offlineSelfFallbackName بس، من غير _offlineFkTempId', async () => {
+      dbWrite.setResult('INSERT:cases', { error: null, offline: true, queued: true });
       mockDb.setResult('clients:select', { data: [], error: null });
-      mockDb.setResult('clients:insert:single', { data: null, error: { message: 'client insert failed' } });
+      dbWrite.setResult('INSERT:clients', { error: null, offline: false, data: { id: 'new-client-online' } });
+      dbWrite.setResult('UPDATE:cases', { error: null, offline: true, queued: true });
+      const saved = makeSavedFormData({ title: 'قضية أوفلاين ب', plaintiff: 'موكل ب' });
+      const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
+      await act(async () => { await result.current.handleLinkCase(); });
+      const tempCaseId = result.current.createdCaseId as string;
+      expect(tempCaseId).toMatch(/^tmp-/);
+
+      await act(async () => { await result.current.handleAddAndLinkClient(); });
+
+      expect(dbWrite.callsFor('UPDATE:cases')[0]).toEqual({
+        type: 'UPDATE', table: 'cases', id: tempCaseId,
+        data: {
+          client_id: 'new-client-online',
+          _offlineSelfTempId: tempCaseId, _offlineSelfFallbackName: 'قضية أوفلاين ب',
+        },
+      });
+      expect(toast).toHaveBeenCalledWith('📥 إضافة الموكل وربطه محفوظة محلياً — ستُزامن عند عودة الإنترنت');
+      expect(result.current.clientStep).toBe('done');
+    });
+
+    it('🆕 (جـ) قضية أونلاين (id حقيقي) + عميل أوفلاين فقط (INSERT:clients رجع queued) → UPDATE:cases بـ _offlineFkTempId بس على client_id، من غير _offlineSelfTempId', async () => {
+      dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-add-c' } });
+      mockDb.setResult('clients:select', { data: [], error: null });
+      dbWrite.setResult('INSERT:clients', { error: null, offline: true, queued: true });
+      dbWrite.setResult('UPDATE:cases', { error: null, offline: true, queued: true });
+      const saved = makeSavedFormData({ plaintiff: 'موكل جـ' });
+      const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
+      await act(async () => { await result.current.handleLinkCase(); });
+
+      await act(async () => { await result.current.handleAddAndLinkClient(); });
+
+      const updateCall = dbWrite.callsFor('UPDATE:cases')[0];
+      const clientTempId = updateCall.data?.client_id as string;
+      expect(clientTempId).toMatch(/^tmp-/);
+      expect(updateCall).toEqual({
+        type: 'UPDATE', table: 'cases', id: 'case-add-c',
+        data: {
+          client_id: clientTempId,
+          _offlineFkTempId: [{ field: 'client_id', tempId: clientTempId, table: 'clients', fallbackNameValue: 'موكل جـ' }],
+        },
+      });
+      expect(toast).toHaveBeenCalledWith('📥 إضافة الموكل وربطه محفوظة محلياً — ستُزامن عند عودة الإنترنت');
+      expect(result.current.clientStep).toBe('done');
+    });
+
+    it('🆕 (د) الاتنين أوفلاين مع بعض (قضية تمبيد + عميل queued) → UPDATE:cases بيحمل _offlineSelfTempId (القضية) و_offlineFkTempId (العميل) مع بعض في نفس العملية', async () => {
+      dbWrite.setResult('INSERT:cases', { error: null, offline: true, queued: true });
+      mockDb.setResult('clients:select', { data: [], error: null });
+      dbWrite.setResult('INSERT:clients', { error: null, offline: true, queued: true });
+      dbWrite.setResult('UPDATE:cases', { error: null, offline: true, queued: true });
+      const saved = makeSavedFormData({ title: 'قضية أوفلاين د', plaintiff: 'موكل د' });
+      const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
+      await act(async () => { await result.current.handleLinkCase(); });
+      const tempCaseId = result.current.createdCaseId as string;
+
+      await act(async () => { await result.current.handleAddAndLinkClient(); });
+
+      const updateCall = dbWrite.callsFor('UPDATE:cases')[0];
+      const clientTempId = updateCall.data?.client_id as string;
+      expect(tempCaseId).toMatch(/^tmp-/);
+      expect(clientTempId).toMatch(/^tmp-/);
+      expect(clientTempId).not.toBe(tempCaseId);
+      expect(updateCall).toEqual({
+        type: 'UPDATE', table: 'cases', id: tempCaseId,
+        data: {
+          client_id: clientTempId,
+          _offlineSelfTempId: tempCaseId, _offlineSelfFallbackName: 'قضية أوفلاين د',
+          _offlineFkTempId: [{ field: 'client_id', tempId: clientTempId, table: 'clients', fallbackNameValue: 'موكل د' }],
+        },
+      });
+      expect(toast).toHaveBeenCalledWith('📥 إضافة الموكل وربطه محفوظة محلياً — ستُزامن عند عودة الإنترنت');
+      expect(result.current.clientStep).toBe('done');
+    });
+
+    it('🆕 فشل إضافة الموكل → الرسالة الموحدة تتعرض، والخام يتسجل عبر recordError، من غير أي محاولة ربط (مفيش UPDATE:cases)', async () => {
+      dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-add-2' } });
+      mockDb.setResult('clients:select', { data: [], error: null });
+      dbWrite.setResult('INSERT:clients', { error: { message: 'client insert failed' }, offline: false });
       const saved = makeSavedFormData({ plaintiff: 'موكل فاشل' });
       const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
       await act(async () => { await result.current.handleLinkCase(); });
@@ -329,32 +475,32 @@ describe('useClientLinking', () => {
 
       expect(toast).toHaveBeenCalledWith('❌ تعذّر إضافة الموكل. تحقق من صحة البيانات. لو المشكلة استمرت، تواصل مع الدعم.', true);
       expect(recordError).toHaveBeenCalledWith('client_create', 'client insert failed', expect.objectContaining({ label: 'إضافة موكل' }));
-      expect(mockDb.casesUpdateSpy).not.toHaveBeenCalled();
+      expect(dbWrite.callsFor('UPDATE:cases')).toHaveLength(0);
     });
 
     it('🆕 الموكل اتضاف بنجاح لكن الربط فشل → الرسالة الموحدة الخاصة بالربط تتعرض، والخام يتسجل عبر recordError، من غير clientStep=done', async () => {
-      mockDb.setResult('cases:insert', { data: { id: 'case-add-3' }, error: null });
+      dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-add-3' } });
       mockDb.setResult('clients:select', { data: [], error: null });
-      mockDb.setResult('clients:insert:single', { data: { id: 'new-client-100' }, error: null });
-      mockDb.setResult('cases:update', { error: { message: 'link failed' } });
+      dbWrite.setResult('INSERT:clients', { error: null, offline: false, data: { id: 'new-client-100' } });
+      dbWrite.setResult('UPDATE:cases', { error: { message: 'link failed' } });
       const saved = makeSavedFormData({ plaintiff: 'موكل بربط فاشل' });
       const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
       await act(async () => { await result.current.handleLinkCase(); });
 
       await act(async () => { await result.current.handleAddAndLinkClient(); });
 
-      expect(toast).toHaveBeenCalledWith('❌ تعذّر ربط الموكل بالجلسة. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', true);
-      expect(recordError).toHaveBeenCalledWith('session_client_link', 'link failed', expect.objectContaining({ label: 'ربط الموكل بالجلسة' }));
+      expect(toast).toHaveBeenCalledWith('❌ تعذّر ربط الموكل بالقضية. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', true);
+      expect(recordError).toHaveBeenCalledWith('session_client_link', 'link failed', expect.objectContaining({ label: 'ربط الموكل بالقضية' }));
       expect(result.current.clientStep).not.toBe('done');
     });
 
     it('استثناء غير متوقع → توست خطأ عام، linkingToCase ترجع false', async () => {
-      mockDb.setResult('cases:insert', { data: { id: 'case-add-4' }, error: null });
+      dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-add-4' } });
       mockDb.setResult('clients:select', { data: [], error: null });
       const saved = makeSavedFormData({ plaintiff: 'موكل استثناء' });
       const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
       await act(async () => { await result.current.handleLinkCase(); });
-      mockDb.from.mockImplementationOnce(() => { throw new Error('boom'); });
+      dbWrite.fn.mockImplementationOnce(() => { throw new Error('boom'); });
 
       await act(async () => { await result.current.handleAddAndLinkClient(); });
 
@@ -363,7 +509,7 @@ describe('useClientLinking', () => {
     });
 
     it('🆕 مفيش tenant_id متاح (getCurrentTenantId ترجع null) → توست خطأ واضح، ومفيش أي INSERT', async () => {
-      mockDb.setResult('cases:insert', { data: { id: 'case-add-5' }, error: null });
+      dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-add-5' } });
       mockDb.setResult('clients:select', { data: [], error: null });
       getCurrentTenantId.mockReturnValue(null);
       const saved = makeSavedFormData({ plaintiff: 'موكل بدون تينانت' });
@@ -373,7 +519,7 @@ describe('useClientLinking', () => {
       await act(async () => { await result.current.handleAddAndLinkClient(); });
 
       expect(toast).toHaveBeenCalledWith('❌ تعذر تحديد المكتب الحالي، أعد تحميل الصفحة وحاول مرة أخرى', true);
-      expect(mockDb.clientsInsertSpy).not.toHaveBeenCalled();
+      expect(dbWrite.callsFor('INSERT:clients')).toHaveLength(0);
     });
   });
 
@@ -383,7 +529,7 @@ describe('useClientLinking', () => {
 
       await act(async () => { await result.current.handleAddClientOnly(); });
 
-      expect(mockDb.clientsInsertSpy).not.toHaveBeenCalled();
+      expect(dbWrite.callsFor('INSERT:clients')).toHaveLength(0);
     });
 
     it('اسم المدعي فاضي بعد trim → لا تفعل شيئًا', async () => {
@@ -392,25 +538,37 @@ describe('useClientLinking', () => {
 
       await act(async () => { await result.current.handleAddClientOnly(); });
 
-      expect(mockDb.clientsInsertSpy).not.toHaveBeenCalled();
+      expect(dbWrite.callsFor('INSERT:clients')).toHaveLength(0);
     });
 
-    it('نجاح → INSERT بـ full_name/national_id (من غير select/single)، توست نجاح', async () => {
-      mockDb.setResult('clients:insert:plain', { error: null });
+    it('نجاح (أونلاين) → __dbWrite بـ full_name/national_id، توست نجاح', async () => {
+      dbWrite.setResult('INSERT:clients', { error: null, offline: false });
       const saved = makeSavedFormData({ plaintiff: 'موكل مستقل', plaintiff_national_id: '999' });
       const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
 
       await act(async () => { await result.current.handleAddClientOnly(); });
 
-      expect(mockDb.clientsInsertSpy).toHaveBeenCalledWith([expect.objectContaining({
+      expect(dbWrite.callsFor('INSERT:clients')[0].data).toEqual(expect.objectContaining({
         full_name: 'موكل مستقل', client_name: 'موكل مستقل', tenant_id: 'tenant-1', national_id: '999',
-      })]);
+      }));
       expect(toast).toHaveBeenCalledWith('✅ تمت إضافة الموكل لقائمة الموكلين');
       expect(result.current.linkingClient).toBe(false);
     });
 
+    it('🆕 أوفلاين (queued) → توست "محفوظ محلياً" بدل توست النجاح العادي', async () => {
+      dbWrite.setResult('INSERT:clients', { error: null, offline: true, queued: true });
+      const onClientAdded = vi.fn();
+      const saved = makeSavedFormData({ plaintiff: 'موكل أوفلاين' });
+      const { result } = renderHook(() => useClientLinking(saved, vi.fn(), onClientAdded));
+
+      await act(async () => { await result.current.handleAddClientOnly(); });
+
+      expect(toast).toHaveBeenCalledWith('📥 الموكل محفوظ محلياً — سيُضاف فور عودة الإنترنت');
+      expect(onClientAdded).toHaveBeenCalled();
+    });
+
     it('🆕 فشل الإدخال → الرسالة الموحدة تتعرض، والخام يتسجل عبر recordError', async () => {
-      mockDb.setResult('clients:insert:plain', { error: { message: 'plain insert failed' } });
+      dbWrite.setResult('INSERT:clients', { error: { message: 'plain insert failed' }, offline: false });
       const saved = makeSavedFormData({ plaintiff: 'موكل فشل الإدخال' });
       const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
 
@@ -421,7 +579,7 @@ describe('useClientLinking', () => {
     });
 
     it('استثناء غير متوقع → توست خطأ عام، linkingClient ترجع false', async () => {
-      mockDb.from.mockImplementationOnce(() => { throw new Error('boom'); });
+      dbWrite.fn.mockImplementationOnce(() => { throw new Error('boom'); });
       const saved = makeSavedFormData({ plaintiff: 'موكل استثناء منفرد' });
       const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
 
@@ -439,7 +597,7 @@ describe('useClientLinking', () => {
       await act(async () => { await result.current.handleAddClientOnly(); });
 
       expect(toast).toHaveBeenCalledWith('❌ تعذر تحديد المكتب الحالي، أعد تحميل الصفحة وحاول مرة أخرى', true);
-      expect(mockDb.clientsInsertSpy).not.toHaveBeenCalled();
+      expect(dbWrite.callsFor('INSERT:clients')).toHaveLength(0);
     });
   });
 });
