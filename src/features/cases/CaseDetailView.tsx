@@ -52,13 +52,18 @@ interface CaseDetailViewProps {
     onDelete?: (caseId: string) => void | Promise<void>;
     onEdit?: (caseId: string, form: CaseFormSubmitData) => void | Promise<void>;
     onLinkClient?: (caseId: string, clientId: string) => void | Promise<void>;
+    // ⚡ NEW (19 يوليو 2026): plaintiffPoa بيتبعت كمان (كان مفقود من الفحص
+    // خالص قبل كده)، والدالة ممكن ترجّع بيانات موكل مطابق لو اتكشف تكرار،
+    // عشان الواجهة تعرض زرار "ربط الآن" بدل توست بس.
+    onCreateAndLinkClient?: (caseId: string, plaintiffName: string, plaintiffNationalId?: string | null, plaintiffPoa?: string | null) =>
+        void | Promise<void> | Promise<{ duplicate: true; client: { id: string; full_name: string | null }; message?: string } | undefined>;
     onNotify?: (msg: string) => void | Promise<void>;
     initialTab?: string;
     profile?: ProfileRow | null;
     country?: string | null;
 }
 
-function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDelete, onEdit, onLinkClient, onNotify, initialTab='timeline', profile=null, country=null}: CaseDetailViewProps){
+function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDelete, onEdit, onLinkClient, onCreateAndLinkClient, onNotify, initialTab='timeline', profile=null, country=null}: CaseDetailViewProps){
     const [activeSection, setActiveSection] = useState(initialTab);
     const [showEditCase, setShowEditCase] = useState(false);
     const [linkingClient, setLinkingClient] = useState(false);
@@ -443,6 +448,11 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
                     try { await onLinkClient(caseData.id, clientId); }
                     finally { setLinkingClient(false); }
                 },
+                onCreateAndLinkClient: onCreateAndLinkClient ? async () => {
+                    setLinkingClient(true);
+                    try { return await onCreateAndLinkClient(caseData.id, caseData.plaintiff || '', caseData.plaintiff_national_id, caseData.plaintiff_power_of_attorney); }
+                    finally { setLinkingClient(false); }
+                } : undefined,
             }),
 
             // ═══ المراجعة (نواقص الملف) — Rule-based بدون AI، المرحلة 1 من خطة المساعد الذكي ═══
