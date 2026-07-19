@@ -53,6 +53,10 @@ test('استرجاع قضية من شاشة الأرشيف: تختفي من ال
   if (error) throw error;
   expect(data?.deleted_at).toBeNull();
 
+  // ── لازم نقفل شاشة لوحة الإدارة (overlay بتغطي الشريط السفلي بالكامل)
+  //    قبل ما نقدر نضغط على nav-cases، وإلا الدوسة بتفشل (element intercepted) ──
+  await page.getByTestId('admin-section-back').click();
+
   // وتظهر تاني في قائمة القضايا النشطة
   await page.getByTestId('nav-cases').click();
   const card = page.getByTestId('case-card').filter({ hasText: title });
