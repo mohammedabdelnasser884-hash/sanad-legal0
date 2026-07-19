@@ -1,9 +1,7 @@
 import { useState } from 'react';
 import { toast } from '../../../shared/lib/notifications';
-import { validateFullNameParts, checkClientDuplicate } from '../../../shared/lib/clientValidation';
 import { db } from '../../../supabaseClient';
 import { showErrorToast } from '../../../shared/lib/errorReporting';
-import { getCurrentTenantId } from '../../../constants';
 import { recalcNextHearing } from '../../../shared/lib/dataAccess';
 import type { Form } from '../NewStandaloneSessionModal';
 
@@ -15,15 +13,46 @@ export type SavedFormData = { form: Form; finalCaseType: string; finalCourtLevel
  * handleLinkCase, handleLinkExistingClient, handleAddAndLinkClient,
  * handleAddClientOnly.
  */
-export function useClientLinking(savedFormData: SavedFormData | null, onSaved: () => void, onClientAdded?: () => void) {
+// ⚡ NEW (خطة توحيد إنشاء الموكل، Phase 3): كول-باك بيفتح NewClientModal
+// الموحّد بدل ما handleAddClientOnly يعمل INSERT مباشر — شوف
+// handleOpenCreateClientForSession في App.tsx.
+export type OpenCreateClientForSession = (
+  sessionId: string | null,
+  plaintiffName: string,
+  plaintiffNationalId?: string | null,
+  plaintiffPoa?: string | null,
+) => void;
+
+// ⚡ NEW (خطة توحيد إنشاء الموكل، Phase 2): كول-باك بيفتح NewClientModal
+// الموحّد لمسار "إنشاء موكل جديد وربطه" بقضية (زي handleOpenCreateClientForCase
+// المستخدم في Phase 1 — نفس التوقيع بالظبط + باراميتر سادس اختياري لمعلومة
+// التمبيد الأوفلاين لو القضية نفسها لسه معرّف مؤقت).
+export type OpenCreateClientForCase = (
+  caseId: string,
+  plaintiffName: string,
+  plaintiffNationalId?: string | null,
+  plaintiffPoa?: string | null,
+  caseOfflineInfo?: { isOfflineTemp: boolean; fallbackTitle?: string },
+) => void;
+
+export function useClientLinking(
+  savedFormData: SavedFormData | null,
+  onSaved: () => void,
+  onClientAdded?: () => void,
+  onOpenCreateClient?: OpenCreateClientForSession,
+  onOpenCreateClientForCase?: OpenCreateClientForCase,
+) {
   const [linkingCase, setLinkingCase] = useState(false);
   const [linkingClient, setLinkingClient] = useState(false);
   const [createdCaseId, setCreatedCaseId] = useState<string | null>(null);
-  // ⚡ NEW (19 يوليو 2026): 'duplicateSession' — لما "إضافة الموكل لقائمة
-  // الموكلين فقط" (بدون إنشاء قضية) تكتشف تكرار، بنعرض زرار ربط مباشر
-  // بالجلسة (case_sessions.client_id) بدل توست بس — شوف handleLinkFoundClientToSession تحت.
-  const [clientStep, setClientStep] = useState<'idle' | 'found' | 'notfound' | 'duplicateSession' | 'done'>('idle');
+  const [clientStep, setClientStep] = useState<'idle' | 'found' | 'notfound' | 'done'>('idle');
   const [foundClient, setFoundClient] = useState<{ id: string; full_name: string | null } | null>(null);
+  // ⚡ FIX: خطوة 'found' بتتفعّل من مصدرين مختلفين تمامًا — تخمين بالاسم
+  // (ilike تقريبي، handleLinkCase) وتطابق مؤكد (اسم/رقم قومي/توكيل بالظبط،
+  // checkClientDuplicate في handleAddAndLinkClient). زرار "إضافة موكل جديد
+  // وربطه" كان بيوصل لطريق مسدود مع التطابق المؤكد (checkClientDuplicate
+  // هيرفضه تاني بنفس الرسالة). الفلاج ده بيسمح للواجهة تميّز الحالتين.
+  const [foundClientMatchType, setFoundClientMatchType] = useState<'exact' | 'fuzzy' | null>(null);
   const [linkingToCase, setLinkingToCase] = useState(false);
 
   const handleLinkCase = async () => {
@@ -126,6 +155,7 @@ export function useClientLinking(savedFormData: SavedFormData | null, onSaved: (
       const { data: clients } = await db.from('clients').select('id,full_name').ilike(`full_name`, `%${plaintiffName}%`).limit(3);
       if (clients && clients.length > 0) {
         setFoundClient(clients[0]);
+        setFoundClientMatchType('fuzzy');
         setClientStep('found');
       } else {
         setClientStep('notfound');
@@ -175,224 +205,49 @@ export function useClientLinking(savedFormData: SavedFormData | null, onSaved: (
     finally { setLinkingToCase(false); }
   };
 
-  const handleAddAndLinkClient = async () => {
+  // ⚡ CHANGED (خطة توحيد إنشاء الموكل، Phase 2): بقى بيفتح NewClientModal
+  // الموحّد بدل INSERT مباشر بحقلين بس — شوف handleOpenCreateClientForCase
+  // في App.tsx. فحص التكرار والربط بـ cases.client_id (+ logActivity + دعم
+  // التمبيد الأوفلاين لو createdCaseId نفسه لسه tmp-) بقوا بيحصلوا جوه
+  // handleSaveClient الموحّد (useClientActions.ts) بعد الحفظ.
+  const handleAddAndLinkClient = () => {
     if (!savedFormData || !createdCaseId) return;
-    setLinkingToCase(true);
-    try {
-      const { form: f } = savedFormData;
-      const name = f.plaintiff?.trim();
-      if (!name) return;
-      const nameErr = validateFullNameParts(name);
-      if (nameErr) { toast(nameErr, true); return; }
-      const tenantId = getCurrentTenantId();
-      if (!tenantId) { toast('❌ تعذر تحديد المكتب الحالي، أعد تحميل الصفحة وحاول مرة أخرى', true); return; }
-      // ⚡ تحقق موحّد: يرفض الإضافة لو نفس الاسم أو الرقم القومي أو رقم
-      // التوكيل مسجل لموكل موجود بالفعل (نفس المكتب) — راجع clientValidation.ts.
-      // ⚡ NEW (19 يوليو 2026): كنا بنبعت الاسم والرقم القومي بس، دلوقتي
-      // بنبعت f.plaintiff_power_of_attorney كـ cr_number كمان.
-      const dup = await checkClientDuplicate(db, { full_name: name, national_id: f.plaintiff_national_id, cr_number: f.plaintiff_power_of_attorney });
-      // ⚡ NEW: بدل توست بيوقف الموضوع، بنستخدم نفس خطوة "found" الموجودة
-      // فعلاً (بحث الاسم التلقائي) عشان نعرض زرار "ربط بهذا الموكل" جاهز —
-      // فيه فرق واحد إن هنا التطابق مؤكد (اسم/رقم قومي/توكيل بالظبط)، مش
-      // تخمين بالاسم بس.
-      if (dup.duplicate) {
-        if (dup.client) { setFoundClient(dup.client); setClientStep('found'); }
-        else toast(dup.message!, true);
-        return;
-      }
-      // 🆕 المرحلة 3-2 (خطة توسيع الأوفلاين): تحويل من db.from() المباشر
-      // لـ __dbWrite. نفس نمط تمبيد القضايا من المرحلة 2 — تمبيد بيتبعت
-      // دايمًا مع العميل الجديد بغض النظر عن حالة الاتصال، عشان لو الاتصال
-      // قطع فجأة أثناء المحاولة يبقى معانا مرجع كافي للربط وقت المزامنة.
-      const clientTempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-      const { data, error, offline: clientOffline, queued: clientQueued } = await window.__dbWrite({
-        type: 'INSERT',
-        table: 'clients',
-        data: {
-          // ⚠️ نفس الباگ الموثّق سابقًا (اتأكد بالاستعلام على
-          // information_schema): client_name عمود إجباري (NOT NULL)،
-          // full_name عمود تاني اختياري بيتحدّث معاه — والاتنين لازم
-          // يتبعتوا مع بعض. tenant_id مطلوب لأن الـ RLS policy
-          // (tenant_id = current_tenant_id()) كانت بترفض الإدراج بصمت
-          // من غيره.
-          client_name: name,
-          full_name: name,
-          tenant_id: tenantId,
-          national_id: f.plaintiff_national_id || null,
-          // power_of_attorney مش عمود موجود في جدول clients — التوكيل
-          // بيتسجل فعلاً على مستوى الجلسة نفسها (plaintiff_power_of_attorney
-          // في case_sessions فوق)، فمحتاجش يتكرر هنا.
-          _offlineTempId: clientTempId,
-        },
-        returning: true,
-      });
-      if (error) {
-        showErrorToast('client_create', error, 'تعذّر إضافة الموكل. تحقق من صحة البيانات. لو المشكلة استمرت، تواصل مع الدعم.', 'إضافة موكل');
-        return;
-      }
-      // 🆕 المرحلة 3-2: نفس منطق realOrTempCaseId من المرحلة 2 — أوفلاين،
-      // بنستخدم التمبيد نفسه كمرجع مؤقت للعميل بدل id حقيقي مش موجود بعد.
-      const realOrTempClientId = (clientOffline && clientQueued) ? clientTempId : (data as { id: string } | null)?.id;
-      if (!realOrTempClientId) { showErrorToast('client_create', new Error('no id returned'), 'تعذّر إضافة الموكل. حاول مرة أخرى.', 'إضافة موكل'); return; }
-      // 🆕 المرحلة 3-2: نفس فحص isTempCaseId من المرحلة 3-1 بالظبط —
-      // القضية نفسها (createdCaseId) ممكن تكون لسه تمبيد لو اتقيدت أوفلاين
-      // في handleLinkCase قبلها.
-      const isTempCaseId = createdCaseId.startsWith('tmp-');
-      const caseTitle = isTempCaseId ? (f.title || savedFormData.fullCaseNumber || 'قضية من جلسة مستقلة') : undefined;
-      const isTempClientId = clientOffline && clientQueued;
-      const { error: linkErr, offline, queued } = await window.__dbWrite({
-        type: 'UPDATE',
-        table: 'cases',
-        id: createdCaseId,
-        data: {
-          client_id: realOrTempClientId,
-          // 🆕 المرحلة 3-2: العملية دي ممكن تحمل الاتنين مع بعض في نفس
-          // الوقت — تمبيد id السطر المستهدف نفسه (القضية، لو أوفلاين من
-          // handleLinkCase) وتمبيد حقل FK جوه data (العميل، لو اتقيّد لسه
-          // في نداء الإدراج فوق). resolveOfflineSelfId وresolveOfflineFkRefs
-          // بيشتغلوا بالتتابع في دورة المزامنة (شوف offlineQueue.ts) من
-          // غير تعارض بينهم — ده بالظبط سيناريو "تمبيدين متزامنين" اللي
-          // resolveOfflineFkRefs اتصممت له من المرحلة 1.
-          ...(isTempCaseId ? { _offlineSelfTempId: createdCaseId, _offlineSelfFallbackName: caseTitle } : {}),
-          ...(isTempClientId ? { _offlineFkTempId: [{ field: 'client_id', tempId: clientTempId, table: 'clients' as const, fallbackNameValue: name }] } : {}),
-        },
-      });
-      if (linkErr) {
-        showErrorToast('session_client_link', linkErr, 'تعذّر ربط الموكل بالقضية. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'ربط الموكل بالقضية');
-      } else if (offline && queued) {
-        // ⚠️ ممكن نوصل هنا حتى لو أونلاين فعليًا (isTempCaseId بيفرض القيد
-        // — شوف forceQueueForSelfTempId في __dbWrite)، أو لو العميل نفسه
-        // اتقيّد أوفلاين وقت الإدراج فوق. الرسالة لسه دقيقة في الحالتين
-        // لأن الربط النهائي هيحصل بعد اكتمال المزامنة، مش فورًا.
-        toast('📥 إضافة الموكل وربطه محفوظة محلياً — ستُزامن عند عودة الإنترنت');
-        setClientStep('done');
-        onClientAdded?.();
-      } else {
-        toast('✅ تمت إضافة الموكل وربطه بالقضية');
-        setClientStep('done');
-        onClientAdded?.();
-      }
-    } catch { toast('❌ خطأ غير متوقع', true); }
-    finally { setLinkingToCase(false); }
+    const { form: f } = savedFormData;
+    if (!f.plaintiff?.trim()) return;
+    const isTempCaseId = createdCaseId.startsWith('tmp-');
+    const caseTitle = isTempCaseId ? (f.title || savedFormData.fullCaseNumber || 'قضية من جلسة مستقلة') : undefined;
+    onOpenCreateClientForCase?.(
+      createdCaseId, f.plaintiff, f.plaintiff_national_id, f.plaintiff_power_of_attorney,
+      { isOfflineTemp: isTempCaseId, fallbackTitle: caseTitle },
+    );
   };
 
-  // ⚡ FIX: قبل كده الزرار ده كان بينشئ الموكل بس من غير ما يربطه
-  // بـ case_sessions.client_id — فالجلسة كانت تفضل "مش مربوطة"، وزرار
-  // "🔗 ربط" يفضل ظاهر تاني لو المستخدم فتح تفاصيل الجلسة بعدها، وممكن
-  // يضيف نفس الموكل تاني بالغلط. دلوقتي بنربط الموكل الجديد بالجلسة اللي
-  // اتحفظت لسه (savedFormData.sessionId) على طول.
-  const handleAddClientOnly = async () => {
+  // ⚡ CHANGED (خطة توحيد إنشاء الموكل، Phase 3): بقى بيفتح NewClientModal
+  // الموحّد (نفس موديل قسم الموكلين، بكل حقوله الإلزامية اسم/نوع/هاتف/رقم
+  // قومي، وفحص التكرار) بدل INSERT مباشر بحقلين بس (اسم + رقم قومي) —
+  // شوف handleOpenCreateClientForSession في App.tsx. فحص التكرار والربط
+  // بـ case_sessions.client_id (+ logActivity) بقوا بيحصلوا جوه
+  // handleSaveClient الموحّد (useClientActions.ts) بعد الحفظ.
+  // ⚠️ ملحوظة سلوك: لو الجلسة لسه ما اتحفظتش أونلاين (savedFormData.sessionId
+  // فاضي)، بنفتح الموديل من غير target ربط (زي السلوك القديم بالظبط —
+  // الموكل بيتحفظ من غير ربط تلقائي)، بس من غير استدعاء fetchTodaySessions/
+  // fetchUpcomingSessions بعد كده في الحالة دي تحديدًا (مفيش ربط حصل
+  // أصلاً يستأهل تحديث شاشة الجلسات) — فرق طفيف عن السلوك القديم اللي كان
+  // بينادي عليهم دايمًا بغض النظر، هيتأكد وقت الاختبار اليدوي الأوفلاين
+  // في Phase 4.
+  const handleAddClientOnly = () => {
     if (!savedFormData) return;
-    setLinkingClient(true);
-    try {
-      const { form: f } = savedFormData;
-      const name = f.plaintiff?.trim();
-      if (!name) return;
-      const nameErr = validateFullNameParts(name);
-      if (nameErr) { toast(nameErr, true); return; }
-      const tenantId = getCurrentTenantId();
-      if (!tenantId) { toast('❌ تعذر تحديد المكتب الحالي، أعد تحميل الصفحة وحاول مرة أخرى', true); return; }
-      // ⚡ تحقق موحّد: يرفض الإضافة لو نفس الاسم أو الرقم القومي أو رقم
-      // التوكيل مسجل لموكل موجود بالفعل (نفس المكتب) — راجع clientValidation.ts.
-      // ⚡ NEW (19 يوليو 2026): f.plaintiff_power_of_attorney بيتبعت كـ
-      // cr_number دلوقتي (كان مفقود من الفحص خالص قبل كده).
-      const dup = await checkClientDuplicate(db, { full_name: name, national_id: f.plaintiff_national_id, cr_number: f.plaintiff_power_of_attorney });
-      // ⚡ NEW: بدل توست بس، بنعرض زرار "ربط الجلسة بيه مباشرة" (المسار ده
-      // مالوش قضية أصلاً — case_sessions.client_id بس — فمينفعش نستخدم
-      // نفس خطوة "found" اللي بتربط cases.client_id).
-      if (dup.duplicate) {
-        if (dup.client) { setFoundClient(dup.client); setClientStep('duplicateSession'); }
-        else toast(dup.message!, true);
-        return;
-      }
-      const clientTempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-      const { data, error, offline: clientOffline, queued: clientQueued } = await window.__dbWrite({
-        type: 'INSERT',
-        table: 'clients',
-        data: {
-          // نفس الإصلاح المذكور فوق في handleAddAndLinkClient — client_name
-          // هو العمود الإجباري الحقيقي، وtenant_id مطلوب عشان الـ RLS.
-          client_name: name,
-          full_name: name,
-          tenant_id: tenantId,
-          national_id: f.plaintiff_national_id || null,
-          // power_of_attorney مش عمود موجود في clients، والتوكيل متسجل على
-          // مستوى الجلسة.
-          _offlineTempId: clientTempId,
-        },
-        returning: true,
-      });
-      if (error) {
-        showErrorToast('client_create', error, 'تعذّر إضافة الموكل. تحقق من صحة البيانات. لو المشكلة استمرت، تواصل مع الدعم.', 'إضافة موكل');
-        return;
-      }
-      // لو الجلسة لسه ما اتحفظتش أونلاين (sessionId فاضي — نفس الحالة
-      // الموثّقة في handleLinkCase/handleLinkExistingClient فوق)، مفيش id
-      // نربط بيه دلوقتي — نكتفي بإضافة الموكل زي السلوك القديم، من غير
-      // ما نحتاج نتأكد من id العميل الجديد أصلاً.
-      let linkedToSession = false;
-      if (savedFormData.sessionId) {
-        const isTempClientId = clientOffline && clientQueued;
-        const realOrTempClientId = isTempClientId ? clientTempId : (data as { id: string } | null)?.id;
-        if (realOrTempClientId) {
-          const { error: linkErr } = await window.__dbWrite({
-            type: 'UPDATE',
-            table: 'case_sessions',
-            id: savedFormData.sessionId,
-            data: {
-              client_id: realOrTempClientId,
-              ...(isTempClientId ? { _offlineFkTempId: [{ field: 'client_id', tempId: clientTempId, table: 'clients' as const, fallbackNameValue: name }] } : {}),
-            },
-          });
-          if (linkErr) {
-            showErrorToast('session_client_link', linkErr, 'تمت إضافة الموكل لكن تعذّر ربطه بالجلسة. حاول تحديث الصفحة.', 'ربط الموكل بالجلسة');
-          } else {
-            linkedToSession = true;
-          }
-        }
-      }
-      if (clientOffline && clientQueued) {
-        toast(linkedToSession
-          ? '📥 إضافة الموكل وربطه بالجلسة محفوظة محلياً — ستُزامن عند عودة الإنترنت'
-          : '📥 الموكل محفوظ محلياً — سيُضاف فور عودة الإنترنت');
-      } else {
-        toast(linkedToSession ? '✅ تمت إضافة الموكل وربطه بالجلسة' : '✅ تمت إضافة الموكل لقائمة الموكلين');
-      }
-      onClientAdded?.();
-      onSaved();
-      setClientStep('done');
-    } catch { toast('❌ خطأ غير متوقع', true); }
-    finally { setLinkingClient(false); }
-  };
-
-  // ⚡ NEW (19 يوليو 2026): ربط الجلسة مباشرة (case_sessions.client_id)
-  // بموكل موجود بالفعل — بتتستخدم من خطوة 'duplicateSession' لما
-  // handleAddClientOnly يكتشف تكرار، بدل ما نسيب المستخدم يدوّر يدويًا.
-  const handleLinkFoundClientToSession = async () => {
-    if (!savedFormData?.sessionId || !foundClient) return;
-    setLinkingClient(true);
-    try {
-      const { error, offline, queued } = await window.__dbWrite({
-        type: 'UPDATE', table: 'case_sessions', id: savedFormData.sessionId, data: { client_id: foundClient.id },
-      });
-      if (error) {
-        showErrorToast('session_client_link', error, 'تعذّر ربط الموكل بالجلسة. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'ربط الموكل بالجلسة');
-        return;
-      }
-      toast(offline && queued ? '📥 الربط محفوظ محلياً — سيُزامن عند عودة الإنترنت' : '✅ تم ربط الموكل بالجلسة');
-      onClientAdded?.();
-      onSaved();
-      setClientStep('done');
-    } catch { toast('❌ خطأ غير متوقع', true); }
-    finally { setLinkingClient(false); }
+    const { form: f } = savedFormData;
+    if (!f.plaintiff?.trim()) return;
+    onOpenCreateClient?.(savedFormData.sessionId, f.plaintiff, f.plaintiff_national_id, f.plaintiff_power_of_attorney);
   };
 
   return {
+
     linkingCase, linkingClient, linkingToCase,
     createdCaseId, setCreatedCaseId,
     clientStep, setClientStep,
-    foundClient, setFoundClient,
+    foundClient, setFoundClient, foundClientMatchType,
     handleLinkCase, handleLinkExistingClient, handleAddAndLinkClient, handleAddClientOnly,
-    handleLinkFoundClientToSession,
   };
 }
