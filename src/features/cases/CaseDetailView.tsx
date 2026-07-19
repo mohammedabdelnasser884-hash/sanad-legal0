@@ -46,19 +46,22 @@ interface CaseDetailTab {
 interface CaseDetailViewProps {
     caseData: MappedCase;
     client: ClientRow | null;
+    clients?: ClientRow[];
     onClose: () => void;
     onUpdate?: (newStatus: string) => void;
     onDelete?: (caseId: string) => void | Promise<void>;
     onEdit?: (caseId: string, form: CaseFormSubmitData) => void | Promise<void>;
+    onLinkClient?: (caseId: string, clientId: string) => void | Promise<void>;
     onNotify?: (msg: string) => void | Promise<void>;
     initialTab?: string;
     profile?: ProfileRow | null;
     country?: string | null;
 }
 
-function CaseDetailView({caseData, client, onClose, onUpdate, onDelete, onEdit, onNotify, initialTab='timeline', profile=null, country=null}: CaseDetailViewProps){
+function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDelete, onEdit, onLinkClient, onNotify, initialTab='timeline', profile=null, country=null}: CaseDetailViewProps){
     const [activeSection, setActiveSection] = useState(initialTab);
     const [showEditCase, setShowEditCase] = useState(false);
+    const [linkingClient, setLinkingClient] = useState(false);
     const [confirmDeleteCase, setConfirmDeleteCase] = useState(false);
     const [docSearch, setDocSearch] = useState('');
     const [viewingDoc, setViewingDoc] = useState<CaseDocWithUrl | null>(null);
@@ -432,7 +435,15 @@ function CaseDetailView({caseData, client, onClose, onUpdate, onDelete, onEdit, 
             activeSection === 'docs' && React.createElement(DocsSection, { fileInputRef, handleFileSelect, showDocForm, setShowDocForm, pendingFile, setPendingFile, docLabel, setDocLabel, docCategory, setDocCategory, handleUploadDoc, uploadingDoc, docs, docSearch, setDocSearch, loadingSessions, setViewingDoc, setConfirmDeleteDoc, deletingDocId }),
 
             // ═══ البيانات ═══
-            activeSection === 'info' && React.createElement(InfoSection, { caseData, client, sessions, notes, docs }),
+            activeSection === 'info' && React.createElement(InfoSection, {
+                caseData, client, sessions, notes, docs, clients, linkingClient,
+                onLinkClient: async (clientId: string) => {
+                    if (!onLinkClient) return;
+                    setLinkingClient(true);
+                    try { await onLinkClient(caseData.id, clientId); }
+                    finally { setLinkingClient(false); }
+                },
+            }),
 
             // ═══ المراجعة (نواقص الملف) — Rule-based بدون AI، المرحلة 1 من خطة المساعد الذكي ═══
             activeSection === 'checklist' && React.createElement(ChecklistSection, { caseData, client, sessions, notes, docs, onGoToTab: setActiveSection })
