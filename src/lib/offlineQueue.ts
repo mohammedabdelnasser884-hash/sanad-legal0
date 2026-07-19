@@ -1,7 +1,7 @@
 import { db } from '../supabaseClient';
 import type { Database } from '../database.types';
 import { showOfflineBanner, hideOfflineBanner, showSyncIndicator, hideSyncIndicator, toast } from '../shared/lib/notifications';
-import { logActivity } from '../shared/lib/dataAccess';
+import { logActivity, recalcNextHearing } from '../shared/lib/dataAccess';
 
 // ══════════════════════════════════════════════════════════
 //  Offline Queue (IndexedDB) + __dbWrite — منقول من main.tsx
@@ -348,6 +348,80 @@ export async function resolveOfflineFkRefs(
 }
 
 // ══════════════════════════════════════════════════════════
+//  🆕 المرحلة 3-1 (خطة توسيع نظام الأوفلاين) — تمبيد id السجل نفسه
+//  ═══════════════════════════════════════════════════════════
+//  🔎 اكتشاف معماري أثناء تنفيذ 3-1: `_offlineFkTempId` فوق بيحل مراجع FK
+//  *جوه* `data` بس (مثال: case_sessions.case_id بيشاور على قضية لسه
+//  تمبيد). لكن في `handleLinkExistingClient` (useClientLinking.ts /
+//  useSessionLinking.ts)، العملية هي UPDATE على جدول `cases` بمعرّف
+//  `createdCaseId` اللي ممكن يبقى هو نفسه لسه تمبيد (لو القضية اتقيدت
+//  أوفلاين في `handleLinkCase` قبلها ولسه ما اتزامنتش) — يعني هنا الـ id
+//  بتاع *السطر نفسه المستهدف بالـ UPDATE* هو التمبيد، مش قيمة حقل جوه
+//  `data`. مفيش أي آلية قديمة بتحل `op.id` نفسه — دورة المزامنة كانت
+//  بتعمل `.eq('id', op.id as string)` مباشرة من غير أي فحص، فلو `op.id`
+//  فضل تمبيد (نص زي 'tmp-...') كان الـ UPDATE هيتنفذ فعليًا ضد Supabase من
+//  غير ما يطابق أي صف حقيقي — Supabase بيرجّع نجاح صامت (صفر صفوف
+//  متأثرة، من غير error) في الحالة دي، يعني المستخدم كان هيشوف "✅ تم
+//  الربط" رغم إن الربط ما حصلش خالص. الدالة دي بتسد الفجوة دي بنفس منطق
+//  `resolveOfflineFkRefs` بالظبط (تمبيد اتحل في نفس الدورة → لسه في
+//  الطابور → fallback بالاسم) بس مطبّقة على `op.id` نفسه بدل حقل جوه
+//  `data`.
+//
+//  الشكل: بدل sentinel من نوع مصفوفة (زي `_offlineFkTempId`)، هنا مرجع
+//  واحد بس ممكن يتحط (السجل نفسه له id واحد بس، مش عدة حقول FK):
+//  `data._offlineSelfTempId: string` (نفس التمبيد اللي اتحط في `id`
+//  الأصلي وقت النداء) + `data._offlineSelfFallbackName?: string`
+//  اختياري للـ fallback بالاسم.
+export async function resolveOfflineSelfId(
+    dbClient: typeof db,
+    op: OfflineQueueItem,
+    tempIdToRealId: Map<string, string>,
+    queue: OfflineQueueItem[],
+): Promise<{ realId: string | null; shouldRetry: boolean }> {
+    const tempId = op.data?._offlineSelfTempId as string | undefined;
+    if (!tempId) {
+        // مفيش sentinel — الـ id الأصلي حقيقي بالفعل من الأول (الحالة
+        // العادية لكل عمليات UPDATE اللي كانت شغالة قبل 3-1).
+        return { realId: op.id as string, shouldRetry: false };
+    }
+    // (أ) اتحل فعلاً في نفس دورة المزامنة دي
+    if (tempIdToRealId.has(tempId)) {
+        return { realId: tempIdToRealId.get(tempId) as string, shouldRetry: false };
+    }
+    // (ب) لسه معلّق في الطابور نفسه (عملية INSERT القضية لسه ما اتعالجتش
+    // أو فشلت) — نستنى الدورة الجاية، بنفس منطق resolveOfflineFkRefs
+    const stillQueued = queue.some(
+        (q) => q.table === op.table && (q.data as Record<string, unknown> | undefined)?._offlineTempId === tempId
+    );
+    if (stillQueued) {
+        return { realId: null, shouldRetry: true };
+    }
+    // (جـ) fallback بالاسم — الحالة النادرة (السجل الأصلي اتزامن في
+    // تشغيلة سابقة ومعندناش التمبيد في الذاكرة)
+    const nameColumn = FK_FALLBACK_NAME_COLUMN[op.table];
+    const fallbackNameValue = op.data?._offlineSelfFallbackName as string | undefined;
+    if (nameColumn && fallbackNameValue) {
+        const { data: row } = await (dbClient.from(op.table as 'cases') as unknown as {
+            select: (col: string) => {
+                eq: (col: string, val: string) => {
+                    order: (col: string, opts: { ascending: boolean }) => {
+                        limit: (n: number) => { maybeSingle: () => Promise<{ data: { id: string } | null; error: unknown }> };
+                    };
+                };
+            };
+        })
+            .select('id')
+            .eq(nameColumn, fallbackNameValue)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        if (row?.id) return { realId: row.id, shouldRetry: false };
+    }
+    // مفيش حل — لا تمبيد في الذاكرة، لا في الطابور، لا fallback نجح
+    return { realId: null, shouldRetry: true };
+}
+
+// ══════════════════════════════════════════════════════════
 //  Offline Sync Queue — DB Write Wrapper
 // ══════════════════════════════════════════════════════════
 let __syncQueueRunning = false;
@@ -374,6 +448,17 @@ window.__syncOfflineQueue = async function() {
     // سابقة قبل ما تتزامن الجلسة (التطابق بالـ tempId ميبقاش متاح وقتها لأن
     // الخريطة دي محلية للتشغيلة الحالية فقط).
     const tempIdToRealId = new Map<string, string>();
+    // 🆕 المرحلة 4 (خطة توسيع نظام الأوفلاين): مجموعتين محليتين للتشغيلة دي
+    // بس، عشان نعرف بعد الحلقة كلها لأي قضية لازم نعيد حساب next_hearing.
+    // `syncedCaseIds`: القضايا اللي اتزامنت (INSERT ناجح) في نفس الدورة دي
+    // بالظبط — مش القضايا الموجودة أصلاً من قبل (دول next_hearing بتاعهم
+    // محسوب صح فعلاً من مسارات تانية، مش محتاجين إعادة حساب هنا).
+    // `casesLinkedThisCycle`: القضايا اللي معاها تحديث case_sessions.case_id
+    // اتزامن بنجاح في نفس الدورة — التقاطع بين المجموعتين هو بالظبط سيناريو
+    // handleLinkCase (قضية + ربط جلستها الأولى، الاتنين أوفلاين مع بعض)،
+    // اللي next_hearing بتاعه كان بيفضل فاضي بعد المزامنة قبل الفيكس ده.
+    const syncedCaseIds = new Set<string>();
+    const casesLinkedThisCycle = new Set<string>();
     // 🔒 FIX (تتبع "إضافة قضية" — 18 يوليو 2026): سقف محاولات — عنصر فشل
     // ~15 مرة متتالية (يعني قريب من ربع ساعة بمعدل محاولة كل دقيقة، غير
     // محاولات أحداث 'online'/'load' الإضافية) بيتحسب "عالق" ويتجمع في
@@ -390,6 +475,10 @@ window.__syncOfflineQueue = async function() {
         try {
             let error = null;
             let conflict = false;
+            // 🆕 المرحلة 4: هيتحدد جوه فرع UPDATE تحت لو العملية دي بتربط
+            // جلسة بقضية (case_sessions.case_id) — شوف linksCaseSession
+            // واستخدامها في فرع النجاح تحت.
+            let linkedCaseIdForRecalc: string | null = null;
 
             if (op.type === 'INSERT') {
                 // البيانات هنا Record<string, unknown> عام (زي useAdminBackup.ts) —
@@ -454,14 +543,43 @@ window.__syncOfflineQueue = async function() {
                 if (op.data?._offlineTempId) {
                     const res = await db.from(op.table).insert([insertData as Database['public']['Tables'][typeof op.table]['Insert']]).select('id').single();
                     error = res.error;
-                    if (!error && res.data) tempIdToRealId.set(op.data._offlineTempId as string, (res.data as { id: string }).id);
+                    if (!error && res.data) {
+                        const newId = (res.data as { id: string }).id;
+                        tempIdToRealId.set(op.data._offlineTempId as string, newId);
+                        // 🆕 المرحلة 4: نسجّل القضايا الجديدة اللي اتزامنت في نفس
+                        // الدورة دي فقط — شوف تعريف syncedCaseIds فوق.
+                        if (op.table === 'cases') syncedCaseIds.add(newId);
+                    }
                 } else {
                     ({ error } = await db.from(op.table).insert([insertData as Database['public']['Tables'][typeof op.table]['Insert']]));
                 }
             } else if (op.type === 'UPDATE') {
+                // 🆕 المرحلة 3-1: لازم نحل تمبيد id السطر نفسه (لو موجود) قبل أي
+                // حاجة تانية — لو لسه معلّق أو مش قابل للحل، منعملش أي محاولة
+                // update أصلاً (بعكس _offlineFkTempId اللي بيحل حقول *جوه*
+                // data، مش هوية السطر المستهدف نفسه).
+                let resolvedOpId = op.id as string;
+                if (op.data?._offlineSelfTempId) {
+                    const selfResolved = await resolveOfflineSelfId(db, op, tempIdToRealId, queue);
+                    if (selfResolved.shouldRetry || !selfResolved.realId) {
+                        await bumpRetry(op);
+                        failCount++;
+                        continue;
+                    }
+                    resolvedOpId = selfResolved.realId;
+                }
                 // 🆕 المرحلة 1: حل مراجع FK العامة (_offlineFkTempId) لو موجودة —
                 // نفس منطق فرع INSERT فوق بالظبط، بس هنا للـ UPDATE (مثال:
                 // ربط جلسة حقيقية بقضية لسه في الطابور — case_id تمبيد).
+                // 🆕 المرحلة 4: قبل ما نحل المراجع (resolveOfflineFkRefs بتشيل
+                // _offlineFkTempId من op.data بعد الحل)، بنسجّل هل العملية دي
+                // أصلاً بتربط جلسة بقضية (case_sessions.case_id) — لو آه، بعد
+                // نجاح الـ UPDATE فعليًا تحت، هنضيف الـ case_id المُحل
+                // (الحقيقي) لـ casesLinkedThisCycle عشان نعرف نعيد حساب
+                // next_hearing بعد الحلقة كلها لو القضية دي نفسها اتزامنت
+                // (INSERT) في نفس الدورة (شوف syncedCaseIds فوق).
+                const linksCaseSession = op.table === 'case_sessions'
+                    && ((op.data?._offlineFkTempId as OfflineFkTempIdRef[] | undefined) || []).some((r) => r.field === 'case_id' && r.table === 'cases');
                 if (op.data?._offlineFkTempId) {
                     const resolved = await resolveOfflineFkRefs(db, op, tempIdToRealId, queue);
                     if (resolved.shouldRetry) {
@@ -470,6 +588,10 @@ window.__syncOfflineQueue = async function() {
                         continue;
                     }
                     op.data = resolved.data;
+                    // 🆕 المرحلة 4: بعد الحل، op.data.case_id بقى الـ id الحقيقي
+                    // (لو اتحل من tempIdToRealId) — ده اللي محتاجينه لتسجيله
+                    // في casesLinkedThisCycle بعد نجاح الـ UPDATE تحت.
+                    if (linksCaseSession) linkedCaseIdForRecalc = (op.data?.case_id as string | undefined) || null;
                 }
                 // op.id هنا هي الـ id الحقيقي (string) بتاع السجل — مش الرقم
                 // التلقائي بتاع IndexedDB (ده بس لعمليات INSERT، زي ما موثّق
@@ -478,7 +600,7 @@ window.__syncOfflineQueue = async function() {
                 // Optimistic Locking — نتحقق إن السجل مش اتعدل من حد تاني
                 if (op.knownUpdatedAt) {
                     const { data: current, error: fetchErr } = await db
-                        .from(op.table).select('updated_at').eq('id', op.id as string).single();
+                        .from(op.table).select('updated_at').eq('id', resolvedOpId).single();
 
                     if (!fetchErr && current && current.updated_at) {
                         const serverTime = new Date(current.updated_at).getTime();
@@ -494,7 +616,10 @@ window.__syncOfflineQueue = async function() {
                     // فوق بيشيل `_offlineFkTempId` بنفسه لما يحل كل المراجع، لكن
                     // بنستدعيها تاني هنا زي ما بيحصل مع INSERT، تحسبًا لأي sentinel
                     // تاني يتضاف مستقبلاً لعمليات UPDATE من غير ما ننسى نشيله هنا.
-                    ({ error } = await db.from(op.table).update(stripOfflineSentinels(op.data) as Database['public']['Tables'][typeof op.table]['Update']).eq('id', op.id as string));
+                    // 🆕 المرحلة 3-1: بنستخدم resolvedOpId (مش op.id الخام) —
+                    // للعمليات العادية (مفيش _offlineSelfTempId) القيمتين
+                    // متطابقتين دايمًا، صفر تغيير سلوك.
+                    ({ error } = await db.from(op.table).update(stripOfflineSentinels(op.data) as Database['public']['Tables'][typeof op.table]['Update']).eq('id', resolvedOpId));
                 }
             } else if (op.type === 'DELETE') {
                 ({ error } = await db.from(op.table).delete().eq('id', op.id as string));
@@ -526,6 +651,14 @@ window.__syncOfflineQueue = async function() {
                         case_type: caseType,
                     });
                 }
+                // 🆕 المرحلة 4: تسجيل ربط جلسة↔قضية ناجح في نفس الدورة —
+                // شوف تعريف casesLinkedThisCycle فوق. بيتحقق فعليًا بعد
+                // الحلقة كلها (مش هنا) عشان نضمن إن القضية نفسها خلصت
+                // مزامنة (ترتيب العمليات في الطابور مش مضمون قضية قبل
+                // جلستها دايمًا لو فيه bumpRetry/إعادة محاولات).
+                if (op.type === 'UPDATE' && linkedCaseIdForRecalc) {
+                    casesLinkedThisCycle.add(linkedCaseIdForRecalc);
+                }
             } else {
                 // BUG FIX: كان بيتجاهل تفاصيل الخطأ تمامًا، فمستحيل تعرف ليه
                 // عملية معينة فاضلة عالقة في الـ queue ومش بتتزامن أبدًا
@@ -538,6 +671,31 @@ window.__syncOfflineQueue = async function() {
             console.error('[Offline Sync] استثناء غير متوقع في عملية', op.type, op.table, '—', err);
             await bumpRetry(op);
             failCount++;
+        }
+    }
+    // ══════════════════════════════════════════════════════════
+    //  🆕 المرحلة 4 (خطة توسيع نظام الأوفلاين) — إعادة حساب next_hearing
+    //  بعد المزامنة، لأي قضية اتزامنت (INSERT) في نفس الدورة *و* كان معاها
+    //  تحديث جلسة (case_id) اتزامن بنجاح في نفس الدورة (التقاطع بين
+    //  syncedCaseIds وcasesLinkedThisCycle). قبل الفيكس ده، next_hearing
+    //  كان بيفضل فاضي دايمًا للقضايا اللي اتعملت من "تحويل جلسة مستقلة
+    //  لقضية" وهي أوفلاين بالكامل (handleLinkCase في
+    //  useClientLinking.ts/useSessionLinking.ts) — لأن recalcNextHearing
+    //  فيه select على case_sessions لازم يتنفذ بعد وجود القضية فعليًا في
+    //  القاعدة (مستحيل يتحول لعملية طابور عادية زي باقي العمليات، نفس
+    //  التوثيق في هدف المرحلة دي بالخطة الأصلية). أونلاين، الاستدعاء
+    //  المباشر في useClientLinking.ts/useSessionLinking.ts فضل زي ما هو
+    //  بالظبط (صفر تغيير هناك) — هنا بس بيغطي المسار الأوفلاين.
+    //  كل استدعاء معزول بـ try/catch مستقل: فشل إعادة حساب next_hearing
+    //  لقضية واحدة (مثلاً مشكلة شبكة عابرة) لازم ميأثرش على تقرير نجاح/فشل
+    //  باقي عمليات المزامنة اللي خلصت فعلاً قبل النقطة دي.
+    // ══════════════════════════════════════════════════════════
+    for (const caseId of casesLinkedThisCycle) {
+        if (!syncedCaseIds.has(caseId)) continue;
+        try {
+            await recalcNextHearing(db, caseId);
+        } catch (err) {
+            console.error('[Offline Sync] فشل إعادة حساب next_hearing بعد المزامنة للقضية', caseId, '—', err);
         }
     }
     if (successCount > 0 && failCount === 0) {
@@ -599,7 +757,19 @@ window.__dbWrite = async function <T extends DbWriteTable>({ type, table, data, 
     knownUpdatedAt?: string | null;
     returning?: boolean;
 }) {
-    if (navigator.onLine) {
+    // 🆕 المرحلة 3-1: لو العملية معاها `_offlineSelfTempId` (يعني الـ id
+    // المستهدف بالـ UPDATE هو نفسه لسه تمبيد — مثال: `handleLinkExistingClient`
+    // بيحاول يربط موكل بقضية اتعملت في `handleLinkCase` قبلها وهي أوفلاين)،
+    // لازم نقيّد العملية في الطابور دايمًا حتى لو `navigator.onLine === true`
+    // فعليًا دلوقتي. السبب: القضية نفسها ممكن تكون لسه معلّقة في الطابور
+    // (رجع النت بس دورة المزامنة التلقائية لسه ما اشتغلتش)، فلو حاولنا
+    // نبعت UPDATE مباشر أونلاين بـ `.eq('id', tempId)`، Supabase هيرجّع
+    // نجاح صامت (صفر صفوف متأثرة، من غير error) لأن مفيش صف حقيقي بالـ id
+    // ده — يعني المستخدم هيشوف "تم الربط" رغم إن الربط ما حصلش خالص. القيد
+    // الإجباري هنا بيضمن إن العملية تتحل صح وقت المزامنة (نفس الدورة أو
+    // اللي بعدها) عن طريق resolveOfflineSelfId فوق.
+    const forceQueueForSelfTempId = type === 'UPDATE' && !!data?._offlineSelfTempId;
+    if (navigator.onLine && !forceQueueForSelfTempId) {
         try {
             let error = null;
             let insertedRow: Partial<Database['public']['Tables'][T]['Row']> | null = null;
@@ -675,8 +845,19 @@ window.__dbWrite = async function <T extends DbWriteTable>({ type, table, data, 
             // والمستخدم يفتكر إنها "محفوظة محلياً" زي ما الرسالة كانت بتقوله.
             return { error: { message: 'فشل الحفظ محلياً — تأكد من توفر مساحة تخزين كافية في المتصفح، أو إنك مش في وضع التصفح الخفي (Private/Incognito)' }, offline: true, queued: false };
         }
-        const count = await window.__getOfflineQueueCount?.() || 0;
-        showOfflineBanner(count);
+        // 🆕 المرحلة 3-1: لو الوصول للفرع ده كان بسبب forceQueueForSelfTempId
+        // (يعني إحنا أونلاين فعليًا، بس مضطرين نقيّد لحد ما القضية تتزامن)،
+        // منعرضش بانر "أوفلاين" المضلل (المستخدم مش أوفلاين فعليًا)، وبدل ما
+        // نستنى دورة المزامنة الدورية (كل دقيقة) أو حدث 'online' (مش هيتفعّل
+        // لأننا already أونلاين)، بنحاول مزامنة فورية دلوقتي (best-effort،
+        // fire-and-forget) — لو القضية اتزامنت خلاص من دورة سابقة، العملية
+        // دي هتتحل وتتنفذ في نفس اللحظة تقريبًا بدل ما تستنى لحد 60 ثانية.
+        if (navigator.onLine && forceQueueForSelfTempId) {
+            window.__syncOfflineQueue?.();
+        } else {
+            const count = await window.__getOfflineQueueCount?.() || 0;
+            showOfflineBanner(count);
+        }
         return { error: null, offline: true, queued: true };
     }
 };
