@@ -97,6 +97,11 @@ test.describe('فاليديشن الحقول المطلوبة', () => {
     await page.getByTestId('new-client-button').click();
     await page.getByTestId('new-client-name').fill(clientName);
     await page.getByTestId('new-client-phone').fill('01000000000');
+    // ⚡ FIX: new-client-national-id بقى حقل إجباري (14 رقم بالظبط) في
+    // NewClientModal — من غيره زرار الحفظ كان بيرفض يعمل submit خالص
+    // (توست "يرجى إدخال الرقم القومي")، فالموكل ما كانش بيتحفظ أبدًا
+    // والتست كان بيستنى كارت هيظهر أصلاً مش هيتبعت.
+    await page.getByTestId('new-client-national-id').fill(`2900101${Date.now()}`.slice(0, 14));
     await page.getByTestId('save-client-button').click();
 
     const newClientCard = page.getByTestId('client-card').filter({ hasText: clientName });
