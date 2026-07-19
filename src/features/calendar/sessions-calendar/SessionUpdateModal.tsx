@@ -58,6 +58,10 @@ function SessionUpdateModal({ session, caseData, db, onClose, onDone, onNotify }
             session_time: session.session_time || null,
             session_floor: session.session_floor || null,
             session_hall: session.session_hall || null,
+            court_level: session.court_level || null,
+            secretary_hall: session.secretary_hall || null,
+            secretary_name: session.secretary_name || null,
+            secretary_mobile: session.secretary_mobile || null,
             next_action: nextRequired || null,
             ...(isStandalone ? {
                 title: session.title || null,
