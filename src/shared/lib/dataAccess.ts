@@ -165,3 +165,26 @@ export async function logActivity(
         console.error('[activityLog] فشل تسجيل النشاط (تم تجاهله، العملية الأساسية لم تتأثر):', e);
     }
 }
+
+// ══════════════════════════════════════════════════════════════
+//  recalcNextHearing — إعادة حساب next_hearing لقضية معينة
+//  ⚠️ منقولة من useCaseSessions.ts (كانت معرّفة جوه الهوك بس) لمكان
+//  مشترك، عشان أي مكان تاني بينشئ/بيربط جلسة بقضية (زي تحويل جلسة
+//  مستقلة لقضية في useClientLinking.ts/useSessionLinking.ts) يقدر
+//  ينادي نفس المنطق الموحّد بدل ما يكرره بإيده.
+//  بتجيب كل جلسات القضية، وتحسب أقرب تاريخ فعلي >= اليوم، وتحدّث
+//  next_hearing بيه (أو null لو مفيش جلسات قادمة خالص).
+// ══════════════════════════════════════════════════════════════
+export async function recalcNextHearing(db: SupabaseClient<Database>, caseId: string): Promise<void> {
+    const { data: allSessions } = await db
+        .from('case_sessions')
+        .select('session_date')
+        .eq('case_id', caseId);
+    const todayStr = new Date().toISOString().slice(0, 10);
+    let nearest: string | null = null;
+    (allSessions || []).forEach((s) => {
+        if (!s.session_date || s.session_date < todayStr) return;
+        if (!nearest || s.session_date < nearest) nearest = s.session_date;
+    });
+    await db.from('cases').update({ next_hearing: nearest }).eq('id', caseId);
+}
