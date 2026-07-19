@@ -10,6 +10,7 @@ import { PoaInput } from '@/shared/ui/PoaInput';
 import { Sel } from '@/shared/ui/Sel';
 import type { MappedCase } from '../../hooks/useAppData';
 import { useClientLinking } from './hooks/useClientLinking';
+import type { OpenCreateClientForSession, OpenCreateClientForCase } from './hooks/useClientLinking';
 
 // ══════════════════════════════════════════
 //  Modal إضافة جلسة مستقلة (بدون ربط بقضية)
@@ -101,12 +102,20 @@ function Field({ label, required = false, children }: { label: string; required?
 const inputCls = 'w-full p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600';
 const inputStyle = { fontFamily: 'Cairo,sans-serif' };
 
-export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAdded, onNotify, cases = [] }: {
+export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAdded, onNotify, cases = [], onOpenCreateClient, onOpenCreateClientForCase }: {
     onClose: () => void;
     onSaved: () => void;
     onClientAdded?: () => void;
     onNotify?: (msg: string) => void;
     cases?: MappedCase[];
+    // ⚡ NEW (خطة توحيد إنشاء الموكل، Phase 3): فتح NewClientModal الموحّد
+    // من "إضافة الموكل لقائمة الموكلين فقط" — شوف App.tsx
+    // (handleOpenCreateClientForSession) وuseClientLinking.ts.
+    onOpenCreateClient?: OpenCreateClientForSession;
+    // ⚡ NEW (خطة توحيد إنشاء الموكل، Phase 2): فتح NewClientModal الموحّد
+    // من "إنشاء موكل جديد وربطه" (بعد تحويل جلسة مستقلة لقضية) — شوف
+    // App.tsx (handleOpenCreateClientForCase) وuseClientLinking.ts.
+    onOpenCreateClientForCase?: OpenCreateClientForCase;
 }) {
     const [form, setForm] = useState<Form>(EMPTY);
     const [linkMode, setLinkMode] = useState<'standalone' | 'existing'>('standalone');
@@ -119,10 +128,9 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
         linkingCase, linkingClient, linkingToCase,
         createdCaseId, setCreatedCaseId,
         clientStep, setClientStep,
-        foundClient, setFoundClient,
+        foundClient, setFoundClient, foundClientMatchType,
         handleLinkCase, handleLinkExistingClient, handleAddAndLinkClient, handleAddClientOnly,
-        handleLinkFoundClientToSession,
-    } = useClientLinking(savedFormData, onSaved, onClientAdded);
+    } = useClientLinking(savedFormData, onSaved, onClientAdded, onOpenCreateClient, onOpenCreateClientForCase);
 
     const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((f: Form) => ({ ...f, [k]: e.target.value }));
 
@@ -318,40 +326,21 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                             React.createElement('span', null, '🔗'),
                             React.createElement('span', null, linkingToCase ? '⏳ جاري الربط...' : 'نعم، ربط بهذا الموكل')
                         ),
-                        React.createElement('button', {
+                        // ⚡ FIX: التطابق ده لما يكون مؤكد (اسم/رقم قومي/توكيل بالظبط —
+                        // foundClientMatchType === 'exact') فزرار "موكل جديد" كان بيوصل
+                        // لطريق مسدود، لأن checkClientDuplicate هيرفضه تاني بنفس السبب.
+                        // نعرضه بس لما يكون التطابق تخمين بالاسم فقط (fuzzy).
+                        foundClientMatchType !== 'exact' && React.createElement('button', {
                             onClick: handleAddAndLinkClient,
                             disabled: linkingToCase,
                             className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2'
                         },
                             React.createElement('span', null, '➕'),
                             React.createElement('span', null, 'إضافة موكل جديد وربطه')
-                        )
-                    ),
-                    React.createElement('button', {
-                        onClick: onClose,
-                        className: 'w-full py-2.5 rounded-2xl text-xs font-bold text-slate-500 hover:text-slate-300 transition-all'
-                    }, 'تخطي')
-                ),
-
-                // ── Step 2a-bis: "إضافة الموكل لقائمة الموكلين فقط" اكتشفت تكرار ──
-                // ⚡ NEW (19 يوليو 2026): موكل موجود بالفعل بنفس الاسم/الرقم القومي/
-                // التوكيل — بدل توست يوقف الموضوع، بنعرض زرار ربط الجلسة بيه مباشرة.
-                clientStep === 'duplicateSession' && React.createElement(React.Fragment, null,
-                    React.createElement('div', { className: 'text-center space-y-1' },
-                        React.createElement('div', { className: 'text-2xl' }, '⚠️'),
-                        React.createElement('h3', { className: 'text-sm font-black text-white' }, 'فيه موكل مطابق بالفعل'),
-                        React.createElement('p', { className: 'text-[11px] text-slate-400' }, 'هل تريد ربط الجلسة بـ'),
-                        React.createElement('p', { className: 'text-xs font-bold text-premium-gold mt-1' }, foundClient?.full_name)
-                    ),
-                    React.createElement('div', { className: 'space-y-2 pt-1' },
-                        React.createElement('button', {
-                            onClick: handleLinkFoundClientToSession,
-                            disabled: linkingClient,
-                            className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2'
-                        },
-                            React.createElement('span', null, '🔗'),
-                            React.createElement('span', null, linkingClient ? '⏳ جاري الربط...' : 'نعم، ربط بهذا الموكل')
-                        )
+                        ),
+                        foundClientMatchType === 'exact' && React.createElement('p', {
+                            className: 'text-[10px] text-slate-500 text-center px-2'
+                        }, 'الاسم أو الرقم القومي أو رقم التوكيل مطابق تمامًا لموكل مسجل بالفعل — لو ده شخص مختلف فعلاً، عدّل بياناته من صفحة الموكلين مباشرة.')
                     ),
                     React.createElement('button', {
                         onClick: onClose,
