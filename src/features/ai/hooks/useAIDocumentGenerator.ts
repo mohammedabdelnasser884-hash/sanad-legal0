@@ -41,9 +41,23 @@ export function useAIDocumentGenerator({
 
     const sf=(k: keyof AIDocFields, v: string)=>setDocFields((p: AIDocFields) =>({...p,[k]:v}));
 
+    // ── Validation قبل التوليد: منع توليد المستند لو الحقول الحرجة ناقصة
+    //    (المرحلة 5، بند "Validation قبل توليد أي مستند/تلخيص"). نفس فكرة
+    //    missingCritical في CaseSummary.tsx/ClientMessage.tsx، بس هنا مبنية
+    //    على الحقول المعلّمة بـ * فعليًا في الفورم (وبتختلف حسب docType) —
+    //    قبل كده كان فيه اشتراط جزئي (plaintiff+subject بس) داخل الزرار
+    //    نفسه في AILegalAssistant.tsx من غير أي رسالة توضح الناقص. ──
+    const isFilled = (v: string | null | undefined) => !!v && v.trim() !== '';
+    const missingCritical: string[] = [];
+    if (!isFilled(docFields.plaintiff)) missingCritical.push(docType === 'توكيل_رسمي' ? 'اسم الموكِّل' : 'الموكل');
+    if (docType !== 'توكيل_رسمي' && !isFilled(docFields.defendant)) missingCritical.push('الخصم');
+    if (!isFilled(docFields.subject)) missingCritical.push('الموضوع / العنوان');
+    const canGenerate = missingCritical.length === 0 && !generatingDoc;
+
     const generateDocument = async () => {
         // 🆕 مبقاش فيه اشتراط مفتاح شخصي قبل التوليد — نفس منطق useAIChat،
         // الـ edge function بيستخدم مفتاح المنصة تلقائيًا ضمن السقف المجاني.
+        if (missingCritical.length > 0) return;
         setGeneratingDoc(true);
         setGeneratedDoc('');
         // ✅ اتشال .type|| الميتة بموافقة جيمي — case_type هو العمود الحقيقي.
@@ -107,7 +121,13 @@ ${caseInfo}
             if (!isUserFacingMessage) {
                 recordError('ai_document_generate', _msg, {label:'توليد المستندات', message: displayMsg});
             }
-            setGeneratedDoc('⚠️ ' + displayMsg.replace(/^⚠️\s*/, ''));
+            // 🆕 نفاد السقف اليومي حالة مختلفة عن خطأ عادي — ⏳ بدل ⚠️ + تلميح BYOK
+            // (المرحلة 3، بند "fallback واضح عند غياب رصيد AI")
+            const isQuota = displayMsg.includes('الحد المجاني اليومي');
+            const cleanMsg = displayMsg.replace(/^[⚠️⏳]\s*/, '');
+            setGeneratedDoc(isQuota
+                ? '⏳ ' + cleanMsg + '\n\nالسقف بيترجع تلقائيًا بكرة. لو عايز تستخدم أكتر دلوقتي، تقدر تضيف مفتاح Groq شخصي مجاني من الإعدادات.'
+                : '⚠️ ' + cleanMsg);
         }
         setGeneratingDoc(false);
     };
@@ -292,5 +312,6 @@ ${PDF_FONT_LINK}
         docType, setDocType, docFields, sf,
         generatedDoc, setGeneratedDoc, generatingDoc,
         copied, copyDoc, printDoc, downloadPDF, generateDocument,
+        missingCritical, canGenerate,
     };
 }
