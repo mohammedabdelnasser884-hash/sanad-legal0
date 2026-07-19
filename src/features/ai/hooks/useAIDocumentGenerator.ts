@@ -123,7 +123,7 @@ ${caseInfo}
             }
             // 🆕 نفاد السقف اليومي حالة مختلفة عن خطأ عادي — ⏳ بدل ⚠️ + تلميح BYOK
             // (المرحلة 3، بند "fallback واضح عند غياب رصيد AI")
-            const isQuota = displayMsg.includes('الحد المجاني اليومي');
+            const isQuota = displayMsg.includes('للحد المجاني اليومي') || displayMsg.includes('الحد المجاني اليومي');
             const warningPrefix = '⚠️';
             const hourglassPrefix = '⏳';
             let cleanMsg = displayMsg;
