@@ -1,8 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { toast } from '../../shared/lib/notifications';
 import { validatePhone, validateEmail } from '../../shared/lib/validation';
+import { validateFullNameParts } from '../../shared/lib/clientValidation';
 import { I } from '../../constants';
 import { Inp } from '@/shared/ui/Inp';
+import { PoaInput } from '@/shared/ui/PoaInput';
 import { Sel } from '@/shared/ui/Sel';
 import { FileUploadField } from '@/shared/ui/FileUploadField';
 
@@ -25,6 +27,10 @@ interface NewClientModalProps {
     onSave: (form: NewClientForm, idFile: File | null, poaFile: File | null) => void;
     loading?: boolean;
 }
+
+// أرقام بس، وبالظبط 14 رقم — بيتقص أي حرف مش رقم أول بأول (نفس نمط
+// onlyDigits المستخدم في NewCaseModal/NewStandaloneSessionModal)
+const onlyDigits = (v: string, max = 14) => v.replace(/\D/g, '').slice(0, max);
 
 // ── حقل تحذير صغير تحت أي input ──
 function WarnHint({msg}: {msg?: string | null}){
@@ -68,6 +74,7 @@ function NewClientModal({onClose,onSave,loading}: NewClientModalProps){
             React.createElement('div',{className:"space-y-4"},
                 // بيانات أساسية
                 React.createElement(Inp,{label:"الاسم الكامل",value:form.full_name,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('full_name',e.target.value),placeholder:"مثال: محمد أحمد علي",required:true,'data-testid':'new-client-name'}),
+                React.createElement(Inp,{label:"العنوان",value:form.address,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('address',e.target.value),placeholder:"العنوان التفصيلي"}),
                 React.createElement('div',{className:"grid grid-cols-2 gap-3"},
                     React.createElement(Sel,{label:"نوع الموكل",required:true,value:form.type,onChange:(e: React.ChangeEvent<HTMLSelectElement>) =>s('type',e.target.value),options:[
                         {value:'individual',label:'فرد'},
@@ -79,12 +86,9 @@ function NewClientModal({onClose,onSave,loading}: NewClientModalProps){
                         React.createElement(WarnHint,{msg:phoneWarn})
                     )
                 ),
-                React.createElement('div',{className:"grid grid-cols-2 gap-3"},
-                    React.createElement('div',null,
-                        React.createElement(Inp,{label:"رقم هاتف ثاني",value:form.phone2,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('phone2',e.target.value),placeholder:"رقم بديل"}),
-                        React.createElement(WarnHint,{msg:phoneWarn2})
-                    ),
-                    React.createElement(Inp,{label:"العنوان",value:form.address,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('address',e.target.value),placeholder:"العنوان التفصيلي"})
+                React.createElement('div',null,
+                    React.createElement(Inp,{label:"رقم هاتف ثاني",value:form.phone2,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('phone2',e.target.value),placeholder:"رقم بديل"}),
+                    React.createElement(WarnHint,{msg:phoneWarn2})
                 ),
                 React.createElement('div',null,
                     React.createElement(Inp,{label:"البريد الإلكتروني",type:"email",value:form.email,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('email',e.target.value),placeholder:"client@email.com"}),
@@ -108,11 +112,11 @@ function NewClientModal({onClose,onSave,loading}: NewClientModalProps){
                     React.createElement('p',{className:"text-[10px] font-black text-slate-500 mb-3"},"— المستندات الرسمية —")
                 ),
 
-                // الرقم القومي ورقم التوكيل
-                React.createElement('div',{className:"grid grid-cols-2 gap-3"},
-                    React.createElement(Inp,{label:"الرقم القومي",value:form.national_id,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('national_id',e.target.value),placeholder:"14 رقم"}),
-                    React.createElement(Inp,{label:"رقم التوكيل",value:form.cr_number,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('cr_number',e.target.value),placeholder:"مثال: 2024/أ/1234"})
-                ),
+                // الرقم القومي
+                React.createElement(Inp,{label:"الرقم القومي",value:form.national_id,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('national_id',onlyDigits(e.target.value)),placeholder:"14 رقم",required:true,inputMode:"numeric",maxLength:14,'data-testid':'new-client-national-id'}),
+
+                // بيانات التوكيل — سطر كامل: رقم / حرف / سنة / مكتب توثيق
+                React.createElement(PoaInput,{value:form.cr_number,onChange:(v: string) =>s('cr_number',v)}),
 
                 // رفع الصور
                 React.createElement(FileUploadField,{
@@ -144,8 +148,12 @@ function NewClientModal({onClose,onSave,loading}: NewClientModalProps){
                     'data-testid':'save-client-button',
                     onClick:()=>{
                         if(!form.full_name.trim()){toast('يرجى إدخال اسم الموكل',true);return;}
+                        const nameErr = validateFullNameParts(form.full_name);
+                        if(nameErr){toast(nameErr,true);return;}
                         if(!form.phone.trim()){toast('يرجى إدخال رقم الهاتف',true);return;}
                         if(!form.type){toast('يرجى اختيار نوع الموكل',true);return;}
+                        if(!form.national_id.trim()){toast('يرجى إدخال الرقم القومي',true);return;}
+                        if(form.national_id.length!==14){toast('⚠️ الرقم القومي لازم يكون 14 رقم بالظبط',true);return;}
                         const warnings = [phoneWarn, phoneWarn2, emailWarn].filter(Boolean);
                         if(warnings.length>0) toast('⚠️ تنبيه: '+warnings[0]+' — تم الحفظ رغم ذلك');
                         onSave(form,idFile,poaFile);
