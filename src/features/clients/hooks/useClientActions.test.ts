@@ -295,6 +295,112 @@ describe('useClientActions', () => {
     });
   });
 
+  // 🆕 Phase 4 (خطة توحيد إنشاء الموكل): تستات clientLinkTarget، بالذات
+  // caseIsOfflineTemp (القضية المستهدفة نفسها لسه معرّف مؤقت أوفلاين —
+  // مسار Phase 2: handleAddAndLinkClient بعد تحويل جلسة مستقلة لقضية).
+  describe('handleSaveClient — clientLinkTarget (ربط تلقائي بعد الحفظ)', () => {
+    it('clientLinkTarget من نوع case (أونلاين، caseIsOfflineTemp غير موجود) → UPDATE:cases بـ client_id الحقيقي من غير أي sentinel أوفلاين، logActivity "ربط قضية بموكل"، وonClientLinked بتتنادى', async () => {
+      dbWriteMock().mockImplementation(async (op: { type: string; table: string }) => {
+        if (op.type === 'INSERT' && op.table === 'clients') return { error: null, offline: false, queued: false, data: { id: 'new-client-1' } };
+        return { error: null, offline: false, queued: false };
+      });
+      const onClientLinked = vi.fn();
+      const params = makeParams({ clientLinkTarget: { type: 'case', caseId: 'case-real-1' }, onClientLinked });
+      const { handleSaveClient } = useClientActions(params);
+
+      await handleSaveClient(makeForm(), null, null);
+
+      expect(dbWriteMock()).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'UPDATE', table: 'cases', id: 'case-real-1',
+        data: { client_id: 'new-client-1' },
+      }));
+      expect(logActivity).toHaveBeenCalledWith(expect.anything(), 'ربط قضية بموكل', expect.objectContaining({
+        entity_type: 'case', entity_id: 'case-real-1', client_name: 'أحمد محمد',
+      }));
+      expect(onClientLinked).toHaveBeenCalledWith({ type: 'case', caseId: 'case-real-1' }, 'new-client-1');
+    });
+
+    it('clientLinkTarget من نوع case مع caseIsOfflineTemp=true (القضية نفسها لسه تمبيد) → UPDATE:cases بيحمل _offlineSelfTempId/_offlineSelfFallbackName كمان', async () => {
+      dbWriteMock().mockImplementation(async (op: { type: string; table: string }) => {
+        if (op.type === 'INSERT' && op.table === 'clients') return { error: null, offline: false, queued: false, data: { id: 'new-client-2' } };
+        return { error: null, offline: false, queued: false };
+      });
+      const params = makeParams({
+        clientLinkTarget: { type: 'case', caseId: 'tmp-case-1', caseIsOfflineTemp: true, caseFallbackTitle: 'قضية أوفلاين' },
+      });
+      const { handleSaveClient } = useClientActions(params);
+
+      await handleSaveClient(makeForm(), null, null);
+
+      expect(dbWriteMock()).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'UPDATE', table: 'cases', id: 'tmp-case-1',
+        data: {
+          client_id: 'new-client-2',
+          _offlineSelfTempId: 'tmp-case-1', _offlineSelfFallbackName: 'قضية أوفلاين',
+        },
+      }));
+    });
+
+    it('clientLinkTarget مع caseIsOfflineTemp=true والموكل نفسه أوفلاين (queued) → UPDATE:cases بيحمل الاتنين: _offlineFkTempId (للموكل) و_offlineSelfTempId/_offlineSelfFallbackName (للقضية) مع بعض', async () => {
+      dbWriteMock().mockImplementation(async (op: { type: string; table: string }) => {
+        if (op.type === 'INSERT' && op.table === 'clients') return { error: null, offline: true, queued: true };
+        return { error: null, offline: true, queued: true };
+      });
+      const params = makeParams({
+        clientLinkTarget: { type: 'case', caseId: 'tmp-case-2', caseIsOfflineTemp: true, caseFallbackTitle: 'قضية أوفلاين د' },
+      });
+      const { handleSaveClient } = useClientActions(params);
+
+      await handleSaveClient(makeForm({ full_name: 'موكل أوفلاين' }), null, null);
+
+      const updateCall = dbWriteMock().mock.calls.map((c: unknown[]) => c[0]).find(
+        (op: { type: string; table: string }) => op.type === 'UPDATE' && op.table === 'cases',
+      ) as { data: Record<string, unknown> };
+      const clientTempId = updateCall.data.client_id as string;
+      expect(clientTempId).toMatch(/^tmp-/);
+      expect(updateCall.data).toEqual({
+        client_id: clientTempId,
+        _offlineFkTempId: [{ field: 'client_id', tempId: clientTempId, table: 'clients', fallbackNameValue: 'موكل أوفلاين' }],
+        _offlineSelfTempId: 'tmp-case-2', _offlineSelfFallbackName: 'قضية أوفلاين د',
+      });
+    });
+
+    it('clientLinkTarget من نوع session → UPDATE:case_sessions بـ client_id، من غير أي sentinel أوفلاين للقضية (مش مطلوب لجلسات)', async () => {
+      dbWriteMock().mockImplementation(async (op: { type: string; table: string }) => {
+        if (op.type === 'INSERT' && op.table === 'clients') return { error: null, offline: false, queued: false, data: { id: 'new-client-3' } };
+        return { error: null, offline: false, queued: false };
+      });
+      const params = makeParams({ clientLinkTarget: { type: 'session', sessionId: 'session-1' } });
+      const { handleSaveClient } = useClientActions(params);
+
+      await handleSaveClient(makeForm(), null, null);
+
+      expect(dbWriteMock()).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'UPDATE', table: 'case_sessions', id: 'session-1',
+        data: { client_id: 'new-client-3' },
+      }));
+      expect(logActivity).toHaveBeenCalledWith(expect.anything(), 'ربط جلسة بموكل', expect.objectContaining({
+        entity_type: 'session', entity_id: 'session-1',
+      }));
+    });
+
+    it('فشل الربط التلقائي (UPDATE بيرجع error) → توست تحذيري يوجّه لزرار الربط اليدوي، من غير onClientLinked', async () => {
+      dbWriteMock().mockImplementation(async (op: { type: string; table: string }) => {
+        if (op.type === 'INSERT' && op.table === 'clients') return { error: null, offline: false, queued: false, data: { id: 'new-client-4' } };
+        return { error: { message: 'link failed' }, offline: false, queued: false };
+      });
+      const onClientLinked = vi.fn();
+      const params = makeParams({ clientLinkTarget: { type: 'case', caseId: 'case-fail-1' }, onClientLinked });
+      const { handleSaveClient } = useClientActions(params);
+
+      await handleSaveClient(makeForm(), null, null);
+
+      expect(toast).toHaveBeenCalledWith(expect.stringContaining('تم حفظ الموكل لكن تعذّر ربطه بالقضية تلقائيًا'), true);
+      expect(recordError).toHaveBeenCalledWith('client_auto_link', 'link failed', expect.objectContaining({ label: 'ربط الموكل تلقائيًا' }));
+      expect(onClientLinked).not.toHaveBeenCalled();
+    });
+  });
+
   describe('handleDeleteClient — يعرض اختيار (بدون mode ثابتة)', () => {
     it('بينشئ deleteConfirm من غير mode ثابتة (عشان المودال يعرض شاشة اختيار أرشفة/حذف نهائي)، مع onConfirmArchive وonConfirmDelete جاهزين', async () => {
       const params = makeParams();
