@@ -334,305 +334,128 @@ describe('useClientLinking', () => {
     });
   });
 
+  // 🔄 Phase 4 (خطة توحيد إنشاء الموكل): بعد Phase 2/3، handleAddAndLinkClient
+  // وhandleAddClientOnly بقوا مجرد كول-باك متزامن بيفتح NewClientModal
+  // الموحّد (onOpenCreateClientForCase / onOpenCreateClient) — الإدراج
+  // الفعلي (INSERT:clients) والربط (UPDATE:cases/case_sessions) بقوا جوه
+  // handleSaveClient الموحّد (useClientActions.ts)، مش هنا. التستات القديمة
+  // اللي كانت بتتأكد من INSERT مباشر اتشالت، ومكانها تستات على استدعاء
+  // الكول-باك بالبراميترز الصح — راجع useClientActions.test.ts للتستات
+  // الخاصة بالإدراج/الربط الفعلي.
   describe('handleAddAndLinkClient', () => {
-    it('مفيش savedFormData أو createdCaseId → لا تفعل شيئًا', async () => {
-      const { result } = renderHook(() => useClientLinking(null, vi.fn()));
+    it('مفيش savedFormData أو createdCaseId → لا تنادي الكول-باك', async () => {
+      const onOpenCreateClientForCase = vi.fn();
+      const { result } = renderHook(() => useClientLinking(null, vi.fn(), undefined, undefined, onOpenCreateClientForCase));
 
-      await act(async () => { await result.current.handleAddAndLinkClient(); });
+      act(() => { result.current.handleAddAndLinkClient(); });
 
-      expect(dbWrite.callsFor('INSERT:clients')).toHaveLength(0);
+      expect(onOpenCreateClientForCase).not.toHaveBeenCalled();
     });
 
-    it('اسم المدعي فاضي بعد trim → لا تفعل شيئًا حتى لو فيه createdCaseId', async () => {
+    it('اسم المدعي فاضي بعد trim → لا تنادي الكول-باك حتى لو فيه createdCaseId', async () => {
       dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-empty' } });
+      const onOpenCreateClientForCase = vi.fn();
       const saved = makeSavedFormData({ plaintiff: '  ' });
-      const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
+      const { result } = renderHook(() => useClientLinking(saved, vi.fn(), undefined, undefined, onOpenCreateClientForCase));
       await act(async () => { await result.current.handleLinkCase(); });
 
-      await act(async () => { await result.current.handleAddAndLinkClient(); });
+      act(() => { result.current.handleAddAndLinkClient(); });
 
-      expect(dbWrite.callsFor('INSERT:clients')).toHaveLength(0);
+      expect(onOpenCreateClientForCase).not.toHaveBeenCalled();
     });
 
-    // 🆕 المرحلة 3-2: 4 سيناريوهات معيار القبول — (أ) أونلاين بالكامل،
-    // (ب) قضية أوفلاين فقط + عميل أونلاين، (جـ) قضية أونلاين + عميل أوفلاين
-    // فقط، (د) الاتنين أوفلاين مع بعض (التمبيدين المتزامنين).
-
-    it('🆕 (أ) أونلاين بالكامل: القضية والعميل معهم id حقيقي → INSERT:clients بتمبيد (بيتشال قبل الإرسال الحقيقي)، UPDATE:cases بـ client_id الحقيقي من غير أي sentinel، توست نجاح', async () => {
+    it('القضية أونلاين (id حقيقي) → الكول-باك بيتنادى بـ caseId الحقيقي وisOfflineTemp=false من غير fallbackTitle', async () => {
       dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-add-1' } });
       mockDb.setResult('clients:select', { data: [], error: null });
-      dbWrite.setResult('INSERT:clients', { error: null, offline: false, data: { id: 'new-client-99' } });
-      dbWrite.setResult('UPDATE:cases', { error: null, offline: false });
+      const onOpenCreateClientForCase = vi.fn();
       const saved = makeSavedFormData({ plaintiff: 'موكل جديد', plaintiff_national_id: '12345' });
-      const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
+      const { result } = renderHook(() => useClientLinking(saved, vi.fn(), undefined, undefined, onOpenCreateClientForCase));
       await act(async () => { await result.current.handleLinkCase(); });
 
-      await act(async () => { await result.current.handleAddAndLinkClient(); });
+      act(() => { result.current.handleAddAndLinkClient(); });
 
-      expect(dbWrite.callsFor('INSERT:clients')[0]).toEqual(expect.objectContaining({
-        type: 'INSERT', table: 'clients',
-        data: expect.objectContaining({
-          full_name: 'موكل جديد', client_name: 'موكل جديد', tenant_id: 'tenant-1', national_id: '12345',
-          _offlineTempId: expect.stringMatching(/^tmp-/),
-        }),
-        returning: true,
-      }));
-      expect(dbWrite.callsFor('UPDATE:cases')[0]).toEqual({
-        type: 'UPDATE', table: 'cases', id: 'case-add-1', data: { client_id: 'new-client-99' },
-      });
-      expect(toast).toHaveBeenCalledWith('✅ تمت إضافة الموكل وربطه بالقضية');
-      expect(result.current.clientStep).toBe('done');
-      expect(result.current.linkingToCase).toBe(false);
+      expect(onOpenCreateClientForCase).toHaveBeenCalledWith(
+        'case-add-1', 'موكل جديد', '12345', '',
+        { isOfflineTemp: false, fallbackTitle: undefined },
+      );
     });
 
-    it('🆕 (ب) قضية أوفلاين فقط (createdCaseId تمبيد من handleLinkCase) + عميل أونلاين → UPDATE:cases بـ _offlineSelfTempId/_offlineSelfFallbackName بس، من غير _offlineFkTempId', async () => {
+    it('القضية أوفلاين (createdCaseId لسه تمبيد من handleLinkCase) → الكول-باك بيتنادى بـ isOfflineTemp=true وfallbackTitle = عنوان القضية', async () => {
       dbWrite.setResult('INSERT:cases', { error: null, offline: true, queued: true });
       mockDb.setResult('clients:select', { data: [], error: null });
-      dbWrite.setResult('INSERT:clients', { error: null, offline: false, data: { id: 'new-client-online' } });
-      dbWrite.setResult('UPDATE:cases', { error: null, offline: true, queued: true });
+      const onOpenCreateClientForCase = vi.fn();
       const saved = makeSavedFormData({ title: 'قضية أوفلاين ب', plaintiff: 'موكل ب' });
-      const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
+      const { result } = renderHook(() => useClientLinking(saved, vi.fn(), undefined, undefined, onOpenCreateClientForCase));
       await act(async () => { await result.current.handleLinkCase(); });
       const tempCaseId = result.current.createdCaseId as string;
       expect(tempCaseId).toMatch(/^tmp-/);
 
-      await act(async () => { await result.current.handleAddAndLinkClient(); });
+      act(() => { result.current.handleAddAndLinkClient(); });
 
-      expect(dbWrite.callsFor('UPDATE:cases')[0]).toEqual({
-        type: 'UPDATE', table: 'cases', id: tempCaseId,
-        data: {
-          client_id: 'new-client-online',
-          _offlineSelfTempId: tempCaseId, _offlineSelfFallbackName: 'قضية أوفلاين ب',
-        },
-      });
-      expect(toast).toHaveBeenCalledWith('📥 إضافة الموكل وربطه محفوظة محلياً — ستُزامن عند عودة الإنترنت');
-      expect(result.current.clientStep).toBe('done');
+      expect(onOpenCreateClientForCase).toHaveBeenCalledWith(
+        tempCaseId, 'موكل ب', '', '',
+        { isOfflineTemp: true, fallbackTitle: 'قضية أوفلاين ب' },
+      );
     });
 
-    it('🆕 (جـ) قضية أونلاين (id حقيقي) + عميل أوفلاين فقط (INSERT:clients رجع queued) → UPDATE:cases بـ _offlineFkTempId بس على client_id، من غير _offlineSelfTempId', async () => {
-      dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-add-c' } });
-      mockDb.setResult('clients:select', { data: [], error: null });
-      dbWrite.setResult('INSERT:clients', { error: null, offline: true, queued: true });
-      dbWrite.setResult('UPDATE:cases', { error: null, offline: true, queued: true });
-      const saved = makeSavedFormData({ plaintiff: 'موكل جـ' });
-      const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
-      await act(async () => { await result.current.handleLinkCase(); });
-
-      await act(async () => { await result.current.handleAddAndLinkClient(); });
-
-      const updateCall = dbWrite.callsFor('UPDATE:cases')[0];
-      const clientTempId = updateCall.data?.client_id as string;
-      expect(clientTempId).toMatch(/^tmp-/);
-      expect(updateCall).toEqual({
-        type: 'UPDATE', table: 'cases', id: 'case-add-c',
-        data: {
-          client_id: clientTempId,
-          _offlineFkTempId: [{ field: 'client_id', tempId: clientTempId, table: 'clients', fallbackNameValue: 'موكل جـ' }],
-        },
-      });
-      expect(toast).toHaveBeenCalledWith('📥 إضافة الموكل وربطه محفوظة محلياً — ستُزامن عند عودة الإنترنت');
-      expect(result.current.clientStep).toBe('done');
-    });
-
-    it('🆕 (د) الاتنين أوفلاين مع بعض (قضية تمبيد + عميل queued) → UPDATE:cases بيحمل _offlineSelfTempId (القضية) و_offlineFkTempId (العميل) مع بعض في نفس العملية', async () => {
+    it('العنوان فاضي في الفورم (قضية أوفلاين) → fallbackTitle بيستخدم fullCaseNumber بدلًا منه', async () => {
       dbWrite.setResult('INSERT:cases', { error: null, offline: true, queued: true });
       mockDb.setResult('clients:select', { data: [], error: null });
-      dbWrite.setResult('INSERT:clients', { error: null, offline: true, queued: true });
-      dbWrite.setResult('UPDATE:cases', { error: null, offline: true, queued: true });
-      const saved = makeSavedFormData({ title: 'قضية أوفلاين د', plaintiff: 'موكل د' });
-      const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
-      await act(async () => { await result.current.handleLinkCase(); });
-      const tempCaseId = result.current.createdCaseId as string;
-
-      await act(async () => { await result.current.handleAddAndLinkClient(); });
-
-      const updateCall = dbWrite.callsFor('UPDATE:cases')[0];
-      const clientTempId = updateCall.data?.client_id as string;
-      expect(tempCaseId).toMatch(/^tmp-/);
-      expect(clientTempId).toMatch(/^tmp-/);
-      expect(clientTempId).not.toBe(tempCaseId);
-      expect(updateCall).toEqual({
-        type: 'UPDATE', table: 'cases', id: tempCaseId,
-        data: {
-          client_id: clientTempId,
-          _offlineSelfTempId: tempCaseId, _offlineSelfFallbackName: 'قضية أوفلاين د',
-          _offlineFkTempId: [{ field: 'client_id', tempId: clientTempId, table: 'clients', fallbackNameValue: 'موكل د' }],
-        },
-      });
-      expect(toast).toHaveBeenCalledWith('📥 إضافة الموكل وربطه محفوظة محلياً — ستُزامن عند عودة الإنترنت');
-      expect(result.current.clientStep).toBe('done');
-    });
-
-    it('🆕 فشل إضافة الموكل → الرسالة الموحدة تتعرض، والخام يتسجل عبر recordError، من غير أي محاولة ربط (مفيش UPDATE:cases)', async () => {
-      dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-add-2' } });
-      mockDb.setResult('clients:select', { data: [], error: null });
-      dbWrite.setResult('INSERT:clients', { error: { message: 'client insert failed' }, offline: false });
-      const saved = makeSavedFormData({ plaintiff: 'موكل فاشل' });
-      const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
+      const onOpenCreateClientForCase = vi.fn();
+      const saved = makeSavedFormData({ title: '', plaintiff: 'موكل بدون عنوان' }, { fullCaseNumber: '30 لسنة 2026' });
+      const { result } = renderHook(() => useClientLinking(saved, vi.fn(), undefined, undefined, onOpenCreateClientForCase));
       await act(async () => { await result.current.handleLinkCase(); });
 
-      await act(async () => { await result.current.handleAddAndLinkClient(); });
+      act(() => { result.current.handleAddAndLinkClient(); });
 
-      expect(toast).toHaveBeenCalledWith('❌ تعذّر إضافة الموكل. تحقق من صحة البيانات. لو المشكلة استمرت، تواصل مع الدعم.', true);
-      expect(recordError).toHaveBeenCalledWith('client_create', 'client insert failed', expect.objectContaining({ label: 'إضافة موكل' }));
-      expect(dbWrite.callsFor('UPDATE:cases')).toHaveLength(0);
-    });
-
-    it('🆕 الموكل اتضاف بنجاح لكن الربط فشل → الرسالة الموحدة الخاصة بالربط تتعرض، والخام يتسجل عبر recordError، من غير clientStep=done', async () => {
-      dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-add-3' } });
-      mockDb.setResult('clients:select', { data: [], error: null });
-      dbWrite.setResult('INSERT:clients', { error: null, offline: false, data: { id: 'new-client-100' } });
-      dbWrite.setResult('UPDATE:cases', { error: { message: 'link failed' } });
-      const saved = makeSavedFormData({ plaintiff: 'موكل بربط فاشل' });
-      const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
-      await act(async () => { await result.current.handleLinkCase(); });
-
-      await act(async () => { await result.current.handleAddAndLinkClient(); });
-
-      expect(toast).toHaveBeenCalledWith('❌ تعذّر ربط الموكل بالقضية. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', true);
-      expect(recordError).toHaveBeenCalledWith('session_client_link', 'link failed', expect.objectContaining({ label: 'ربط الموكل بالقضية' }));
-      expect(result.current.clientStep).not.toBe('done');
-    });
-
-    it('استثناء غير متوقع → توست خطأ عام، linkingToCase ترجع false', async () => {
-      dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-add-4' } });
-      mockDb.setResult('clients:select', { data: [], error: null });
-      const saved = makeSavedFormData({ plaintiff: 'موكل استثناء' });
-      const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
-      await act(async () => { await result.current.handleLinkCase(); });
-      dbWrite.fn.mockImplementationOnce(() => { throw new Error('boom'); });
-
-      await act(async () => { await result.current.handleAddAndLinkClient(); });
-
-      expect(toast).toHaveBeenCalledWith('❌ خطأ غير متوقع', true);
-      expect(result.current.linkingToCase).toBe(false);
-    });
-
-    it('🆕 مفيش tenant_id متاح (getCurrentTenantId ترجع null) → توست خطأ واضح، ومفيش أي INSERT', async () => {
-      dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-add-5' } });
-      mockDb.setResult('clients:select', { data: [], error: null });
-      getCurrentTenantId.mockReturnValue(null);
-      const saved = makeSavedFormData({ plaintiff: 'موكل بدون تينانت' });
-      const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
-      await act(async () => { await result.current.handleLinkCase(); });
-
-      await act(async () => { await result.current.handleAddAndLinkClient(); });
-
-      expect(toast).toHaveBeenCalledWith('❌ تعذر تحديد المكتب الحالي، أعد تحميل الصفحة وحاول مرة أخرى', true);
-      expect(dbWrite.callsFor('INSERT:clients')).toHaveLength(0);
+      expect(onOpenCreateClientForCase).toHaveBeenCalledWith(
+        expect.stringMatching(/^tmp-/), 'موكل بدون عنوان', '', '',
+        { isOfflineTemp: true, fallbackTitle: '30 لسنة 2026' },
+      );
     });
   });
 
   describe('handleAddClientOnly', () => {
-    it('savedFormData فاضي → لا تفعل شيئًا', async () => {
-      const { result } = renderHook(() => useClientLinking(null, vi.fn()));
+    it('savedFormData فاضي → لا تنادي الكول-باك', () => {
+      const onOpenCreateClient = vi.fn();
+      const { result } = renderHook(() => useClientLinking(null, vi.fn(), undefined, onOpenCreateClient));
 
-      await act(async () => { await result.current.handleAddClientOnly(); });
+      act(() => { result.current.handleAddClientOnly(); });
 
-      expect(dbWrite.callsFor('INSERT:clients')).toHaveLength(0);
+      expect(onOpenCreateClient).not.toHaveBeenCalled();
     });
 
-    it('اسم المدعي فاضي بعد trim → لا تفعل شيئًا', async () => {
+    it('اسم المدعي فاضي بعد trim → لا تنادي الكول-باك', () => {
+      const onOpenCreateClient = vi.fn();
       const saved = makeSavedFormData({ plaintiff: '   ' });
-      const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
+      const { result } = renderHook(() => useClientLinking(saved, vi.fn(), undefined, onOpenCreateClient));
 
-      await act(async () => { await result.current.handleAddClientOnly(); });
+      act(() => { result.current.handleAddClientOnly(); });
 
-      expect(dbWrite.callsFor('INSERT:clients')).toHaveLength(0);
+      expect(onOpenCreateClient).not.toHaveBeenCalled();
     });
 
-    it('نجاح (أونلاين) → __dbWrite بـ full_name/national_id، توست نجاح', async () => {
-      dbWrite.setResult('INSERT:clients', { error: null, offline: false });
-      const saved = makeSavedFormData({ plaintiff: 'موكل مستقل', plaintiff_national_id: '999' });
-      const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
+    it('بيانات صحيحة → الكول-باك بيتنادى بـ sessionId/plaintiff/national_id/poa', () => {
+      const onOpenCreateClient = vi.fn();
+      const saved = makeSavedFormData(
+        { plaintiff: 'موكل مستقل', plaintiff_national_id: '999', plaintiff_power_of_attorney: 'توكيل-1' },
+        { sessionId: 'session-1' },
+      );
+      const { result } = renderHook(() => useClientLinking(saved, vi.fn(), undefined, onOpenCreateClient));
 
-      await act(async () => { await result.current.handleAddClientOnly(); });
+      act(() => { result.current.handleAddClientOnly(); });
 
-      expect(dbWrite.callsFor('INSERT:clients')[0].data).toEqual(expect.objectContaining({
-        full_name: 'موكل مستقل', client_name: 'موكل مستقل', tenant_id: 'tenant-1', national_id: '999',
-      }));
-      expect(toast).toHaveBeenCalledWith('✅ تمت إضافة الموكل لقائمة الموكلين');
-      expect(result.current.linkingClient).toBe(false);
+      expect(onOpenCreateClient).toHaveBeenCalledWith('session-1', 'موكل مستقل', '999', 'توكيل-1');
     });
 
-    it('🆕 أوفلاين (queued) → توست "محفوظ محلياً" بدل توست النجاح العادي', async () => {
-      dbWrite.setResult('INSERT:clients', { error: null, offline: true, queued: true });
-      const onClientAdded = vi.fn();
-      const saved = makeSavedFormData({ plaintiff: 'موكل أوفلاين' });
-      const { result } = renderHook(() => useClientLinking(saved, vi.fn(), onClientAdded));
-
-      await act(async () => { await result.current.handleAddClientOnly(); });
-
-      expect(toast).toHaveBeenCalledWith('📥 الموكل محفوظ محلياً — سيُضاف فور عودة الإنترنت');
-      expect(onClientAdded).toHaveBeenCalled();
-    });
-
-    it('🆕 فشل الإدخال → الرسالة الموحدة تتعرض، والخام يتسجل عبر recordError', async () => {
-      dbWrite.setResult('INSERT:clients', { error: { message: 'plain insert failed' }, offline: false });
-      const saved = makeSavedFormData({ plaintiff: 'موكل فشل الإدخال' });
-      const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
-
-      await act(async () => { await result.current.handleAddClientOnly(); });
-
-      expect(toast).toHaveBeenCalledWith('❌ تعذّر إضافة الموكل. تحقق من صحة البيانات. لو المشكلة استمرت، تواصل مع الدعم.', true);
-      expect(recordError).toHaveBeenCalledWith('client_create', 'plain insert failed', expect.objectContaining({ label: 'إضافة موكل' }));
-    });
-
-    it('استثناء غير متوقع → توست خطأ عام، linkingClient ترجع false', async () => {
-      dbWrite.fn.mockImplementationOnce(() => { throw new Error('boom'); });
-      const saved = makeSavedFormData({ plaintiff: 'موكل استثناء منفرد' });
-      const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
-
-      await act(async () => { await result.current.handleAddClientOnly(); });
-
-      expect(toast).toHaveBeenCalledWith('❌ خطأ غير متوقع', true);
-      expect(result.current.linkingClient).toBe(false);
-    });
-
-    it('🆕 مفيش tenant_id متاح → توست خطأ واضح، ومفيش أي INSERT', async () => {
-      getCurrentTenantId.mockReturnValue(null);
-      const saved = makeSavedFormData({ plaintiff: 'موكل منفرد بدون تينانت' });
-      const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
-
-      await act(async () => { await result.current.handleAddClientOnly(); });
-
-      expect(toast).toHaveBeenCalledWith('❌ تعذر تحديد المكتب الحالي، أعد تحميل الصفحة وحاول مرة أخرى', true);
-      expect(dbWrite.callsFor('INSERT:clients')).toHaveLength(0);
-    });
-
-    // 🆕 FIX: قبل كده كان بيضيف الموكل من غير ما يربطه بالجلسة اللي اتحفظت
-    // لسه (sessionId) — فزرار "🔗 ربط" كان يفضل ظاهر تاني ويسمح بتكرار
-    // نفس الموكل. التستات دي بتتأكد إن الجلسة بقت مربوطة فعليًا لما
-    // sessionId يكون متاح.
-    it('🆕 sessionId متاح (الجلسة اتحفظت أونلاين) → بعد إضافة الموكل، UPDATE:case_sessions بـ client_id، وتوست يوضّح الربط', async () => {
-      dbWrite.setResult('INSERT:clients', { error: null, offline: false, data: { id: 'new-client-linked' } });
-      const onSaved = vi.fn();
-      const onClientAdded = vi.fn();
-      const saved = makeSavedFormData({ plaintiff: 'موكل مربوط' }, { sessionId: 'session-just-saved' });
-      const { result } = renderHook(() => useClientLinking(saved, onSaved, onClientAdded));
-
-      await act(async () => { await result.current.handleAddClientOnly(); });
-
-      expect(dbWrite.callsFor('UPDATE:case_sessions')[0]).toEqual(expect.objectContaining({
-        type: 'UPDATE', table: 'case_sessions', id: 'session-just-saved',
-        data: expect.objectContaining({ client_id: 'new-client-linked' }),
-      }));
-      expect(toast).toHaveBeenCalledWith('✅ تمت إضافة الموكل وربطه بالجلسة');
-      expect(result.current.clientStep).toBe('done');
-      expect(onSaved).toHaveBeenCalled();
-      expect(onClientAdded).toHaveBeenCalled();
-    });
-
-    it('🆕 sessionId فاضي (الجلسة أوفلاين، لسه من غير id حقيقي) → مفيش أي UPDATE:case_sessions، والرسالة القديمة تفضل زي ما هي', async () => {
-      dbWrite.setResult('INSERT:clients', { error: null, offline: false, data: { id: 'new-client-nolink' } });
+    it('sessionId فاضي (الجلسة أوفلاين، لسه من غير id حقيقي) → الكول-باك بيتنادى بـ sessionId = null زي ما هو', () => {
+      const onOpenCreateClient = vi.fn();
       const saved = makeSavedFormData({ plaintiff: 'موكل بدون ربط' }, { sessionId: null });
-      const { result } = renderHook(() => useClientLinking(saved, vi.fn()));
+      const { result } = renderHook(() => useClientLinking(saved, vi.fn(), undefined, onOpenCreateClient));
 
-      await act(async () => { await result.current.handleAddClientOnly(); });
+      act(() => { result.current.handleAddClientOnly(); });
 
-      expect(dbWrite.callsFor('UPDATE:case_sessions')).toHaveLength(0);
-      expect(toast).toHaveBeenCalledWith('✅ تمت إضافة الموكل لقائمة الموكلين');
-      expect(result.current.clientStep).toBe('done');
+      expect(onOpenCreateClient).toHaveBeenCalledWith(null, 'موكل بدون ربط', '', '');
     });
   });
 });
