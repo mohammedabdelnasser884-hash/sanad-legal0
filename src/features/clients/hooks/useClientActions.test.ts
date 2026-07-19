@@ -374,8 +374,10 @@ describe('useClientActions', () => {
 
       await handleSaveClient(makeForm({ full_name: 'موكل أوفلاين' }), null, null);
 
-      const updateCall = dbWriteMock().mock.calls.map((c: unknown[]) => c[0]).find(
-        (op: { type: string; table: string }) => op.type === 'UPDATE' && op.table === 'cases',
+      const updateCall = dbWriteMock().mock.calls
+        .map((c: unknown[]) => c[0] as { type: string; table: string; data: Record<string, unknown> })
+        .find(
+        (op) => op.type === 'UPDATE' && op.table === 'cases',
       ) as { data: Record<string, unknown> };
       const clientTempId = updateCall.data.client_id as string;
       expect(clientTempId).toMatch(/^tmp-/);
