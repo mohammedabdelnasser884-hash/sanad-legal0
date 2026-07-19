@@ -26,6 +26,14 @@ interface NewClientModalProps {
     onClose: () => void;
     onSave: (form: NewClientForm, idFile: File | null, poaFile: File | null) => void;
     loading?: boolean;
+    // ⚡ NEW: بيانات مبدئية بتيجي من قضية/جلسة مستقلة (اسم المدعي، رقمه
+    // القومي، رقم توكيله) — بتتعمل بيها pre-fill للفورم بدل ما يبدأ فاضي.
+    // Partial لأن مفيش ضمان إن كل الحقول دي متوفرة في السياق اللي فتح منه.
+    initialData?: Partial<NewClientForm>;
+    // ⚡ NEW: نص توضيحي صغير بيبان أعلى الموديل لما يتفتح من جوه قضية/جلسة
+    // (مثلاً "هيتربط تلقائيًا بالقضية رقم ١٢٣") — عشان المستخدم يبقى واعي
+    // إن دي مش عملية إنشاء موكل مستقلة.
+    contextLabel?: string | null;
 }
 
 // أرقام بس، وبالظبط 14 رقم — بيتقص أي حرف مش رقم أول بأول (نفس نمط
@@ -38,8 +46,8 @@ function WarnHint({msg}: {msg?: string | null}){
     return React.createElement('p',{className:"text-[9px] text-amber-400 mt-1 mr-1"},"⚠️ "+msg);
 }
 
-function NewClientModal({onClose,onSave,loading}: NewClientModalProps){
-    const [form,setForm]=useState<NewClientForm>({full_name:'',type:'individual',phone:'',phone2:'',email:'',address:'',notes:'',national_id:'',cr_number:'',kin_name:'',kin_phone:''});
+function NewClientModal({onClose,onSave,loading,initialData,contextLabel}: NewClientModalProps){
+    const [form,setForm]=useState<NewClientForm>({full_name:'',type:'individual',phone:'',phone2:'',email:'',address:'',notes:'',national_id:'',cr_number:'',kin_name:'',kin_phone:'',...initialData});
     const [idFile,setIdFile]=useState<File | null>(null);
     const [idPreview,setIdPreview]=useState<string | null>(null);
     const [poaFile,setPoaFile]=useState<File | null>(null);
@@ -70,6 +78,11 @@ function NewClientModal({onClose,onSave,loading}: NewClientModalProps){
                     "إضافة موكل جديد"
                 ),
                 React.createElement('button',{onClick:onClose,className:"w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-white active:scale-90 transition-all"},"✕")
+            ),
+            // ⚡ NEW: تنبيه الربط التلقائي — بيبان بس لو الموديل اتفتح من
+            // جوه قضية/جلسة (contextLabel موجود).
+            contextLabel && React.createElement('div',{className:"mb-4 -mt-1 px-3 py-2 rounded-xl bg-premium-gold/10 border border-premium-gold/20"},
+                React.createElement('p',{className:"text-[10px] font-bold text-premium-gold"},"🔗 "+contextLabel)
             ),
             React.createElement('div',{className:"space-y-4"},
                 // بيانات أساسية
