@@ -53,10 +53,14 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
         defendant_role: session.defendant_role || null,
         defendant_national_id: session.defendant_national_id || null,
         circuit_number: session.circuit_number || null,
-        // ⚡ نفس إصلاح useClientLinking.ts — نقل الصفة والدور/القاعة من
-        // الجلسة لملف القضية الجديد بدل ما يضيعوا.
-        court_floor: session.session_floor || null,
+        // ⚡ نفس إصلاح useClientLinking.ts — نقل الصفة ومكان الجلسة ودرجة
+        // التقاضي وبيانات السكرتير من الجلسة لملف القضية الجديد بدل ما
+        // يضيعوا. session_hall هو الحقل الموحّد (مش court_floor القديم).
         session_hall: session.session_hall || null,
+        court_level: session.court_level || null,
+        secretary_hall: session.secretary_hall || null,
+        secretary_name: session.secretary_name || null,
+        secretary_mobile: session.secretary_mobile || null,
         status: 'نشطة',
       }]).select('id').single();
       if (error) {
