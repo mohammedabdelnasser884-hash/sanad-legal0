@@ -3,6 +3,7 @@ import { toast } from '../../../shared/lib/notifications';
 import { showErrorToast } from '../../../shared/lib/errorReporting';
 import { getCurrentTenantId } from '../../../constants';
 import { ilikeOrClause } from '../../../shared/lib/sanitize';
+import { recalcNextHearing } from '../../../shared/lib/dataAccess';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '../../../database.types';
 import type { CaseSessionRow } from '../../../types';
@@ -57,6 +58,9 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
         // التقاضي وبيانات السكرتير من الجلسة لملف القضية الجديد بدل ما
         // يضيعوا. session_hall هو الحقل الموحّد (مش court_floor القديم).
         session_hall: session.session_hall || null,
+        // ⚡ FIX: نفس إصلاح useClientLinking.ts — session_time كان بيضيع
+        // عند تحويل جلسة مستقلة لقضية.
+        session_time: session.session_time || null,
         court_level: session.court_level || null,
         secretary_hall: session.secretary_hall || null,
         secretary_name: session.secretary_name || null,
@@ -72,6 +76,9 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
       const { error: sessionLinkErr } = await db.from('case_sessions').update({ case_id: data.id }).eq('id', session.id);
       if (sessionLinkErr) {
         showErrorToast('session_case_link', sessionLinkErr, 'تم إنشاء القضية لكن تعذّر ربط الجلسة بها. حاول تحديث الصفحة.', 'ربط الجلسة بالقضية');
+      } else {
+        // ⚡ FIX: نفس إصلاح useClientLinking.ts — next_hearing كان بيفضل فاضي
+        await recalcNextHearing(db, data.id);
       }
       onDone();
       const plaintiffName = session.plaintiff?.trim();
@@ -133,14 +140,23 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
       if (!name) return;
       const tenantId = getCurrentTenantId();
       if (!tenantId) { toast('❌ تعذر تحديد المكتب الحالي، أعد تحميل الصفحة وحاول مرة أخرى', true); return; }
-      const { error } = await db.from('clients').insert([{
-        client_name: name,
-        full_name: name,
-        tenant_id: tenantId,
-        national_id: session.plaintiff_national_id || null,
-      }]);
+      // ⚡ FIX (مرحلة 0 — توسيع الأوفلاين): تحويل من db.from() المباشر لـ
+      // __dbWrite. عملية مستقلة تمامًا، فآمنة تتحول فورًا.
+      const { error, offline, queued } = await window.__dbWrite({
+        type: 'INSERT',
+        table: 'clients',
+        data: {
+          client_name: name,
+          full_name: name,
+          tenant_id: tenantId,
+          national_id: session.plaintiff_national_id || null,
+        },
+      });
       if (error) {
         showErrorToast('client_create', error, 'تعذّر إضافة الموكل. تحقق من صحة البيانات. لو المشكلة استمرت، تواصل مع الدعم.', 'إضافة موكل');
+      } else if (offline && queued) {
+        toast('📥 الموكل محفوظ محلياً — سيُضاف فور عودة الإنترنت');
+        onClientAdded?.();
       } else { toast('✅ تمت إضافة الموكل لقائمة الموكلين'); onClientAdded?.(); }
     } catch { toast('❌ خطأ غير متوقع', true); }
     finally { setLinkingClient(false); }
@@ -172,12 +188,22 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
     if (!selectedExistingClient) return;
     setLinkingExisting(true);
     try {
-      const { error } = await db.from('case_sessions').update({ client_id: selectedExistingClient.id }).eq('id', session.id);
+      // ⚡ FIX (مرحلة 0 — توسيع الأوفلاين): تحويل من db.from() المباشر لـ
+      // __dbWrite. عملية UPDATE مستقلة بمعرّفين حقيقيين بالفعل (session.id
+      // جلسة موجودة فعلاً، selectedExistingClient.id موكل موجود فعلاً) —
+      // مفيش أي سلسلة تعتمد على id لسه في الطابور، فآمنة تتحول فورًا.
+      const { error, offline, queued } = await window.__dbWrite({
+        type: 'UPDATE', table: 'case_sessions', data: { client_id: selectedExistingClient.id }, id: session.id,
+      });
       if (error) {
         showErrorToast('session_client_link', error, 'تعذّر ربط الموكل بالجلسة. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'ربط الموكل بالجلسة');
         return;
       }
-      toast('✅ تم ربط الجلسة بالموكل');
+      if (offline && queued) {
+        toast('📥 الربط محفوظ محلياً — سيُزامن عند عودة الإنترنت');
+      } else {
+        toast('✅ تم ربط الجلسة بالموكل');
+      }
       onDone();
       setClientStep('done');
     } catch { toast('❌ خطأ غير متوقع', true); }
