@@ -35,6 +35,28 @@ export interface ClientFormData {
     kin_phone: string;
 }
 
+// ⚡ NEW: "فين هيتربط الموكل الجديد بعد الحفظ" — بيتحدد وقت فتح
+// NewClientModal من جوه قضية أو جلسة مستقلة (شوف خطة توحيد إنشاء الموكل).
+// ⚡ NEW (Phase 2): caseIsOfflineTemp/caseFallbackTitle — لازمين لما
+// القضية المستهدفة نفسها لسه معرّف مؤقت أوفلاين (تم إنشاؤها من جلسة
+// مستقلة، ولسه ما اتزامنتش) — بنفس نمط _offlineSelfTempId/
+// _offlineSelfFallbackName المستخدم في handleLinkExistingClient/
+// handleAddAndLinkClient الأصليين (useClientLinking.ts). مش لازمين لمسار
+// Phase 1 (قضية محفوظة بالفعل ليها id حقيقي دايمًا).
+export type ClientLinkTarget =
+    | { type: 'case'; caseId: string; caseIsOfflineTemp?: boolean; caseFallbackTitle?: string }
+    | { type: 'session'; sessionId: string };
+
+// ⚡ NEW: كل حاجة محتاجها فتح NewClientModal بسياق (بيانات مبدئية + هدف
+// الربط + تسمية توضيحية + كول-باك تحديث بعد نجاح الربط) — بتتخزن كـ state
+// واحدة في App.tsx وقت الفتح، وبتتصفّر عند أي إغلاق للموديل.
+export interface ClientModalContext {
+    initialData?: Partial<ClientFormData>;
+    linkTarget?: ClientLinkTarget;
+    contextLabel?: string;
+    onLinked?: (target: ClientLinkTarget, clientId: string) => void;
+}
+
 interface DeleteConfirmState {
     type: string;
     id: string;
@@ -65,11 +87,17 @@ export function useClientActions(params: {
     setShowLawyerModal: (v: boolean) => void;
     nav: NavigationState;
     profile?: ProfileRow | null;
+    // ⚡ NEW: هدف الربط التلقائي بعد حفظ الموكل (لو الموديل اتفتح من جوه
+    // قضية/جلسة) + كول-باك اختياري بينادى بعد نجاح الربط (لتحديث الـ state
+    // المحلي في المكان اللي فتح منه الموديل — قضية، جلسة... إلخ).
+    clientLinkTarget?: ClientLinkTarget | null;
+    onClientLinked?: (target: ClientLinkTarget, clientId: string) => void;
 }) {
     const {
         sendTelegram, fetchClients, fetchLawyers, clients, clientSearch,
         setClients, setSelectedClient, setDeleteConfirm, setSavingClient,
         setSavingLawyer, setShowClientModal, setShowLawyerModal, nav, profile,
+        clientLinkTarget, onClientLinked,
     } = params;
     const _userName = profile?.full_name || null;
 
@@ -132,8 +160,12 @@ export function useClientActions(params: {
             contact_info: { id_url: idUrl, poa_url: poaUrl } as ClientContactInfo,
         };
 
-        const { error, offline, queued } = await window.__dbWrite({
-            type: 'INSERT', table: 'clients', data: payload
+        // ⚡ NEW: تمبيد أوفلاين للموكل — بنفس نمط offlineTempId المستخدم في
+        // useClientLinking.ts، عشان لو فيه clientLinkTarget نقدر نربط بيه
+        // حتى لو الإدراج نفسه راح للطابور (أوفلاين).
+        const offlineTempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        const { error, offline, queued, data: insertedClient } = await window.__dbWrite({
+            type: 'INSERT', table: 'clients', data: { ...payload, _offlineTempId: offlineTempId }, returning: true,
         });
         setSavingClient(false);
 
@@ -161,6 +193,48 @@ export function useClientActions(params: {
             sendTelegram(clientMsg);
             fetchClients(0, clientSearch);
         }
+
+        // ⚡ NEW: ربط تلقائي بالقضية/الجلسة اللي فتح منها الموديل (لو فيه
+        // clientLinkTarget) — نفس فلسفة handleLinkClient الموجودة
+        // الموجودين، بس هنا الموكل نفسه جديد اتحفظ لسه.
+        if (clientLinkTarget) {
+            const isOfflineTemp = offline && queued;
+            const linkedClientId = isOfflineTemp ? offlineTempId : (insertedClient as { id: string } | null)?.id;
+            if (linkedClientId) {
+                const table = clientLinkTarget.type === 'case' ? 'cases' : 'case_sessions';
+                const targetId = clientLinkTarget.type === 'case' ? clientLinkTarget.caseId : clientLinkTarget.sessionId;
+                // ⚡ NEW (Phase 2): لو القضية المستهدفة نفسها لسه تمبيد أوفلاين
+                // (clientLinkTarget.caseIsOfflineTemp)، لازم نبعت
+                // _offlineSelfTempId + _offlineSelfFallbackName كمان — بنفس
+                // نمط handleLinkExistingClient/handleAddAndLinkClient الأصليين
+                // — عشان دورة المزامنة تقدر تحل id القضية الحقيقي قبل تنفيذ
+                // الـ UPDATE ده (resolveOfflineSelfId في offlineQueue.ts).
+                const isTargetOfflineTempCase = clientLinkTarget.type === 'case' && clientLinkTarget.caseIsOfflineTemp;
+                const { error: linkErr } = await window.__dbWrite({
+                    type: 'UPDATE',
+                    table,
+                    id: targetId,
+                    data: {
+                        client_id: linkedClientId,
+                        ...(isOfflineTemp ? { _offlineFkTempId: [{ field: 'client_id', tempId: offlineTempId, table: 'clients' as const, fallbackNameValue: form.full_name }] } : {}),
+                        ...(isTargetOfflineTempCase ? { _offlineSelfTempId: targetId, _offlineSelfFallbackName: clientLinkTarget.caseFallbackTitle } : {}),
+                    },
+                });
+                if (linkErr) {
+                    const targetLabel = clientLinkTarget.type === 'case' ? 'بالقضية' : 'بالجلسة';
+                    showErrorToast('client_auto_link', linkErr, `تم حفظ الموكل لكن تعذّر ربطه ${targetLabel} تلقائيًا — استخدم زرار "🔗 ربط" لربطه يدويًا.`, 'ربط الموكل تلقائيًا');
+                } else {
+                    logActivity(db, clientLinkTarget.type === 'case' ? 'ربط قضية بموكل' : 'ربط جلسة بموكل', {
+                        userName: _userName,
+                        entity_type: clientLinkTarget.type,
+                        entity_id: targetId,
+                        client_name: form.full_name || null,
+                    });
+                    onClientLinked?.(clientLinkTarget, linkedClientId);
+                }
+            }
+        }
+
         setShowClientModal(false);
     };
 
