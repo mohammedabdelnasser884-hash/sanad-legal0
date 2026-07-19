@@ -5,7 +5,7 @@ import { showErrorToast } from '../../../shared/lib/errorReporting';
 import { getCurrentTenantId } from '../../../constants';
 import type { Form } from '../NewStandaloneSessionModal';
 
-export type SavedFormData = { form: Form; finalCaseType: string; fullCaseNumber: string; sessionId: string | null };
+export type SavedFormData = { form: Form; finalCaseType: string; finalCourtLevel: string; fullCaseNumber: string; sessionId: string | null };
 
 /**
  * منطق إنشاء قضية من بيانات جلسة مستقلة + ربط/إضافة الموكل — منقول حرفيًا
@@ -25,7 +25,7 @@ export function useClientLinking(savedFormData: SavedFormData | null, onSaved: (
     if (!savedFormData) return;
     setLinkingCase(true);
     try {
-      const { form: f, finalCaseType: ct, fullCaseNumber: cn } = savedFormData;
+      const { form: f, finalCaseType: ct, finalCourtLevel: cl, fullCaseNumber: cn } = savedFormData;
       const caseTitle = f.title || cn || 'قضية من جلسة مستقلة';
       const { data, error } = await db.from('cases').insert([{
         title: caseTitle,
@@ -43,11 +43,15 @@ export function useClientLinking(savedFormData: SavedFormData | null, onSaved: (
         defendant_national_id: f.defendant_national_id || null,
         circuit_number: f.circuit_number || null,
         // ⚡ FIX: كانت الصفة (plaintiff_role/defendant_role) والدور/القاعة
-        // (session_floor→court_floor, session_hall) بيتسجلوا صح في الجلسة
-        // المستقلة لكن بيضيعوا وقت تحويلها لملف قضية، لأن الإدراج القديم
-        // هنا كان مش بينقلهم خالص رغم إن الأعمدة دلوقتي موجودة في cases.
-        court_floor: f.session_floor || null,
+        // بيتسجلوا صح في الجلسة المستقلة لكن بيضيعوا وقت تحويلها لملف
+        // قضية. دلوقتي session_hall هو الحقل الموحّد الوحيد لمكان الجلسة
+        // (مش court_floor القديم المهجور)، وبننقل درجة التقاضي وبيانات
+        // السكرتير كمان بنفس المنطق.
         session_hall: f.session_hall || null,
+        court_level: cl || null,
+        secretary_hall: f.secretary_hall || null,
+        secretary_name: f.secretary_name || null,
+        secretary_mobile: f.secretary_mobile || null,
         status: 'نشطة',
       }]).select('id').single();
       if (error) {
