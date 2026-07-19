@@ -72,6 +72,9 @@ function CaseSummary({ cases, clients, retrieveLegalArticles, buildLegalContextB
   const selectedCase = cases.find((c) => c.id === selectedId) || null;
   const client = selectedCase ? clients.find((cl) => cl.id === selectedCase.client_id) || null : null;
 
+  /* eslint-disable react-hooks/exhaustive-deps -- selectedCase بيتحسب من .find() في
+     كل render فبيبقى object جديد كل مرة. معتمدين على .id (قيمة ثابتة) عشان الـ effect
+     ميعدش يشتغل غير لما تتغير القضية فعليًا. */
   useEffect(() => {
     setSummary('');
     setError(null);
@@ -88,6 +91,7 @@ function CaseSummary({ cases, clients, retrieveLegalArticles, buildLegalContextB
     }).catch(() => { /* مش حرج — التلخيص هيشتغل حتى من غير الإحصائيات دي */ });
     return () => { cancelled = true; };
   }, [selectedCase?.id]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   // ── Validation قبل التوليد: منع التلخيص لو بيانات القضية ناقصة بشكل حرج ──
   const missingCritical: string[] = [];
