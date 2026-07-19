@@ -37,6 +37,8 @@ interface UpcomingSessionRow {
     session_floor: string | null;
     session_hall: string | null;
     case_id: string | null;
+    // ⚡ FIX: client_id بتاع الجلسة نفسها — نفس إصلاح CalendarSessionRow.
+    client_id: string | null;
     description: string | null;
     result: string | null;
     next_action: string | null;
@@ -92,7 +94,7 @@ function UpcomingSessionsList({db, cases, clients, onOpenCase}: UpcomingSessions
 
     const fetchSessions = () => {
         db.from('case_sessions')
-          .select('id,session_date,session_time,session_floor,session_hall,case_id,description,result,next_action,cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
+          .select('id,session_date,session_time,session_floor,session_hall,case_id,client_id,description,result,next_action,cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
           .gte('session_date', todayStr)
           .lte('session_date', endStr)
           .order('session_date',{ascending:true})
@@ -194,7 +196,9 @@ function UpcomingSessionsList({db, cases, clients, onOpenCase}: UpcomingSessions
                           )
                         : daySessions.map((s: UpcomingSessionRow) =>{
                             const linkedCase = ((Array.isArray(s.cases) ? s.cases[0] : s.cases) || cases.find((c: MappedCase) =>c.id===s.case_id)) as LinkedCaseLike | undefined;
-                            const linkedClient = linkedCase ? clients.find((cl: MappedClient) =>cl.id===linkedCase.client_id) : null;
+                            const linkedClient = linkedCase
+                                ? clients.find((cl: MappedClient) => cl.id === linkedCase.client_id)
+                                : (s.client_id ? clients.find((cl: MappedClient) => cl.id === s.client_id) : null);
                             const isLatest = latestSessionMap[s.case_id as string]===s.id;
 
                             return React.createElement('div',{
