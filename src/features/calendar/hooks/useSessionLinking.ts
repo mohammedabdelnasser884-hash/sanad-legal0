@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { toast } from '../../../shared/lib/notifications';
+import { validateFullNameParts, checkClientDuplicate } from '../../../shared/lib/clientValidation';
 import { showErrorToast } from '../../../shared/lib/errorReporting';
 import { getCurrentTenantId } from '../../../constants';
 import { ilikeOrClause } from '../../../shared/lib/sanitize';
@@ -16,7 +17,7 @@ export type ClientSearchResult = { id: string; full_name: string | null; client_
  *  1) إنشاء ملف قضية من بيانات الجلسة (ونفس البحث التلقائي عن موكل مطابق
  *     زي ما كان موجود في useClientLinking، بس هنا بيربط createdCaseId
  *     بدل savedFormData.sessionId لأن الجلسة already موجودة).
- *  2) إضافة الموكل لقائمة الموكلين فقط (من غير ربط).
+ *  2) إضافة الموكل لقائمة الموكلين + ربطه بالجلسة مباشرة (case_sessions.client_id).
  *  3) [جديد] بحث يدوي في الموكلين الموجودين بالفعل وربط الجلسة مباشرة
  *     بـ client_id بتاعه (case_sessions.client_id) من غير إنشاء قضية.
  */
@@ -159,8 +160,22 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
     try {
       const name = session.plaintiff?.trim();
       if (!name) return;
+      const nameErr = validateFullNameParts(name);
+      if (nameErr) { toast(nameErr, true); return; }
       const tenantId = getCurrentTenantId();
       if (!tenantId) { toast('❌ تعذر تحديد المكتب الحالي، أعد تحميل الصفحة وحاول مرة أخرى', true); return; }
+      // ⚡ تحقق موحّد: يرفض الإضافة لو نفس الاسم أو الرقم القومي أو رقم
+      // التوكيل مسجل لموكل موجود بالفعل (نفس المكتب) — راجع clientValidation.ts.
+      // ⚡ NEW (19 يوليو 2026): session.plaintiff_power_of_attorney بيتبعت
+      // كـ cr_number دلوقتي (كان مفقود من الفحص خالص قبل كده).
+      const dup = await checkClientDuplicate(db, { full_name: name, national_id: session.plaintiff_national_id, cr_number: session.plaintiff_power_of_attorney });
+      // ⚡ NEW: بدل توست بس، بنستخدم نفس خطوة "found" الموجودة (بتربط
+      // cases.client_id عبر createdCaseId، متسق مع باقي الدالة دي).
+      if (dup.duplicate) {
+        if (dup.client) { setFoundClient(dup.client); setClientStep('found'); }
+        else toast(dup.message!, true);
+        return;
+      }
       // 🆕 المرحلة 3-2 (خطة توسيع الأوفلاين): نفس تحويل useClientLinking.ts
       // بالظبط — تمبيد بيتبعت دايمًا مع العميل الجديد بغض النظر عن حالة
       // الاتصال.
@@ -219,17 +234,37 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
     finally { setLinkingToCase(false); }
   };
 
-  // ── 2) إضافة الموكل لقائمة الموكلين فقط (من غير ربط) ──
+  // ── 2) إضافة الموكل لقائمة الموكلين + ربطه بالجلسة نفسها ──
+  // ⚡ FIX: قبل كده الزرار ده كان بينشئ الموكل بس من غير ما يربطه بالجلسة
+  // (case_sessions.client_id فاضل null) — فالجلسة تفضل "مش مربوطة" في نظر
+  // isAlreadyLinked، وزرار "🔗 ربط" يفضل ظاهر تاني ويسمح بتكرار نفس الموكل.
+  // دلوقتي بنربط الموكل الجديد بالجلسة على طول زي مسار "ربط بموكل موجود".
   const handleAddClientOnly = async () => {
     setLinkingClient(true);
     try {
       const name = session.plaintiff?.trim();
       if (!name) return;
+      const nameErr = validateFullNameParts(name);
+      if (nameErr) { toast(nameErr, true); return; }
       const tenantId = getCurrentTenantId();
       if (!tenantId) { toast('❌ تعذر تحديد المكتب الحالي، أعد تحميل الصفحة وحاول مرة أخرى', true); return; }
-      // ⚡ FIX (مرحلة 0 — توسيع الأوفلاين): تحويل من db.from() المباشر لـ
-      // __dbWrite. عملية مستقلة تمامًا، فآمنة تتحول فورًا.
-      const { error, offline, queued } = await window.__dbWrite({
+      // ⚡ تحقق موحّد: يرفض الإضافة لو نفس الاسم أو الرقم القومي أو رقم
+      // التوكيل مسجل لموكل موجود بالفعل (نفس المكتب) — راجع clientValidation.ts.
+      // ⚡ NEW (19 يوليو 2026): session.plaintiff_power_of_attorney بيتبعت
+      // كـ cr_number دلوقتي (كان مفقود من الفحص خالص قبل كده).
+      const dup = await checkClientDuplicate(db, { full_name: name, national_id: session.plaintiff_national_id, cr_number: session.plaintiff_power_of_attorney });
+      // ⚡ NEW: بدل توست بس، بنستخدم نفس خطوة "searching"/"selectedExistingClient"
+      // الموجودة فعلاً (البحث اليدوي) — بنحط الموكل المطابق كـ"مختار" على
+      // طول، فبيبان زرار "ربط" الجاهز من غير ما المستخدم يدوّر عليه.
+      if (dup.duplicate) {
+        if (dup.client) {
+          setSelectedExistingClient({ id: dup.client.id, full_name: dup.client.full_name, client_name: dup.client.full_name, national_id: null });
+          setClientStep('searching');
+        } else toast(dup.message!, true);
+        return;
+      }
+      const clientTempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const { data, error, offline: clientOffline, queued: clientQueued } = await window.__dbWrite({
         type: 'INSERT',
         table: 'clients',
         data: {
@@ -237,14 +272,39 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
           full_name: name,
           tenant_id: tenantId,
           national_id: session.plaintiff_national_id || null,
+          _offlineTempId: clientTempId,
         },
+        returning: true,
       });
       if (error) {
         showErrorToast('client_create', error, 'تعذّر إضافة الموكل. تحقق من صحة البيانات. لو المشكلة استمرت، تواصل مع الدعم.', 'إضافة موكل');
-      } else if (offline && queued) {
-        toast('📥 الموكل محفوظ محلياً — سيُضاف فور عودة الإنترنت');
+        return;
+      }
+      const realOrTempClientId = (clientOffline && clientQueued) ? clientTempId : (data as { id: string } | null)?.id;
+      if (!realOrTempClientId) { showErrorToast('client_create', new Error('no id returned'), 'تعذّر إضافة الموكل. حاول مرة أخرى.', 'إضافة موكل'); return; }
+      const isTempClientId = clientOffline && clientQueued;
+      const { error: linkErr, offline, queued } = await window.__dbWrite({
+        type: 'UPDATE',
+        table: 'case_sessions',
+        id: session.id,
+        data: {
+          client_id: realOrTempClientId,
+          ...(isTempClientId ? { _offlineFkTempId: [{ field: 'client_id', tempId: clientTempId, table: 'clients' as const, fallbackNameValue: name }] } : {}),
+        },
+      });
+      if (linkErr) {
+        showErrorToast('session_client_link', linkErr, 'تمت إضافة الموكل لكن تعذّر ربطه بالجلسة. حاول تحديث الصفحة.', 'ربط الموكل بالجلسة');
         onClientAdded?.();
-      } else { toast('✅ تمت إضافة الموكل لقائمة الموكلين'); onClientAdded?.(); }
+        return;
+      }
+      if (offline && queued) {
+        toast('📥 إضافة الموكل وربطه بالجلسة محفوظة محلياً — ستُزامن عند عودة الإنترنت');
+      } else {
+        toast('✅ تمت إضافة الموكل وربطه بالجلسة');
+      }
+      onClientAdded?.();
+      onDone();
+      setClientStep('done');
     } catch { toast('❌ خطأ غير متوقع', true); }
     finally { setLinkingClient(false); }
   };
