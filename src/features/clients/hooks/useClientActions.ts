@@ -1,4 +1,5 @@
 import { toast } from '../../../shared/lib/notifications';
+import { validateFullNameParts, checkClientDuplicate } from '../../../shared/lib/clientValidation';
 import { validateUploadFile, resolveStorageUrl } from '../../../shared/lib/storage';
 import { escapeTelegramHtml } from '../../../shared/lib/sanitize';
 import { safeUpdate, logActivity } from '../../../shared/lib/dataAccess';
@@ -81,6 +82,12 @@ export function useClientActions(params: {
             toast('❌ حقل "اسم الموكل" مطلوب', true);
             return;
         }
+        const nameErr = validateFullNameParts(form.full_name);
+        if (nameErr) { toast(nameErr, true); return; }
+        // ⚡ تحقق موحّد: يرفض الحفظ لو نفس الاسم أو نفس الرقم القومي مسجل
+        // لموكل موجود بالفعل (نفس المكتب) — راجع clientValidation.ts.
+        const dup = await checkClientDuplicate(db, { full_name: form.full_name, national_id: form.national_id, cr_number: form.cr_number });
+        if (dup.duplicate) { toast(dup.message!, true); return; }
         setSavingClient(true);
         // رفع الصور على Storage (يحتاج نت — مش بنحفظه offline)
         let idUrl: string | null = null, poaUrl: string | null = null;
@@ -221,6 +228,13 @@ export function useClientActions(params: {
             toast('❌ حقل "اسم الموكل" مطلوب', true);
             return;
         }
+        const nameErr = validateFullNameParts(form.full_name);
+        if (nameErr) { toast(nameErr, true); return; }
+        // ⚡ تحقق موحّد: يرفض التعديل لو نفس الاسم أو نفس الرقم القومي بقى
+        // متسجل لموكل تاني غير الموكل ده نفسه (نفس المكتب) — راجع
+        // clientValidation.ts. clientId هنا هو الاستثناء (بنعدّل بياناته هو).
+        const dup = await checkClientDuplicate(db, { full_name: form.full_name, national_id: form.national_id, cr_number: form.cr_number }, clientId);
+        if (dup.duplicate) { toast(dup.message!, true); return; }
         const client = clients.find((c) => c.id === clientId);
         const existingContactInfo = (client?.contact_info as ClientContactInfo | null) || null;
 
