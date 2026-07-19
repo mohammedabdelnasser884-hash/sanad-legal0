@@ -1,13 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from '../../shared/lib/notifications';
+import { validateFullNameParts } from '../../shared/lib/clientValidation';
 import { I } from '../../constants';
 import { Inp } from '@/shared/ui/Inp';
+import { PoaInput } from '@/shared/ui/PoaInput';
 import { Sel } from '@/shared/ui/Sel';
 import { FileUploadField } from '@/shared/ui/FileUploadField';
 import { useResolvedStorageUrl } from '../../shared/lib/storage';
 import type { ClientRow } from '../../types';
 import type { ClientContactInfo } from './hooks/useClientActions';
+
+// أرقام بس، وبالظبط 14 رقم — نفس نمط onlyDigits في NewClientModal/
+// NewCaseModal/EditCaseModal.
+const onlyDigits = (v: string, max = 14) => v.replace(/\D/g, '').slice(0, max);
 
 interface EditClientForm {
     full_name: string;
@@ -82,6 +88,7 @@ function EditClientModal({client: c, onClose, onSave}: EditClientModalProps) {
             React.createElement('div', {className:"space-y-4"},
                 // الاسم ونوع الموكل
                 React.createElement(Inp, {label:"الاسم الكامل", value:form.full_name, onChange:(e: React.ChangeEvent<HTMLInputElement>)=>s('full_name',e.target.value), placeholder:"اسم الموكل", required:true,'data-testid':'edit-client-name'}),
+                React.createElement(Inp, {label:"العنوان", value:form.address, onChange:(e: React.ChangeEvent<HTMLInputElement>)=>s('address',e.target.value), placeholder:"العنوان التفصيلي"}),
                 React.createElement('div', {className:"grid grid-cols-2 gap-3"},
                     React.createElement(Sel, {label:"نوع الموكل", required:true, value:form.type, onChange:(e: React.ChangeEvent<HTMLSelectElement>)=>s('type',e.target.value), options:[
                         {value:'individual', label:'فرد'},
@@ -90,17 +97,14 @@ function EditClientModal({client: c, onClose, onSave}: EditClientModalProps) {
                     ]}),
                     React.createElement(Inp, {label:"رقم الهاتف", value:form.phone, onChange:(e: React.ChangeEvent<HTMLInputElement>)=>s('phone',e.target.value), placeholder:"05xxxxxxxx", required:true,'data-testid':'edit-client-phone'})
                 ),
-                React.createElement('div', {className:"grid grid-cols-2 gap-3"},
-                    React.createElement(Inp, {label:"رقم هاتف ثاني", value:form.phone2, onChange:(e: React.ChangeEvent<HTMLInputElement>)=>s('phone2',e.target.value), placeholder:"رقم بديل"}),
-                    React.createElement(Inp, {label:"العنوان", value:form.address, onChange:(e: React.ChangeEvent<HTMLInputElement>)=>s('address',e.target.value), placeholder:"العنوان التفصيلي"})
-                ),
+                React.createElement(Inp, {label:"رقم هاتف ثاني", value:form.phone2, onChange:(e: React.ChangeEvent<HTMLInputElement>)=>s('phone2',e.target.value), placeholder:"رقم بديل"}),
                 React.createElement(Inp, {label:"البريد الإلكتروني", type:"email", value:form.email, onChange:(e: React.ChangeEvent<HTMLInputElement>)=>s('email',e.target.value), placeholder:"client@email.com"}),
 
-                // الرقم القومي ورقم التوكيل
-                React.createElement('div', {className:"grid grid-cols-2 gap-3"},
-                    React.createElement(Inp, {label:"الرقم القومي", value:form.national_id, onChange:(e: React.ChangeEvent<HTMLInputElement>)=>s('national_id',e.target.value), placeholder:"14 رقم"}),
-                    React.createElement(Inp, {label:"رقم التوكيل", value:form.cr_number, onChange:(e: React.ChangeEvent<HTMLInputElement>)=>s('cr_number',e.target.value), placeholder:"2024/أ/1234"})
-                ),
+                // الرقم القومي
+                React.createElement(Inp, {label:"الرقم القومي", value:form.national_id, onChange:(e: React.ChangeEvent<HTMLInputElement>)=>s('national_id',onlyDigits(e.target.value)), placeholder:"14 رقم", required:true, inputMode:"numeric", maxLength:14,'data-testid':'edit-client-national-id'}),
+
+                // بيانات التوكيل — سطر كامل: رقم / حرف / سنة / مكتب توثيق
+                React.createElement(PoaInput, {value:form.cr_number, onChange:(v: string)=>s('cr_number',v)}),
 
                 // فاصل قريب الدرجة الأولى
                 React.createElement('div', {className:"border-t border-white/5 pt-2"},
@@ -144,8 +148,12 @@ function EditClientModal({client: c, onClose, onSave}: EditClientModalProps) {
                     'data-testid': 'save-client-edit-button',
                     onClick: () => {
                         if(!form.full_name || !form.full_name.trim()){ toast('يرجى إدخال اسم الموكل', true); return; }
+                        const nameErr = validateFullNameParts(form.full_name);
+                        if(nameErr){ toast(nameErr, true); return; }
                         if(!form.phone || !form.phone.trim()){ toast('يرجى إدخال رقم الهاتف', true); return; }
                         if(!form.type){ toast('يرجى اختيار نوع الموكل', true); return; }
+                        if(!form.national_id || !form.national_id.trim()){ toast('يرجى إدخال الرقم القومي', true); return; }
+                        if(form.national_id.length!==14){ toast('⚠️ الرقم القومي لازم يكون 14 رقم بالظبط', true); return; }
                         onSave(form, idFile, poaFile);
                     },
                     className:"w-full py-3.5 bg-gradient-to-tr from-emerald-500 to-emerald-400 text-white rounded-xl font-black text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform mt-2"
