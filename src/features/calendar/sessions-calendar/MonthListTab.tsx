@@ -61,7 +61,7 @@ function MonthListTab({ cases, clients, onOpenCase, onOpenReminders, onOpenStand
         const startStr = `${viewYear}-${mm}-01`;
         const endStr   = `${viewYear}-${mm}-${String(last).padStart(2,'0')}`;
         db.from('case_sessions')
-          .select('id,session_date,case_id,description,result,next_action,session_time,session_floor,session_hall,title,case_number,court,case_type,plaintiff,plaintiff_national_id,plaintiff_power_of_attorney,defendant,defendant_national_id,circuit_number,plaintiff_role,defendant_role,cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
+          .select('id,session_date,case_id,client_id,description,result,next_action,session_time,session_floor,session_hall,title,case_number,court,case_type,plaintiff,plaintiff_national_id,plaintiff_power_of_attorney,defendant,defendant_national_id,circuit_number,plaintiff_role,defendant_role,cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
           .gte('session_date', startStr)
           .lte('session_date', endStr)
           .order('session_date', { ascending: true })
@@ -89,7 +89,9 @@ function MonthListTab({ cases, clients, onOpenCase, onOpenReminders, onOpenStand
     const handleGoogleExport = (s: MonthSessionRow, e: React.MouseEvent) => {
         e.stopPropagation();
         const linkedCase   = cases.find((c: MappedCase) => c.id === s.case_id);
-        const linkedClient = linkedCase ? clients.find((cl: MappedClient) => cl.id === linkedCase.client_id) : null;
+        const linkedClient = linkedCase
+            ? clients.find((cl: MappedClient) => cl.id === linkedCase.client_id)
+            : (s.client_id ? clients.find((cl: MappedClient) => cl.id === s.client_id) : null);
         exportSessionToGoogleCalendar(s, linkedCase?.title || 'جلسة قانونية', linkedCase?.court || '', linkedClient?.full_name || '');
         toast('🗓 جاري الفتح في Google Calendar...');
     };
