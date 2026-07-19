@@ -317,7 +317,11 @@ function DashboardTab({
             ),
             missedSessions.slice(0,2).map((s: SessionFeedItem) => {
                 const linkedCase = ((Array.isArray(s.cases) ? s.cases[0] : s.cases) || cases.find((c: MappedCase) =>c.id===s.case_id)) as LinkedCaseLike | undefined;
-                const linkedClient = linkedCase ? clients.find((cl: MappedClient) =>cl.id===linkedCase.client_id) : null;
+                const linkedClient = linkedCase
+                    ? clients.find((cl: MappedClient) => cl.id === linkedCase.client_id)
+                    // ⚡ FIX: مفيش قضية مربوطة؟ جرّب client_id بتاع الجلسة نفسها
+                    // (ربط مباشر بموكل من غير قضية)، مش null على طول.
+                    : (s.client_id ? clients.find((cl: MappedClient) => cl.id === s.client_id) : null);
                 const daysAgo = Math.round((new Date().getTime()-new Date((s.session_date as string)+'T00:00:00').getTime())/(1000*60*60*24));
                 const agoLabel = daysAgo===1?'أمس':`منذ ${daysAgo} يوم`;
                 return buildSessionCard(s, linkedCase, linkedClient,
@@ -386,7 +390,11 @@ function DashboardTab({
                     : React.createElement('div',{className:"space-y-2"},
                         todaySessions.map((s: SessionFeedItem) => {
                             const linkedCase = ((Array.isArray(s.cases) ? s.cases[0] : s.cases) || cases.find((c: MappedCase) =>c.id===s.case_id)) as LinkedCaseLike | undefined;
-                            const linkedClient = linkedCase ? clients.find((cl: MappedClient) =>cl.id===linkedCase.client_id) : null;
+                            const linkedClient = linkedCase
+                    ? clients.find((cl: MappedClient) => cl.id === linkedCase.client_id)
+                    // ⚡ FIX: مفيش قضية مربوطة؟ جرّب client_id بتاع الجلسة نفسها
+                    // (ربط مباشر بموكل من غير قضية)، مش null على طول.
+                    : (s.client_id ? clients.find((cl: MappedClient) => cl.id === s.client_id) : null);
                             return buildSessionCard(s,linkedCase,linkedClient,'#f87171',
                                 'linear-gradient(135deg,rgba(239,68,68,0.10),rgba(239,68,68,0.04))','rgba(239,68,68,0.35)','⚡ اليوم');
                         }),
@@ -437,7 +445,11 @@ function DashboardTab({
                     : React.createElement('div',{className:"space-y-2"},
                         upcomingSessions.map((s: SessionFeedItem) => {
                             const linkedCase = ((Array.isArray(s.cases) ? s.cases[0] : s.cases) || cases.find((c: MappedCase) =>c.id===s.case_id)) as LinkedCaseLike | undefined;
-                            const linkedClient = linkedCase ? clients.find((cl: MappedClient) =>cl.id===linkedCase.client_id) : null;
+                            const linkedClient = linkedCase
+                    ? clients.find((cl: MappedClient) => cl.id === linkedCase.client_id)
+                    // ⚡ FIX: مفيش قضية مربوطة؟ جرّب client_id بتاع الجلسة نفسها
+                    // (ربط مباشر بموكل من غير قضية)، مش null على طول.
+                    : (s.client_id ? clients.find((cl: MappedClient) => cl.id === s.client_id) : null);
                             const d = new Date((s.session_date as string)+'T00:00:00');
                             if(d.getDay()===5) return React.createElement('div',{key:s.id,className:"flex items-center gap-3 py-1 opacity-50"},
                                 React.createElement('span',{className:"text-[9px] text-slate-600 font-bold"},"الجمعة — إجازة رسمية"),
