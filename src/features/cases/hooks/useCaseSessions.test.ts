@@ -59,9 +59,22 @@ vi.mock('../../../shared/lib/notifications', () => ({ toast: (...a: unknown[]) =
 
 const safeUpdate = vi.fn();
 const logActivity = vi.fn();
+// recalcNextHearing اتنقلت لملف dataAccess.ts المشترك (بعد الـ refactor)،
+// فبنعمل mock ليها هنا كمان بنفس منطق النسخة الحقيقية، عشان تفضل شغالة
+// على mockDb الموجود فوق (بتقرأ case_sessions وتحدّث cases.next_hearing).
 vi.mock('../../../shared/lib/dataAccess', () => ({
   safeUpdate: (...a: unknown[]) => safeUpdate(...a),
   logActivity: (...a: unknown[]) => logActivity(...a),
+  recalcNextHearing: async (db: { from: (table: string) => any }, caseId: string) => {
+    const { data: allSessions } = await db.from('case_sessions').select('session_date').eq('case_id', caseId);
+    const todayStr = new Date().toISOString().slice(0, 10);
+    let nearest: string | null = null;
+    (allSessions || []).forEach((s: { session_date: string | null }) => {
+      if (!s.session_date || s.session_date < todayStr) return;
+      if (!nearest || s.session_date < nearest) nearest = s.session_date;
+    });
+    await db.from('cases').update({ next_hearing: nearest }).eq('id', caseId);
+  },
 }));
 
 import { useCaseSessions } from './useCaseSessions';
