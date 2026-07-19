@@ -34,6 +34,7 @@ export interface CaseFormSubmitData {
     session_hall?: string;
     secretary_hall?: string;
     secretary_name?: string;
+    secretary_mobile?: string;
 }
 
 // شكل بيانات مودال تأكيد الحذف/الأرشفة (زي ما بيتبنى في handleDeleteCase تحت)
@@ -134,6 +135,7 @@ export function useCaseActions(params: {
             session_hall: form.session_hall || null,
             secretary_hall: form.secretary_hall || null,
             secretary_name: form.secretary_name || null,
+            secretary_mobile: form.secretary_mobile || null,
             _offlineTempId: offlineTempId,
         };
         const offlineId = 'offline-' + Date.now();
@@ -343,6 +345,7 @@ export function useCaseActions(params: {
                 session_hall: form.session_hall || null,
                 secretary_hall: form.secretary_hall || null,
                 secretary_name: form.secretary_name || null,
+                secretary_mobile: form.secretary_mobile || null,
             };
             // FIX: Optimistic Locking لتعديل القضايا — كان `updated_at` بيتجاب
             // ويتخزّن في الـ state (شوف useAppData.ts) خصيصًا للاستخدام هنا، بس
@@ -427,5 +430,47 @@ export function useCaseActions(params: {
         }
     };
 
-    return { handleLogout, handleSaveCase, handleDeleteCase, handlePermanentDeleteCase, handleRestoreCase, handleUpdateCase };
+    // ─ ربط قضية بموكل ─
+    // ⚡ NEW (19 يوليو 2026): قبل كده مافيش أي طريقة تربط قضية بموكل بعد
+    // إنشائها (NewCaseModal بس هو اللي بيحدد client_id وقت الإنشاء، و
+    // EditCaseModal مابيبعتش client_id خالص — شوف تعليق CaseFormSubmitData
+    // فوق). الدالة دي بتحدّث عمود client_id بس، من غير ما تلمس أي حقل تاني
+    // في القضية (بعكس handleUpdateCase اللي بيعيد كتابة كل الحقول من الـ form).
+    const handleLinkClient = async (caseId: string, clientId: string) => {
+        const existingCase = cases.find((c) => c.id === caseId);
+        const knownUpdatedAt = existingCase?.updated_at
+            || (selectedCase?.id === caseId ? selectedCase?.updated_at : null)
+            || null;
+        const { error, offline, queued, conflict, data: writtenRow } = await window.__dbWrite({
+            type: 'UPDATE', table: 'cases', data: { client_id: clientId }, id: caseId, knownUpdatedAt
+        });
+        if (offline && queued) {
+            toast('📥 الربط محفوظ محلياً — سيُزامن عند عودة الإنترنت');
+            setCases((prev) => prev.map((c) => c.id === caseId ? { ...c, client_id: clientId } : c));
+            if (selectedCase?.id === caseId) setSelectedCase((p) => p ? { ...p, client_id: clientId } : p);
+            return;
+        }
+        if (conflict) {
+            toast('⚠️ هذه القضية عدّلها شخص آخر بعد ما فتحتها — أعد فتحها وحاول الربط مرة أخرى', true);
+            return;
+        }
+        if (error) {
+            toast('❌ فشل ربط القضية بالموكل — تحقق من الاتصال وأعد المحاولة', true);
+            return;
+        }
+        const clientName = clients.find((cl) => cl.id === clientId)?.full_name || null;
+        toast('✅ تم ربط القضية بالموكل');
+        logActivity(db, 'ربط قضية بموكل', {
+            userName: _userName,
+            entity_type: 'case', entity_id: caseId, details: existingCase?.title || null,
+            case_name: existingCase?.title || null,
+            client_name: clientName,
+        });
+        const freshFields = writtenRow?.updated_at ? { updated_at: writtenRow.updated_at } : {};
+        setCases((prev) => prev.map((c) => c.id === caseId ? { ...c, client_id: clientId, ...freshFields } : c));
+        if (selectedCase?.id === caseId) setSelectedCase((p) => p ? { ...p, client_id: clientId, ...freshFields } : p);
+        fetchCases(0, casesFilter);
+    };
+
+    return { handleLogout, handleSaveCase, handleDeleteCase, handlePermanentDeleteCase, handleRestoreCase, handleUpdateCase, handleLinkClient };
 }
