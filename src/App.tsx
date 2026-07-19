@@ -136,7 +136,7 @@ function App() {
         else   { _setDeleteConfirm(null); }
     }, [nav]);
 
-    const { handleLogout, handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient } = useCaseActions({
+    const { handleLogout, handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleCreateAndLinkClient } = useCaseActions({
         sendTelegram, fetchCases, cases, lawyers, clients, selectedCase,
         setCases, setLawyers, setClients, setProfile, setAuthUser,
         setSelectedCase, setDeleteConfirm, setSavingCase, setShowCaseModal,
@@ -274,7 +274,7 @@ function App() {
             setCases, setCasesFilter, setCasesPage,
             fetchCases, fetchTodaySessions, fetchUpcomingSessions,
             fetchClients, clientSearch,
-            handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient,
+            handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleCreateAndLinkClient,
             handleSaveClient, handleDeleteClient, handleUpdateClient, handleSaveLawyer,
             sendTelegram,
         }),
