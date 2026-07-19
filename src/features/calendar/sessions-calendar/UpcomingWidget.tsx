@@ -33,7 +33,7 @@ function UpcomingWidget({ cases, clients, onOpenCase }: UpcomingWidgetProps) {
 
     useEffect(() => {
         db.from('case_sessions')
-          .select('id,session_date,session_time,session_floor,session_hall,case_id,description,result,next_action,title,case_number,court,case_type,plaintiff,defendant,cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
+          .select('id,session_date,session_time,session_floor,session_hall,case_id,client_id,description,result,next_action,title,case_number,court,case_type,plaintiff,defendant,cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
           .gte('session_date', todayStr)
           .order('session_date', { ascending: true })
           .limit(200)
@@ -69,7 +69,9 @@ function UpcomingWidget({ cases, clients, onOpenCase }: UpcomingWidgetProps) {
     return React.createElement('div', { className: "space-y-2" },
         sessions.slice(0, visibleCount).map((s: CalendarSessionRow) => {
             const linkedCase   = ((Array.isArray(s.cases) ? s.cases[0] : s.cases) || cases.find((c: MappedCase) => c.id === s.case_id)) as LinkedCaseLike | undefined;
-            const linkedClient = linkedCase ? clients.find((cl: MappedClient) => cl.id === linkedCase.client_id) : null;
+            const linkedClient = linkedCase
+                ? clients.find((cl: MappedClient) => cl.id === linkedCase.client_id)
+                : (s.client_id ? clients.find((cl: MappedClient) => cl.id === s.client_id) : null);
             const { dayName, day, month, isToday, isTomorrow, daysUntil } = formatDate(s.session_date as string);
             const urgency = isToday ? 'red' : daysUntil <= 2 ? 'amber' : daysUntil <= 7 ? 'blue' : 'slate';
             const st: UrgencyStyle = {
