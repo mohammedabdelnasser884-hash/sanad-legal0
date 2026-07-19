@@ -158,6 +158,7 @@ function NextStepSuggestion({ cases }: NextStepSuggestionProps) {
       setLoading(false);
     });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on id intentionally; re-running on the whole selectedCase object would refetch on every render since it's re-derived each time.
   }, [selectedCase?.id, retryTick]);
 
   const suggestions = useMemo(
