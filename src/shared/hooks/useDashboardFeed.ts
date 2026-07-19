@@ -26,6 +26,10 @@ export interface SessionFeedItem {
     session_hall: string | null;
     description: string | null;
     case_id: string | null;
+    // ⚡ FIX: client_id بتاع الجلسة نفسها (ربط مباشر بموكل من غير قضية،
+    // المسار التالت في useSessionLinking.ts) — كان ناقص من هنا، فكانت
+    // شارة "👤 الموكل" أبدًا ما بتظهرش لهذا النوع من الجلسات.
+    client_id: string | null;
     result: string | null;
     next_action: string | null;
     title: string | null;
@@ -72,7 +76,7 @@ export function useDashboardFeed(profile: ProfileRow | null) {
         setLoadingUrgent(true);
         const todayStr = fmtDate(new Date());
         const { data } = await db.from('case_sessions')
-            .select('id, session_date, session_time, session_floor, session_hall, description, case_id, result, next_action, title, case_number, court, case_type, circuit_number, plaintiff, plaintiff_role, defendant, defendant_role, cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
+            .select('id, session_date, session_time, session_floor, session_hall, description, case_id, client_id, result, next_action, title, case_number, court, case_type, circuit_number, plaintiff, plaintiff_role, defendant, defendant_role, cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
             .eq('session_date', todayStr)
             .order('session_date', { ascending: true });
         setTodaySessions(data || []);
@@ -86,7 +90,7 @@ export function useDashboardFeed(profile: ProfileRow | null) {
         const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
         const endDay   = new Date(today); endDay.setDate(today.getDate() + 7);
         const { data } = await db.from('case_sessions')
-            .select('id, session_date, session_time, session_floor, session_hall, description, case_id, result, next_action, title, case_number, court, case_type, circuit_number, plaintiff, plaintiff_role, defendant, defendant_role, cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
+            .select('id, session_date, session_time, session_floor, session_hall, description, case_id, client_id, result, next_action, title, case_number, court, case_type, circuit_number, plaintiff, plaintiff_role, defendant, defendant_role, cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
             .gte('session_date', fmtDate(tomorrow))
             .lte('session_date', fmtDate(endDay))
             .order('session_date', { ascending: true });
@@ -112,7 +116,7 @@ export function useDashboardFeed(profile: ProfileRow | null) {
         // بالـ select بتاع جلسات اليوم/الأسبوع فوق، مع إن SessionFeedItem بيطلبهم
         // إجباريًا — ده كان بيكسر النوع وقت التخزين في setMissedSessions.
         const { data: pastData } = await db.from('case_sessions')
-            .select('id, session_date, session_time, session_floor, session_hall, description, case_id, result, next_action, title, case_number, court, case_type, circuit_number, plaintiff, plaintiff_role, defendant, defendant_role, cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
+            .select('id, session_date, session_time, session_floor, session_hall, description, case_id, client_id, result, next_action, title, case_number, court, case_type, circuit_number, plaintiff, plaintiff_role, defendant, defendant_role, cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
             .lt('session_date', todayStr)
             .order('session_date', { ascending: false });
 
