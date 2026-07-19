@@ -4,7 +4,8 @@ import { COUNTRY_CONFIGS } from '../constants';
 import type { TabName } from '../useNavigation';
 import type { NavigationState } from '../useNavigation';
 import type { DeleteConfirmState, CaseFormSubmitData } from '@/features/cases/hooks/useCaseActions';
-import type { ClientFormData } from '@/features/clients/hooks/useClientActions';
+import type { ClientFormData, ClientModalContext } from '@/features/clients/hooks/useClientActions';
+import type { OpenCreateClientForSession, OpenCreateClientForCase } from '@/features/calendar/hooks/useClientLinking';
 import type { MappedCase, MappedClient } from '../hooks/useAppData';
 import type { ProfileRow } from '../types';
 import NewCaseModal from '../features/cases/NewCaseModal';
@@ -42,6 +43,10 @@ interface AppModalsProps {
     selectedClient: MappedClient | null;
     selectedCase: MappedCase | null;
     selectedCaseInitialTab: string;
+    // ⚡ NEW: سياق فتح موديل "إنشاء موكل جديد" من جوه قضية/جلسة —
+    // شوف useClientActions.ts (ClientModalContext) وApp.tsx.
+    clientModalContext: ClientModalContext | null;
+    openNewClientModal: (ctx: ClientModalContext) => void;
 
     // ── setters ──
     setShowSearch: (v: boolean) => void;
@@ -72,8 +77,16 @@ interface AppModalsProps {
     handleDeleteCase: (caseId: string) => void | Promise<void>;
     handleUpdateCase: (caseId: string, form: CaseFormSubmitData) => void | Promise<void>;
     handleLinkClient: (caseId: string, clientId: string) => void | Promise<void>;
-    handleCreateAndLinkClient: (caseId: string, plaintiffName: string, plaintiffNationalId?: string | null, plaintiffPoa?: string | null) =>
-        void | Promise<void> | Promise<{ duplicate: true; client: { id: string; full_name: string | null }; message?: string } | undefined>;
+    // ⚡ CHANGED (خطة توحيد إنشاء الموكل، Phase 1): بقت مجرد فتح لموديل
+    // "إنشاء موكل جديد" الموحّد — شوف App.tsx (handleOpenCreateClientForCase).
+    handleCreateAndLinkClient: (caseId: string, plaintiffName: string, plaintiffNationalId?: string | null, plaintiffPoa?: string | null) => void;
+    // ⚡ NEW (خطة توحيد إنشاء الموكل، Phase 3): نفس فكرة handleCreateAndLinkClient
+    // بس لـ "إضافة الموكل لقائمة الموكلين فقط" من جلسة مستقلة — شوف App.tsx.
+    handleOpenCreateClientForSession: OpenCreateClientForSession;
+    // ⚡ NEW (خطة توحيد إنشاء الموكل، Phase 2): نفس handleCreateAndLinkClient
+    // (Phase 1) بس ممرّرة لـ NewStandaloneSessionModal — "إنشاء موكل جديد
+    // وربطه" بعد تحويل جلسة مستقلة لقضية — شوف App.tsx.
+    handleOpenCreateClientForSessionCase: OpenCreateClientForCase;
     handleSaveClient: (form: ClientFormData, idFile: File | null, poaFile: File | null) => void | Promise<void>;
     handleDeleteClient: (clientId: string) => void | Promise<void>;
     handleUpdateClient: (clientId: string, form: ClientFormData, idFile?: File | null, poaFile?: File | null) => void | Promise<void>;
@@ -95,6 +108,7 @@ function AppModals({
     showSearch, showAI, showCaseModal, showNewSessionModal,
     showLawyerModal, showClientModal, savingCase, savingLawyer, savingClient,
     deleteConfirm, selectedClient, selectedCase, selectedCaseInitialTab,
+    clientModalContext, openNewClientModal,
     setShowSearch, setShowAI, setShowCaseModal, setShowNewSessionModal,
     setShowLawyerModal, setShowClientModal, setTab,
     setSelectedCase, setSelectedClient, _setDeleteConfirm, _setSelectedClient, _setSelectedCase,
@@ -102,6 +116,7 @@ function AppModals({
     fetchCases, fetchTodaySessions, fetchUpcomingSessions,
     fetchClients, clientSearch,
     handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleCreateAndLinkClient,
+    handleOpenCreateClientForSession, handleOpenCreateClientForSessionCase,
     handleSaveClient, handleDeleteClient, handleUpdateClient, handleSaveLawyer,
     sendTelegram,
 }: AppModalsProps) {
@@ -151,9 +166,15 @@ function AppModals({
             onClientAdded: () => { fetchClients(0, clientSearch); },
             onNotify: sendTelegram,
             cases,
+            onOpenCreateClient: handleOpenCreateClientForSession,
+            onOpenCreateClientForCase: handleOpenCreateClientForSessionCase,
         }),
         showLawyerModal && React.createElement(UserFormModal, { onClose: () => setShowLawyerModal(false), onSave: handleSaveLawyer, loading: savingLawyer }),
-        showClientModal && React.createElement(NewClientModal, { onClose: () => setShowClientModal(false), onSave: handleSaveClient, loading: savingClient }),
+        showClientModal && React.createElement(NewClientModal, {
+            onClose: () => setShowClientModal(false), onSave: handleSaveClient, loading: savingClient,
+            initialData: clientModalContext?.initialData,
+            contextLabel: clientModalContext?.contextLabel,
+        }),
         selectedClient && nav.isOpen('clientDetail') && React.createElement(ClientDetailModal, {
             client: selectedClient,
             cases: cases.filter((c) => c.client_id === selectedClient?.id),
