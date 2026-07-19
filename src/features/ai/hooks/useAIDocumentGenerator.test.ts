@@ -3,6 +3,7 @@ import { renderHook, act } from '@testing-library/react';
 import { useAIDocumentGenerator } from './useAIDocumentGenerator';
 import type { CountryConfig } from '../../../constants';
 import type { ProfileRow } from '../../../types';
+import type { AIDocFields } from './aiAssistantTypes';
 
 // ══════════════════════════════════════════════════════════════════
 // اختبار useAIDocumentGenerator — يغطي بندين من المرحلة 5 (الثبات
@@ -40,7 +41,7 @@ function setup(callAIImpl?: () => Promise<string>) {
   return { result, callAI };
 }
 
-function fillRequiredFields(result: { current: { sf: (k: string, v: string) => void } }) {
+function fillRequiredFields(result: { current: { sf: (k: keyof AIDocFields, v: string) => void } }) {
   act(() => {
     result.current.sf('plaintiff', 'أحمد محمد');
     result.current.sf('defendant', 'شركة س');
