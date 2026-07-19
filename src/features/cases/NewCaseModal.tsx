@@ -23,7 +23,7 @@ interface NewCaseForm {
     type: string; type_other: string; caseNum: string; caseYear: string;
     court_level: string; court_level_other: string; circuit_number: string; date: string; session_time: string;
     client_id: string; client_name: string; client_capacity: string; opponent: string; opponent_capacity: string;
-    session_hall: string; secretary_hall: string; secretary_name: string;
+    session_hall: string; secretary_hall: string; secretary_name: string; secretary_mobile: string;
 }
 
 function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCourts,countryCaseTypes}: NewCaseModalProps){
@@ -31,7 +31,7 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
         title:'',court:'',court_other:'',court_floor:'',court_hall:'',type:'',type_other:'',caseNum:'',caseYear:'',
         court_level:'',court_level_other:'',circuit_number:'',date:'',session_time:'صباحي',
         client_id:'',client_name:'',client_capacity:'',opponent:'',opponent_capacity:'',
-        session_hall:'',secretary_hall:'',secretary_name:''
+        session_hall:'',secretary_hall:'',secretary_name:'',secretary_mobile:''
     });
     const s=<K extends keyof NewCaseForm>(k: K,v: NewCaseForm[K])=>setForm((p) =>({...p,[k]:v}));
 
@@ -203,6 +203,10 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
                 React.createElement('div',null,
                     React.createElement('label',{className:"block text-[10px] font-bold text-slate-400 mb-1.5"},"اسم سكرتير الجلسة"),
                     React.createElement('input',{value:form.secretary_name,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('secretary_name',e.target.value),placeholder:"اسم السكرتير",className:inputCls,style:inpStyle})
+                ),
+                React.createElement('div',null,
+                    React.createElement('label',{className:"block text-[10px] font-bold text-slate-400 mb-1.5"},"موبايل سكرتير الجلسة"),
+                    React.createElement('input',{value:form.secretary_mobile,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('secretary_mobile',e.target.value.replace(/\D/g,'').slice(0,11)),placeholder:"رقم الموبايل",inputMode:"numeric",maxLength:11,className:inputCls,style:inpStyle})
                 ),
 
                 // زر الحفظ
