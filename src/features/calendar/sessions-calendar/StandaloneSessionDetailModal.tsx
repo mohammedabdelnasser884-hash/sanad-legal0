@@ -197,9 +197,13 @@ interface LinkSessionModalProps {
     // عادي) — عشان قائمة الموكلين في التطبيق كله تتحدّث فورًا، بدل ما
     // الموكل الجديد يفضل مخفي لحد ما المستخدم يدخل تاب الموكلين يدويًا.
     onClientAdded?: () => void;
+    // ⚡ FIX: الموكل ممكن يكون اتربط بالجلسة بالفعل من غير ما القضية
+    // تتعمل (LinkSessionModal بقى بيتفتح طول ما !hasCase بس) — الفلاج ده
+    // بيخفي اختيارات "إضافة/ربط موكل" بس، ويسيب "إنشاء ملف قضية" ظاهرة.
+    hasClient?: boolean;
 }
 
-function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientAdded }: LinkSessionModalProps) {
+function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientAdded, hasClient }: LinkSessionModalProps) {
     const {
         linkingCase, linkingClient, linkingToCase, linkingExisting,
         clientStep, setClientStep, foundClient,
@@ -236,7 +240,7 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                             React.createElement('span', null, '⚖️'),
                             React.createElement('span', null, linkingCase ? '⏳ جاري الإنشاء...' : 'إنشاء ملف قضية من هذه البيانات')
                         ),
-                        hasPlaintiff && React.createElement('button', {
+                        hasPlaintiff && !hasClient && React.createElement('button', {
                             onClick: handleAddClientOnly,
                             disabled: linkingClient,
                             className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2'
@@ -244,7 +248,7 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                             React.createElement('span', null, '👤'),
                             React.createElement('span', null, linkingClient ? '⏳ جاري الإضافة...' : 'إضافة الموكل لقائمة الموكلين فقط')
                         ),
-                        React.createElement('button', {
+                        !hasClient && React.createElement('button', {
                             onClick: () => setClientStep('searching'),
                             className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2'
                         },
@@ -414,8 +418,11 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
     }, [partialSession.id, db]);
 
     const session = fullSession;
-    // الزرار "🔗 ربط" بيتاح بس لو الجلسة لسه مش مربوطة لا بقضية ولا بموكل
-    const isAlreadyLinked = !!(session.case_id || session.client_id);
+    // زرار "🔗 ربط" بيتاح طول ما لسه مفيش قضية اتعملت من الجلسة دي —
+    // مش شرطه إن الموكل يكون لسه مش مربوط. ربط/إضافة الموكل حاجة مستقلة
+    // تمامًا عن إنشاء القضية، فمينفعش اختفاء واحد يخفي التاني.
+    const hasCase = !!session.case_id;
+    const hasClient = !!session.client_id;
 
     // كائن قضية اصطناعي خفيف بيتبنى من بيانات الجلسة المستقلة نفسها (مفيش قضية حقيقية أصلاً)
     // عشان يتمرر لـ SessionUpdateModal اللي بيتوقع caseData: MappedCase — نفس القيم بالظبط
@@ -519,7 +526,7 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
                         onClick: onClose,
                         className: 'flex-1 py-2.5 rounded-2xl text-xs font-bold text-slate-400 bg-white/5 hover:bg-white/10 transition-all'
                     }, 'إغلاق'),
-                    !isAlreadyLinked && React.createElement('button', {
+                    !hasCase && React.createElement('button', {
                         onClick: () => setShowLink(true),
                         disabled: loadingFull,
                         className: 'flex-1 py-2.5 rounded-2xl text-xs font-bold text-slate-300 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-50'
@@ -562,7 +569,7 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
             onNotify
         }),
         showLink && React.createElement(LinkSessionModal, {
-            session, db,
+            session, db, hasClient,
             onClose: () => setShowLink(false),
             onDone,
             onFullClose: () => { setShowLink(false); onDone(); onClose(); },
