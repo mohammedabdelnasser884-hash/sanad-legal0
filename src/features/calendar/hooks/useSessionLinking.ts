@@ -73,6 +73,11 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
           secretary_name: session.secretary_name || null,
           secretary_mobile: session.secretary_mobile || null,
           status: 'نشطة',
+          // ⚡ FIX: لو الموكل كان اتربط بالجلسة المستقلة قبل إنشاء القضية
+          // (عن طريق "إضافة الموكل لقائمة الموكلين فقط" أو "ربط بموكل
+          // موجود")، لازم القضية الجديدة تورّث نفس الربط تلقائيًا بدل ما
+          // نستنى المستخدم يدوّر تاني على نفس الموكل بالاسم.
+          client_id: session.client_id || null,
           _offlineTempId: offlineTempId,
         },
         returning: true,
@@ -112,6 +117,11 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
         await recalcNextHearing(db, realOrTempCaseId);
       }
       onDone();
+      // ⚡ FIX: لو session.client_id موجود بالفعل، القضية الجديدة اتربطت
+      // بيه أوتوماتيك من صف الـ INSERT فوق — مفيش داعي ندوّر تاني بالاسم
+      // ونعرض خطوة "لقينا موكل مطابق"، ده هيكرر نفس الربط أو يلخبط
+      // المستخدم من غير فايدة.
+      if (session.client_id) { setClientStep('done'); return; }
       const plaintiffName = session.plaintiff?.trim();
       if (!plaintiffName) { setClientStep('notfound'); return; }
       const { data: clients } = await db.from('clients').select('id,full_name').is('deleted_at', null).ilike('full_name', `%${plaintiffName}%`).limit(3);
