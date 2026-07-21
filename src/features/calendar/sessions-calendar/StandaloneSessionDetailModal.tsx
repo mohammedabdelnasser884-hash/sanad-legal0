@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from '../../../shared/lib/notifications';
+import { validateFullNameParts } from '../../../shared/lib/clientValidation';
 import { safeUpdate } from '../../../shared/lib/dataAccess';
 import { showErrorToast } from '../../../shared/lib/errorReporting';
 import { I } from '../../../constants';
@@ -17,6 +18,11 @@ import type { Database } from '../../../database.types';
 const CASE_TYPES = ['مدني', 'تجاري', 'جنائي', 'عمالي', 'إداري', 'أسرة', 'أخرى'];
 const inputCls = 'w-full p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600';
 const inputStyle = { fontFamily: 'Cairo,sans-serif' };
+// 🔒 FIX (تقرير الموثوقية — نتيجة 4): نفس الهيلبر المستخدم في
+// NewStandaloneSessionModal.tsx — كان مفقود من الملف ده تمامًا، فحقلي
+// الرقم القومي (موكل/خصم) كانوا بيقبلوا أي نص حر من غير أي تقييد أرقام
+// أو فحص طول خالص قبل الحفظ.
+const onlyDigits = (v: string, max = 14) => v.replace(/\D/g, '').slice(0, max);
 
 interface EditStandaloneModalProps {
     session: CaseSessionRow;
@@ -72,6 +78,25 @@ function EditStandaloneModal({ session, db, onClose, onSaved }: EditStandaloneMo
         if (!form.session_date) { toast('⚠️ تاريخ الجلسة مطلوب', true); return; }
         if (!form.title?.trim() || !form.plaintiff?.trim() || !form.defendant?.trim()) {
             toast('⚠️ يجب ملء الحقول الإجبارية المحددة بعلامة (*)', true);
+            return;
+        }
+        // 🔒 FIX (تقرير الموثوقية — نتيجة 5 الفرعية): نفس فحص الاسم الثلاثي
+        // للخصم المستخدم في NewStandaloneSessionModal — من غير فحص تكرار.
+        const oppNameErr = validateFullNameParts(form.defendant || '');
+        if (oppNameErr) {
+            toast('⚠️ اسم الخصم لازم يكون ثلاثي على الأقل (الاسم الأول، الأب، الجد)', true);
+            return;
+        }
+        // 🔒 FIX (تقرير الموثوقية — نتيجة 4): الملف ده ما كانش فيه أي فحص
+        // للرقم القومي خالص (لا تقييد أرقام ولا طول) — بعكس باقي المودالات.
+        // القرار المتخذ: إجباري للموكل (14 رقم بالظبط)، اختياري للخصم لكن
+        // لازم يكون 14 رقم لو اتكتب.
+        if (form.plaintiff_national_id.length !== 14) {
+            toast('⚠️ الرقم القومي للموكل مطلوب ولازم يكون 14 رقم بالظبط', true);
+            return;
+        }
+        if (form.defendant_national_id && form.defendant_national_id.length !== 14) {
+            toast('⚠️ الرقم القومي للخصم لازم يكون 14 رقم بالظبط', true);
             return;
         }
         setSaving(true);
@@ -150,7 +175,7 @@ function EditStandaloneModal({ session, db, onClose, onSaved }: EditStandaloneMo
                         React.createElement(Inp, { label: 'الصفة', value: form.plaintiff_role, onChange: set('plaintiff_role'), placeholder: 'مدعي، مستأنف' })
                     ),
                     React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
-                        React.createElement(Inp, { label: 'الرقم القومي', value: form.plaintiff_national_id, onChange: set('plaintiff_national_id'), placeholder: '14 رقم' }),
+                        React.createElement(Inp, { label: 'الرقم القومي', required: true, value: form.plaintiff_national_id, onChange: (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, plaintiff_national_id: onlyDigits(e.target.value) })), placeholder: '14 رقم', inputMode: 'numeric', maxLength: 14 }),
                         React.createElement(Inp, { label: 'رقم التوكيل', value: form.plaintiff_power_of_attorney, onChange: set('plaintiff_power_of_attorney'), placeholder: 'رقم التوكيل' })
                     ),
                     React.createElement('div', { className: 'border-t border-white/5 my-1' }),
@@ -158,7 +183,7 @@ function EditStandaloneModal({ session, db, onClose, onSaved }: EditStandaloneMo
                         React.createElement(Inp, { label: 'الخصم', required: true, value: form.defendant, onChange: set('defendant'), placeholder: 'الاسم بالكامل' }),
                         React.createElement(Inp, { label: 'الصفة', value: form.defendant_role, onChange: set('defendant_role'), placeholder: 'مدعى عليه' })
                     ),
-                    React.createElement(Inp, { label: 'الرقم القومي للخصم', value: form.defendant_national_id, onChange: set('defendant_national_id'), placeholder: '14 رقم' }),
+                    React.createElement(Inp, { label: 'الرقم القومي للخصم', value: form.defendant_national_id, onChange: (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, defendant_national_id: onlyDigits(e.target.value) })), placeholder: '14 رقم', inputMode: 'numeric', maxLength: 14 }),
                     React.createElement(Inp, { label: 'الإجراء القادم', value: form.next_action, onChange: set('next_action'), placeholder: 'مثال: تقديم مذكرة دفاع' }),
                     React.createElement('div', { className: 'h-4' })
                 ),
@@ -206,7 +231,7 @@ interface LinkSessionModalProps {
 function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientAdded, hasClient }: LinkSessionModalProps) {
     const {
         linkingCase, linkingClient, linkingToCase, linkingExisting,
-        clientStep, setClientStep, foundClient,
+        clientStep, setClientStep, foundClient, foundClientMatchType,
         clientSearch, searchResults, searching, selectedExistingClient, setSelectedExistingClient,
         handleLinkCase, handleLinkExistingClient, handleAddAndLinkClient, handleAddClientOnly,
         searchExistingClients, confirmLinkToExistingClient,
@@ -317,14 +342,23 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                             React.createElement('span', null, '🔗'),
                             React.createElement('span', null, linkingToCase ? '⏳ جاري الربط...' : 'نعم، ربط بهذا الموكل')
                         ),
-                        React.createElement('button', {
+                        // ⚡ FIX: زي NewStandaloneSessionModal.tsx بالظبط — لو التطابق
+                        // مؤكد (نفس الاسم بالظبط أو نفس الرقم القومي/التوكيل)، زرار
+                        // "إضافة موكل جديد" كان بيوصل لطريق مسدود صامت: handleAddAndLinkClient
+                        // بينده checkClientDuplicate بنفس البيانات فيرفضه ويرجّع نفس
+                        // خطوة 'found' من غير أي رد فعل ظاهر للمستخدم. نعرضه بس لما
+                        // يكون التطابق تخمين بالاسم فقط (fuzzy).
+                        foundClientMatchType !== 'exact' && React.createElement('button', {
                             onClick: handleAddAndLinkClient,
                             disabled: linkingToCase,
                             className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2'
                         },
                             React.createElement('span', null, '➕'),
                             React.createElement('span', null, 'إضافة موكل جديد وربطه')
-                        )
+                        ),
+                        foundClientMatchType === 'exact' && React.createElement('p', {
+                            className: 'text-[10px] text-slate-500 text-center px-2'
+                        }, 'الاسم أو الرقم القومي أو رقم التوكيل مطابق تمامًا لموكل مسجل بالفعل — لو ده شخص مختلف فعلاً، عدّل بياناته من صفحة الموكلين مباشرة.')
                     ),
                     React.createElement('button', {
                         onClick: onFullClose,
