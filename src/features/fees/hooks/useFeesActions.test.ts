@@ -11,10 +11,11 @@ import type { MappedCase } from '../../../hooks/useAppData';
 //   - db.from('case_fees').select('*',{count}).eq('status',s).is(...).order(...).range(...)  [fetchFees]
 //   - db.from('fee_payments').select('*').in('fee_id',ids).order('payment_date',...)         [fetchFees payments]
 //   - db.from('case_fees').insert([...]).select().single()                                    [handleSave create]
-//   - db.from('fee_payments').insert([...])                                                    [handleSave/handleAddPayment]
-//   - db.from('fee_payments').select('amount').eq('fee_id', id)                                [realPaid recompute]
-//   - db.from('case_fees').update({...}).eq('id', id)                                          [handleSave/handleAddPayment/handleDelete...]
+//   - db.from('fee_payments').insert([...])                                                    [handleSave، دفعة مقدّمة وقت الإنشاء]
+//   - db.from('fee_payments').select('amount').eq('fee_id', id)                                [realPaid recompute — handleSave/handleDeletePayment]
+//   - db.from('case_fees').update({...}).eq('id', id)                                          [handleSave/handleDelete...]
 //   - db.from('fee_payments').delete().eq('id', payId)                                         [handleDeletePayment]
+//   - db.rpc('record_fee_payment', {...})                                                       [handleAddPayment — نداء ذرّي واحد]
 // ══════════════════════════════════════════════════════════════════
 type Result = { data?: unknown; error?: unknown; count?: number | null };
 const DEFAULT_RESULT: Result = { data: [], error: null, count: 0 };
@@ -24,6 +25,7 @@ function makeMockDb() {
   const insertSpy = vi.fn();
   const updateSpy = vi.fn();
   const deleteSpy = vi.fn();
+  const rpcSpy = vi.fn();
 
   const setResult = (key: string, result: Result) => { configured[key] = result; };
   const get = (key: string) => configured[key] ?? DEFAULT_RESULT;
@@ -75,11 +77,27 @@ function makeMockDb() {
     }),
   }));
 
-  return { from, setResult, insertSpy, updateSpy, deleteSpy };
+  // ⚡ FIX: تسجيل دفعة (handleAddPayment) بيعدي دلوقتي عن طريق db.rpc('record_fee_payment', …)
+  // — نداء ذرّي واحد بدل insert/select/update منفصلين (راجع migration الدفعات). الموك
+  // القديم مكانش فيه rpc() خالص فكانت بترمي "db.rpc is not a function" — استثناء
+  // غير متوقع/غير ممسوك كان بيسرّب unhandled rejection يضرب تستات تانية في نفس
+  // الملف. افتراضيًا بترجع نجاح ({error:null})؛ تقدر تتحكم فيها بـ
+  // setResult('rpc:record_fee_payment', {...}).
+  const rpc = vi.fn((name: string, params: unknown) => {
+    rpcSpy(name, params);
+    return Promise.resolve(get(`rpc:${name}`) ?? { data: null, error: null });
+  });
+
+  return { from, rpc, setResult, insertSpy, updateSpy, deleteSpy, rpcSpy };
 }
 
 let mockDb = makeMockDb();
-vi.mock('../../../supabaseClient', () => ({ db: { from: (...a: Parameters<typeof mockDb.from>) => mockDb.from(...a) } }));
+vi.mock('../../../supabaseClient', () => ({
+  db: {
+    from: (...a: Parameters<typeof mockDb.from>) => mockDb.from(...a),
+    rpc: (...a: Parameters<typeof mockDb.rpc>) => mockDb.rpc(...a),
+  },
+}));
 
 const toast = vi.fn();
 vi.mock('../../../shared/lib/notifications', () => ({ toast: (...a: unknown[]) => toast(...a) }));
@@ -243,18 +261,34 @@ describe('useFeesActions', () => {
     });
   });
 
+  // ⚡ FIX (21 يوليو 2026 — المرحلة 6): تسجيل دفعة بقى نداء RPC ذرّي واحد
+  // (record_fee_payment) بدل 3 استعلامات منفصلة (insert → select → update)
+  // — التستات دلوقتي بتتأكد من الـ params المبعوتة لـ db.rpc، مش من
+  // insert/update منفصلين على fee_payments/case_fees (مبقتش موجودة في
+  // الكود الحقيقي خالص). الـ recompute والـ status الجديدة بقوا جوه الـ
+  // transaction على مستوى القاعدة — مش ملاحظين من هنا، فمفيش تستات عليهم.
   describe('handleAddPayment', () => {
-    it('مبلغ صفر أو سالب → توست تحذير فقط، من غير أي نداء لقاعدة البيانات', async () => {
+    it('مبلغ صفر أو سالب → توست تحذير فقط، من غير أي نداء rpc', async () => {
       const { result } = await renderFeesHook();
       act(() => { result.current.setPayAmount('0'); });
       await act(async () => { await result.current.handleAddPayment(makeFee()); });
 
       expect(toast).toHaveBeenCalledWith('أدخل مبلغاً صحيحاً', true);
-      expect(mockDb.insertSpy).not.toHaveBeenCalled();
+      expect(mockDb.rpcSpy).not.toHaveBeenCalled();
+    });
+
+    it('أوفلاين (مفيش نت) → توست تحذير واضح يطلب إعادة المحاولة أونلاين، من غير أي نداء rpc', async () => {
+      Object.defineProperty(navigator, 'onLine', { value: false, configurable: true });
+      const { result } = await renderFeesHook();
+      act(() => { result.current.setPayAmount('200'); });
+      await act(async () => { await result.current.handleAddPayment(makeFee()); });
+
+      expect(toast).toHaveBeenCalledWith('⚠️ تسجيل الدفعة يتطلب اتصالاً بالإنترنت — أعد المحاولة عند توفر الاتصال', true);
+      expect(mockDb.rpcSpy).not.toHaveBeenCalled();
+      Object.defineProperty(navigator, 'onLine', { value: true, configurable: true });
     });
 
     it('مبلغ أكبر من المتبقي → توست تحذير لكن بيكمل التسجيل عادي (مش حظر)', async () => {
-      mockDb.setResult('fee_payments:eqFeeId', { data: [{ amount: 900 }], error: null });
       const { result } = await renderFeesHook();
       const fee = makeFee({ total_fees: 1000, paid_fees: 500 }); // المتبقي 500
       act(() => { result.current.setPayAmount('900'); }); // أكبر من الـ 500 المتبقي
@@ -262,23 +296,21 @@ describe('useFeesActions', () => {
 
       expect(toast).toHaveBeenCalledWith(expect.stringContaining('يتجاوز المتبقي'), true);
       // برضو المفروض اتسجلت فعليًا (مفيش return مبكر في الكود الحقيقي)
-      expect(mockDb.insertSpy).toHaveBeenCalledWith('fee_payments', [expect.objectContaining({ amount: 900 })]);
+      expect(mockDb.rpcSpy).toHaveBeenCalledWith('record_fee_payment', expect.objectContaining({ p_fee_id: fee.id, p_amount: 900 }));
     });
 
-    it('اختيار موكل من القايمة → بيتسجل client_id/client_name بتاعه (مش بتاع الأتعاب الأصلية)', async () => {
-      mockDb.setResult('fee_payments:eqFeeId', { data: [{ amount: 200 }], error: null });
+    it('اختيار موكل من القايمة → بيتسجل p_client_id/p_client_name بتاعه (مش بتاع الأتعاب الأصلية)', async () => {
       const { result } = await renderFeesHook();
       const fee = makeFee({ client_id: 'client-original', client_name: 'اسم قديم' });
       act(() => { result.current.setPayAmount('200'); result.current.setPayClientName('client-1'); });
       await act(async () => { await result.current.handleAddPayment(fee); });
 
-      expect(mockDb.insertSpy).toHaveBeenCalledWith('fee_payments', [expect.objectContaining({
-        client_id: 'client-1', client_name: 'أحمد محمد',
-      })]);
+      expect(mockDb.rpcSpy).toHaveBeenCalledWith('record_fee_payment', expect.objectContaining({
+        p_client_id: 'client-1', p_client_name: 'أحمد محمد',
+      }));
     });
 
-    it('إدخال اسم يدوي (__manual__) → client_id يترجع null، client_name = النص المكتوب', async () => {
-      mockDb.setResult('fee_payments:eqFeeId', { data: [{ amount: 200 }], error: null });
+    it('إدخال اسم يدوي (__manual__) → p_client_id يترجع null، p_client_name = النص المكتوب', async () => {
       const { result } = await renderFeesHook();
       const fee = makeFee();
       act(() => {
@@ -288,54 +320,55 @@ describe('useFeesActions', () => {
       });
       await act(async () => { await result.current.handleAddPayment(fee); });
 
-      expect(mockDb.insertSpy).toHaveBeenCalledWith('fee_payments', [expect.objectContaining({
-        client_id: null, client_name: 'اسم مكتوب يدويًا',
-      })]);
+      expect(mockDb.rpcSpy).toHaveBeenCalledWith('record_fee_payment', expect.objectContaining({
+        p_client_id: null, p_client_name: 'اسم مكتوب يدويًا',
+      }));
     });
 
     it('من غير اختيار موكل → بيرجع لبيانات الـ fee الأصلية (fallback)', async () => {
-      mockDb.setResult('fee_payments:eqFeeId', { data: [{ amount: 200 }], error: null });
       const { result } = await renderFeesHook();
       const fee = makeFee({ client_id: 'client-original', client_name: 'اسم الأتعاب الأصلي' });
       act(() => { result.current.setPayAmount('200'); });
       await act(async () => { await result.current.handleAddPayment(fee); });
 
-      expect(mockDb.insertSpy).toHaveBeenCalledWith('fee_payments', [expect.objectContaining({
-        client_id: 'client-original', client_name: 'اسم الأتعاب الأصلي',
-      })]);
+      expect(mockDb.rpcSpy).toHaveBeenCalledWith('record_fee_payment', expect.objectContaining({
+        p_client_id: 'client-original', p_client_name: 'اسم الأتعاب الأصلي',
+      }));
     });
 
-    it('الدفعة الأخيرة تكمّل المبلغ بالكامل → status تتحول لـ collected', async () => {
-      mockDb.setResult('fee_payments:eqFeeId', { data: [{ amount: 500 }, { amount: 500 }], error: null });
+    it('نجاح → rpc بكل الحقول الصحيحة، توست نجاح، تسجيل نشاط، وتصفير حقول الفورم', async () => {
       const { result } = await renderFeesHook();
-      const fee = makeFee({ total_fees: 1000, paid_fees: 500 });
-      act(() => { result.current.setPayAmount('500'); });
+      const fee = makeFee({ id: 'fee-99', client_id: 'client-1', client_name: 'اسم الأتعاب' });
+      act(() => {
+        result.current.setPayAmount('300');
+        result.current.setPayDate('2026-07-20');
+        result.current.setPayNote('ملاحظة الدفعة');
+        result.current.setPayReceiver('المحاسب');
+      });
       await act(async () => { await result.current.handleAddPayment(fee); });
 
-      expect(mockDb.updateSpy).toHaveBeenCalledWith('case_fees', expect.objectContaining({
-        paid_fees: 1000, status: 'collected',
-      }));
+      expect(mockDb.rpcSpy).toHaveBeenCalledWith('record_fee_payment', {
+        p_fee_id: 'fee-99', p_amount: 300, p_payment_date: '2026-07-20', p_notes: 'ملاحظة الدفعة',
+        p_received_by: 'المحاسب', p_client_id: 'client-1', p_client_name: 'اسم الأتعاب',
+      });
       expect(toast).toHaveBeenCalledWith('✅ تم تسجيل الدفعة');
+      expect(logActivity).toHaveBeenCalledWith(expect.anything(), 'تسجيل دفعة', expect.objectContaining({
+        entity_type: 'fee', entity_id: 'fee-99', client_name: 'اسم الأتعاب',
+      }));
+      expect(result.current.payAmount).toBe('');
+      expect(result.current.payDate).toBe('');
+      expect(result.current.payNote).toBe('');
+      expect(result.current.payReceiver).toBe('');
     });
 
-    it('فشل الـ insert → توست خطأ، من غير أي محاولة تحديث case_fees', async () => {
-      mockDb.setResult('fee_payments:insert', { error: { message: 'insert failed' } });
+    it('فشل الـ rpc → توست خطأ، من غير logActivity', async () => {
+      mockDb.setResult('rpc:record_fee_payment', { error: { message: 'rpc failed' } });
       const { result } = await renderFeesHook();
       act(() => { result.current.setPayAmount('200'); });
       await act(async () => { await result.current.handleAddPayment(makeFee()); });
 
       expect(toast).toHaveBeenCalledWith('❌ فشل تسجيل الدفعة، يرجى المحاولة مرة أخرى', true);
-      expect(mockDb.updateSpy).not.toHaveBeenCalledWith('case_fees', expect.anything());
-    });
-
-    it('نجح تسجيل الدفعة لكن فشل تحديث case_fees → توست تحذير جزئي (مش فشل كامل)', async () => {
-      mockDb.setResult('fee_payments:eqFeeId', { data: [{ amount: 200 }], error: null });
-      mockDb.setResult('case_fees:update', { error: { message: 'update failed' } });
-      const { result } = await renderFeesHook();
-      act(() => { result.current.setPayAmount('200'); });
-      await act(async () => { await result.current.handleAddPayment(makeFee()); });
-
-      expect(toast).toHaveBeenCalledWith('⚠️ تم تسجيل الدفعة لكن فشل تحديث إجمالي المدفوع، يرجى تحديث الصفحة', true);
+      expect(logActivity).not.toHaveBeenCalled();
     });
   });
 
