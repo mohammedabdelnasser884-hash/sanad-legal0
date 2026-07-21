@@ -10,17 +10,16 @@ import type { ReminderRow, ProfileRow } from '../../../types';
 //   - db.from('reminders').select('*',{count}).eq('done',true).order(...).range()                  [fetchDone]
 //   - db.from('reminders').select('*').ilike('title',...).order(...).limit(50)                      [searchReminders]
 //   - db.from('reminders').select('*').ilike('notes',...).order(...).limit(50)                       [searchReminders]
-//   - db.from('reminders').insert([...])                                                             [handleSave]
-//   - db.from('reminders').delete().eq('id',x)                                                       [handleDelete]
-// handleToggleDone/handleEdit بيعدوا عن طريق safeUpdate (dataAccess.ts) مش db.from مباشرة.
+// handleSave/handleToggleDone/handleDelete بيعدوا عن طريق window.__dbWrite (مش
+// db.from('reminders').insert/update/delete مباشرة) — مرحلة 6 (توسيع الأوفلاين
+// H-3)، نفس نمط useClientActions.test.ts/useSessionLinking.test.ts. handleEdit
+// لسه بيعدي عن طريق safeUpdate (dataAccess.ts) — ملموش في الفيتشر ده.
 // ══════════════════════════════════════════════════════════════════
 type Result = { data?: unknown; error?: unknown; count?: number | null };
 const DEFAULT_LIST_RESULT: Result = { data: [], error: null, count: 0 };
 
 function makeMockDb() {
   const configured: Record<string, Result> = {};
-  const insertSpy = vi.fn();
-  const deleteSpy = vi.fn();
 
   const setResult = (key: string, result: Result) => { configured[key] = result; };
   const get = (key: string) => configured[key] ?? DEFAULT_LIST_RESULT;
@@ -56,19 +55,9 @@ function makeMockDb() {
 
   const from = vi.fn(() => ({
     select: vi.fn(() => buildSelectChain()),
-    insert: vi.fn((payload: unknown) => {
-      insertSpy(payload);
-      return Promise.resolve(get('reminders:insert') ?? { error: null });
-    }),
-    delete: vi.fn(() => ({
-      eq: vi.fn((col: string, val: unknown) => {
-        deleteSpy(val);
-        return Promise.resolve(get('reminders:delete') ?? { error: null });
-      }),
-    })),
   }));
 
-  return { from, setResult, insertSpy, deleteSpy };
+  return { from, setResult };
 }
 
 let mockDb = makeMockDb();
@@ -93,6 +82,10 @@ vi.mock('../../../systemHealth', () => ({
 
 import { useRemindersTab } from './useRemindersTab';
 
+function dbWriteMock(): ReturnType<typeof vi.fn> {
+  return window.__dbWrite as unknown as ReturnType<typeof vi.fn>;
+}
+
 const profile = { id: 'lawyer-1', full_name: 'المحامي سالم', tenant_id: 'tenant-1' } as ProfileRow;
 
 function makeReminder(overrides: Partial<ReminderRow> = {}): ReminderRow {
@@ -113,6 +106,7 @@ describe('useRemindersTab', () => {
   beforeEach(() => {
     mockDb = makeMockDb();
     vi.clearAllMocks();
+    window.__dbWrite = vi.fn() as unknown as typeof window.__dbWrite;
   });
 
   describe('التحميل الأولي (fetchReminders عبر useEffect)', () => {
@@ -198,17 +192,17 @@ describe('useRemindersTab', () => {
   });
 
   describe('handleSave', () => {
-    it('عنوان أو تاريخ فاضي → توست تحذير، من غير أي INSERT', async () => {
+    it('عنوان أو تاريخ فاضي → توست تحذير، من غير أي __dbWrite', async () => {
       const { result } = await renderReady();
       act(() => { result.current.setForm({ title: '', due_date: '', notes: '' }); });
 
       await act(async () => { await result.current.handleSave(); });
 
       expect(toast).toHaveBeenCalledWith('يرجى إدخال العنوان والتاريخ', true);
-      expect(mockDb.insertSpy).not.toHaveBeenCalled();
+      expect(dbWriteMock()).not.toHaveBeenCalled();
     });
 
-    it('مفيش tenant_id في البروفايل → توست فشل تحديد المكتب، من غير INSERT — FIX (RLS tenant_scoped_reminders)', async () => {
+    it('مفيش tenant_id في البروفايل → توست فشل تحديد المكتب، من غير __dbWrite — FIX (RLS tenant_scoped_reminders)', async () => {
       // ⚠️ FIX (17 يوليو 2026): كان فيه { ...profile, tenant_id: null } بيتكتب
       // *جوه* الكولباك اللي بتاخده renderHook مباشرة — يعني object جديد
       // بـ identity مختلفة بيتعمل في كل re-render. الهوك بيحط profile في
@@ -226,19 +220,22 @@ describe('useRemindersTab', () => {
       await act(async () => { await result.current.handleSave(); });
 
       expect(toast).toHaveBeenCalledWith('❌ تعذر تحديد المكتب الحالي، أعد تسجيل الدخول وحاول مرة أخرى', true);
-      expect(mockDb.insertSpy).not.toHaveBeenCalled();
+      expect(dbWriteMock()).not.toHaveBeenCalled();
     });
 
-    it('نجاح → INSERT بـ tenant_id من البروفايل، توست نجاح، تسجيل نشاط، إغلاق الفورم وتصفيره، وfetchReminders (إعادة تحميل)', async () => {
-      mockDb.setResult('reminders:insert', { error: null });
+    it('نجاح → INSERT عن طريق __dbWrite بـ tenant_id من البروفايل، توست نجاح، تسجيل نشاط، إغلاق الفورم وتصفيره، وfetchReminders (إعادة تحميل)', async () => {
+      dbWriteMock().mockResolvedValue({ error: null, offline: false, queued: false });
       const { result } = await renderReady();
       act(() => { result.current.setForm({ title: '  تذكير جديد  ', due_date: '2026-08-01', notes: 'ملاحظة' }); });
 
       await act(async () => { await result.current.handleSave(); });
 
-      expect(mockDb.insertSpy).toHaveBeenCalledWith([expect.objectContaining({
-        title: 'تذكير جديد', due_date: '2026-08-01', notes: 'ملاحظة', done: false, tenant_id: 'tenant-1',
-      })]);
+      expect(dbWriteMock()).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'INSERT', table: 'reminders',
+        data: expect.objectContaining({
+          title: 'تذكير جديد', due_date: '2026-08-01', notes: 'ملاحظة', done: false, tenant_id: 'tenant-1',
+        }),
+      }));
       expect(toast).toHaveBeenCalledWith('✅ تم إضافة التذكير');
       expect(logActivity).toHaveBeenCalledWith(expect.anything(), 'إضافة تذكير', expect.objectContaining({
         entity_type: 'reminder', details: 'تذكير جديد',
@@ -247,8 +244,21 @@ describe('useRemindersTab', () => {
       expect(result.current.form).toEqual({ title: '', due_date: '', notes: '' });
     });
 
+    it('أوفلاين (queued) → توست حفظ محلي، إغلاق الفورم وتصفيره، من غير logActivity — سلوك أوفلاين حقيقي (مرحلة 6)', async () => {
+      dbWriteMock().mockResolvedValue({ error: null, offline: true, queued: true });
+      const { result } = await renderReady();
+      act(() => { result.current.setForm({ title: 'تذكير أوفلاين', due_date: '2026-08-01', notes: '' }); });
+
+      await act(async () => { await result.current.handleSave(); });
+
+      expect(toast).toHaveBeenCalledWith('📥 التذكير محفوظ محلياً — سيُزامن عند عودة الإنترنت');
+      expect(result.current.showForm).toBe(false);
+      expect(result.current.form).toEqual({ title: '', due_date: '', notes: '' });
+      expect(logActivity).not.toHaveBeenCalled();
+    });
+
     it('فشل الإدخال → recordError بمفتاح reminder_save، توست فشل، من غير logActivity أو إغلاق الفورم', async () => {
-      mockDb.setResult('reminders:insert', { error: { message: 'insert failed' } });
+      dbWriteMock().mockResolvedValue({ error: { message: 'insert failed' }, offline: false, queued: false });
       const { result } = await renderReady();
       act(() => { result.current.setForm({ title: 'تذكير فاشل', due_date: '2026-08-01', notes: '' }); });
 
@@ -262,30 +272,59 @@ describe('useRemindersTab', () => {
   });
 
   describe('handleToggleDone', () => {
-    it('من غير إنجاز → إنجاز (done:true, completed_at الآن)، توست نجاح، fetchReminders', async () => {
-      safeUpdate.mockResolvedValue({ success: true, error: null });
+    it('من غير إنجاز → إنجاز (done:true, completed_at الآن) عن طريق __dbWrite (UPDATE) بـ knownUpdatedAt، توست نجاح، fetchReminders', async () => {
+      dbWriteMock().mockResolvedValue({ error: null, offline: false, queued: false, conflict: false });
       const { result } = await renderReady();
       const reminder = makeReminder({ id: 'rem-toggle', done: false, updated_at: '2026-07-01T00:00:00.000Z' });
 
       await act(async () => { await result.current.handleToggleDone(reminder); });
 
-      expect(safeUpdate).toHaveBeenCalledWith(expect.anything(), 'reminders', 'rem-toggle', expect.objectContaining({ done: true, completed_at: expect.any(String) }), '2026-07-01T00:00:00.000Z');
+      expect(dbWriteMock()).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'UPDATE', table: 'reminders', id: 'rem-toggle',
+        data: expect.objectContaining({ done: true, completed_at: expect.any(String) }),
+        knownUpdatedAt: '2026-07-01T00:00:00.000Z',
+      }));
       expect(toast).toHaveBeenCalledWith('✅ تم تسجيل الإنجاز');
     });
 
     it('إنجاز بالفعل → إلغاء الإنجاز (done:false, completed_at:null)، توست مختلف', async () => {
-      safeUpdate.mockResolvedValue({ success: true, error: null });
+      dbWriteMock().mockResolvedValue({ error: null, offline: false, queued: false, conflict: false });
       const { result } = await renderReady();
       const reminder = makeReminder({ id: 'rem-toggle-2', done: true });
 
       await act(async () => { await result.current.handleToggleDone(reminder); });
 
-      expect(safeUpdate).toHaveBeenCalledWith(expect.anything(), 'reminders', 'rem-toggle-2', { done: false, completed_at: null }, expect.anything());
+      expect(dbWriteMock()).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'UPDATE', table: 'reminders', id: 'rem-toggle-2',
+        data: { done: false, completed_at: null },
+      }));
       expect(toast).toHaveBeenCalledWith('↩️ تم إلغاء الإنجاز');
     });
 
+    it('أوفلاين (queued) → توست حفظ محلي، من غير توست نجاح/فشل', async () => {
+      dbWriteMock().mockResolvedValue({ error: null, offline: true, queued: true });
+      const { result } = await renderReady();
+      const reminder = makeReminder({ id: 'rem-toggle-offline' });
+
+      await act(async () => { await result.current.handleToggleDone(reminder); });
+
+      expect(toast).toHaveBeenCalledWith('📥 التعديل محفوظ محلياً — سيُزامن عند عودة الإنترنت');
+      expect(toast).not.toHaveBeenCalledWith('✅ تم تسجيل الإنجاز');
+    });
+
+    it('تعارض (conflict:true) → توست تعارض صريح، من غير توست نجاح/فشل', async () => {
+      dbWriteMock().mockResolvedValue({ error: null, offline: false, queued: false, conflict: true });
+      const { result } = await renderReady();
+      const reminder = makeReminder({ id: 'rem-toggle-conflict' });
+
+      await act(async () => { await result.current.handleToggleDone(reminder); });
+
+      expect(toast).toHaveBeenCalledWith('⚠️ هذا التذكير عدّله شخص آخر بعد ما فتحته — أعد المحاولة', true);
+      expect(toast).not.toHaveBeenCalledWith('✅ تم تسجيل الإنجاز');
+    });
+
     it('فشل التحديث → recordError، توست فشل، من غير fetchReminders إضافي', async () => {
-      safeUpdate.mockResolvedValue({ success: false, error: { message: 'toggle failed' } });
+      dbWriteMock().mockResolvedValue({ error: { message: 'toggle failed' }, offline: false, queued: false, conflict: false });
       const { result } = await renderReady();
       const reminder = makeReminder({ id: 'rem-toggle-3' });
       const fromCallsBefore = mockDb.from.mock.calls.length;
@@ -299,19 +338,29 @@ describe('useRemindersTab', () => {
   });
 
   describe('handleDelete', () => {
-    it('نجاح → DELETE بالـ id الصحيح، توست نجاح، تسجيل نشاط، fetchReminders', async () => {
-      mockDb.setResult('reminders:delete', { error: null });
+    it('نجاح → DELETE عن طريق __dbWrite بالـ id الصحيح، توست نجاح، تسجيل نشاط، fetchReminders', async () => {
+      dbWriteMock().mockResolvedValue({ error: null, offline: false, queued: false });
       const { result } = await renderReady();
 
       await act(async () => { await result.current.handleDelete('rem-del-1'); });
 
-      expect(mockDb.deleteSpy).toHaveBeenCalledWith('rem-del-1');
+      expect(dbWriteMock()).toHaveBeenCalledWith(expect.objectContaining({ type: 'DELETE', table: 'reminders', id: 'rem-del-1' }));
       expect(toast).toHaveBeenCalledWith('🗑 تم حذف التذكير');
       expect(logActivity).toHaveBeenCalledWith(expect.anything(), 'حذف تذكير', expect.objectContaining({ entity_type: 'reminder', entity_id: 'rem-del-1' }));
     });
 
+    it('أوفلاين (queued) → توست حفظ محلي، من غير logActivity — سلوك أوفلاين حقيقي (مرحلة 6)', async () => {
+      dbWriteMock().mockResolvedValue({ error: null, offline: true, queued: true });
+      const { result } = await renderReady();
+
+      await act(async () => { await result.current.handleDelete('rem-del-offline'); });
+
+      expect(toast).toHaveBeenCalledWith('📥 الحذف محفوظ محلياً — سيُزامن عند عودة الإنترنت');
+      expect(logActivity).not.toHaveBeenCalled();
+    });
+
     it('فشل الحذف → recordError، توست فشل، من غير logActivity', async () => {
-      mockDb.setResult('reminders:delete', { error: { message: 'delete failed' } });
+      dbWriteMock().mockResolvedValue({ error: { message: 'delete failed' }, offline: false, queued: false });
       const { result } = await renderReady();
 
       await act(async () => { await result.current.handleDelete('rem-del-2'); });
