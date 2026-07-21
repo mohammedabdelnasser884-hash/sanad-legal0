@@ -112,6 +112,15 @@ export function useClientActions(params: {
         }
         const nameErr = validateFullNameParts(form.full_name);
         if (nameErr) { toast(nameErr, true); return; }
+        // 🔒 FIX (تقرير الموثوقية — نتيجة 0): الزرار بيتقفل هنا فورًا، قبل
+        // فحص التكرار اللي هو استعلام على النت وممكن ياخد وقت لو النت
+        // بطيء. قبل الفيكس ده كان setSavingClient(true) بعد الفحص، فلو
+        // النت هيس والمستخدم ضغط "إضافة" أكتر من مرة، كل ضغطة كانت
+        // بتعمل فحصها الخاص وتشوف "مفيش تكرار" (لسه محدش عمل insert)،
+        // فيتسجل نفس الموكل أكتر من مرة — ده السبب الجذري اللي أدى لتكرار
+        // موكل واحد 3 مرات في الاستخدام الفعلي. تقفيل الزرار قبل الفحص
+        // بيضمن إن أي ضغطة تانية أثناء الفحص أو الحفظ متتجاهلش تمامًا.
+        setSavingClient(true);
         // ⚡ تحقق موحّد: يرفض الحفظ لو نفس الاسم أو نفس الرقم القومي مسجل
         // لموكل موجود بالفعل (نفس المكتب) — راجع clientValidation.ts.
         let dup;
@@ -119,10 +128,10 @@ export function useClientActions(params: {
             dup = await checkClientDuplicate(db, { full_name: form.full_name, national_id: form.national_id, cr_number: form.cr_number });
         } catch (e) {
             showErrorToast('client_duplicate_check', e, 'تعذّر التحقق من بيانات الموكل. حاول مرة أخرى.', 'إضافة موكل');
+            setSavingClient(false);
             return;
         }
-        if (dup.duplicate) { toast(dup.message!, true); return; }
-        setSavingClient(true);
+        if (dup.duplicate) { toast(dup.message!, true); setSavingClient(false); return; }
         // رفع الصور على Storage (يحتاج نت — مش بنحفظه offline)
         let idUrl: string | null = null, poaUrl: string | null = null;
         if (navigator.onLine) {
@@ -180,7 +189,17 @@ export function useClientActions(params: {
             // إضافة مؤقتة في الـ state المحلي
             setClients((prev) => [{ ...payload, id: 'offline-' + Date.now(), full_name: form.full_name } as unknown as ClientRow, ...prev]);
         } else if (error) {
-            toast('❌ فشل حفظ بيانات الموكل — تحقق من الاتصال وأعد المحاولة', true);
+            // 🔒 FIX (تقرير الموثوقية — نتيجة 3): خط دفاع أخير — لو الـ
+            // UNIQUE index على الداتابيز (راجع client-case-unique-constraints-migration.sql)
+            // رفض الإدراج (كود 23505 من Postgres) رغم إن فحص التكرار في
+            // الكود فوق عدّى، بنعرض نفس رسالة "موجود بالفعل" بدل رسالة
+            // خطأ عامة — بيغطي أي سباق نادر (TOCTOU) أو مسار أوفلاين
+            // اتخطى الفحص العادي.
+            if ((error as { code?: string }).code === '23505') {
+                toast('⚠️ موكل بنفس الاسم أو الرقم القومي مسجل بالفعل', true);
+            } else {
+                toast('❌ فشل حفظ بيانات الموكل — تحقق من الاتصال وأعد المحاولة', true);
+            }
             return;
         } else {
             toast('✅ تم إضافة الموكل بنجاح!');
@@ -310,6 +329,14 @@ export function useClientActions(params: {
         }
         const nameErr = validateFullNameParts(form.full_name);
         if (nameErr) { toast(nameErr, true); return; }
+        // 🔒 FIX (تقرير الموثوقية — نتيجة 0/1): الدالة دي ما كانش فيها أي
+        // حماية دبل كليك خالص — لا setSavingClient ولا أي state تاني. زرار
+        // "حفظ التعديلات" في EditClientModal فاضل شغال طول وقت الفحص
+        // والرفع والتحديث، فضغط متكرر (خصوصًا مع نت بطيء) ممكن يبعت أكتر
+        // من UPDATE متوازي ويرفع نفس الملف أكتر من مرة. بنستخدم نفس
+        // setSavingClient المستخدمة في handleSaveClient (المودالين بيشاركوا
+        // نفس الـ state من App.tsx)، وبنقفلها هنا فورًا قبل فحص التكرار.
+        setSavingClient(true);
         // ⚡ تحقق موحّد: يرفض التعديل لو نفس الاسم أو نفس الرقم القومي بقى
         // متسجل لموكل تاني غير الموكل ده نفسه (نفس المكتب) — راجع
         // clientValidation.ts. clientId هنا هو الاستثناء (بنعدّل بياناته هو).
@@ -318,9 +345,10 @@ export function useClientActions(params: {
             dup = await checkClientDuplicate(db, { full_name: form.full_name, national_id: form.national_id, cr_number: form.cr_number }, clientId);
         } catch (e) {
             showErrorToast('client_duplicate_check', e, 'تعذّر التحقق من بيانات الموكل. حاول مرة أخرى.', 'تعديل موكل');
+            setSavingClient(false);
             return;
         }
-        if (dup.duplicate) { toast(dup.message!, true); return; }
+        if (dup.duplicate) { toast(dup.message!, true); setSavingClient(false); return; }
         const client = clients.find((c) => c.id === clientId);
         const existingContactInfo = (client?.contact_info as ClientContactInfo | null) || null;
 
@@ -346,7 +374,7 @@ export function useClientActions(params: {
             if (poaFile) poaUrl = await uploadFile(poaFile, 'poa') ?? poaUrl;
         }
 
-        const { success, conflict } = await safeUpdate(db, 'clients', clientId, {
+        const { success, conflict, error } = await safeUpdate(db, 'clients', clientId, {
             client_name:  form.full_name,
             client_type:  form.type || 'individual',
             phone:        form.phone        || null,
@@ -364,8 +392,18 @@ export function useClientActions(params: {
             // المعروفة دي فعلاً متوافق مع Json" (كلاهما قيم string|null اختيارية).
             contact_info: { id_url: idUrl, poa_url: poaUrl } as ClientContactInfo as unknown as Json,
         }, client?.updated_at || null);
+        setSavingClient(false);
         if (conflict) return;
-        if (!success) { toast('❌ فشل تعديل بيانات الموكل — تحقق من الاتصال وأعد المحاولة', true); return; }
+        if (!success) {
+            // 🔒 FIX (تقرير الموثوقية — نتيجة 3): نفس خط الدفاع الأخير المستخدم
+            // في handleSaveClient — راجع التعليق هناك.
+            if (error?.code === '23505') {
+                toast('⚠️ موكل بنفس الاسم أو الرقم القومي مسجل بالفعل', true);
+            } else {
+                toast('❌ فشل تعديل بيانات الموكل — تحقق من الاتصال وأعد المحاولة', true);
+            }
+            return;
+        }
         toast('✅ تم تحديث بيانات الموكل');
         logActivity(db, 'تعديل موكل', { userName: _userName, entity_type: 'client', entity_id: clientId, details: form.full_name || null, client_name: form.full_name || null });
         fetchClients(0, clientSearch);
