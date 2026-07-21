@@ -43,7 +43,8 @@ function SessionUpdateModal({ session, caseData, db, onClose, onDone, onNotify }
         const { conflict } = await safeUpdate(db, 'case_sessions', session.id, {
             result: whatHappened || null,
         }, session.updated_at || null);
-        if (conflict) { setSaving(false); return; }
+        // 🔒 FIX (تقرير الموثوقية — القسم 12، Concurrent Editing): توست بدل السكوت التام.
+        if (conflict) { setSaving(false); toast('⚠️ هذه الجلسة عدّلها شخص آخر بعد ما فتحتها — أعد المحاولة', true); return; }
 
         // 2. أنشئ جلسة جديدة
         // ⚠️ الجلسة المستقلة (caseData.id = null) مالهاش صف في جدول cases —
