@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { db } from '../../../supabaseClient';
 import { toast } from '../../../shared/lib/notifications';
 import { escapeTelegramHtml } from '../../../shared/lib/sanitize';
-import { safeUpdate, logActivity, recalcNextHearing as recalcNextHearingShared } from '../../../shared/lib/dataAccess';
+import { logActivity, recalcNextHearing as recalcNextHearingShared } from '../../../shared/lib/dataAccess';
 import type { ClientRow, ProfileRow, CaseSessionRow } from '../../../types';
 import type { MappedCase } from '../../../hooks/useAppData';
 import type { EditingSessionForm } from '../case-detail/TimelineSection';
@@ -47,22 +47,36 @@ export function useCaseSessions(
   const handleAddSession = async () => {
     if (!sessionForm.date) return;
     setSavingSession(true);
-    const { error } = await db.from('case_sessions').insert([{
-      case_id: caseData.id,
-      session_date: sessionForm.date,
-      session_time: sessionForm.time_period || null,
-      session_floor: sessionForm.location_floor || null,
-      session_hall: sessionForm.location_hall || null,
-      description: sessionForm.description || null,
-      result: sessionForm.result || null,
-      next_action: sessionForm.next_action || null,
-    }]);
-    if (!error) {
-      // تحديث أقرب جلسة في جدول القضايا — بمقارنة حقيقية، مش استبدال أعمى
-      await recalcNextHearing(caseData.id);
-    }
+    // 🆕 المرحلة 6.5 (توسيع الأوفلاين — H-3، تكملة ثالثة): __dbWrite بدل
+    // db.from(...).insert() المباشر — نفس نمط useCaseDetailActions.ts
+    // (case_notes) بالظبط. case_id هنا دايمًا حقيقي (القضية محمّلة ومعروضة
+    // على الشاشة فعليًا، مش تمبيد)، فمفيش داعي لـ _offlineFkTempId هنا.
+    const { error, offline, queued } = await window.__dbWrite({
+      type: 'INSERT', table: 'case_sessions', data: {
+        case_id: caseData.id,
+        session_date: sessionForm.date,
+        session_time: sessionForm.time_period || null,
+        session_floor: sessionForm.location_floor || null,
+        session_hall: sessionForm.location_hall || null,
+        description: sessionForm.description || null,
+        result: sessionForm.result || null,
+        next_action: sessionForm.next_action || null,
+      }
+    });
     setSavingSession(false);
+    if (offline && queued) {
+      // ⚠️ next_hearing مش بيتحدّث هنا فورًا — القضية معروضة على الشاشة
+      // فعليًا، فمفيش طريقة نعرف "أقرب جلسة" صح غير بمقارنة كل الجلسات على
+      // القاعدة. التحديث بيحصل تلقائيًا بعد المزامنة الفعلية (راجع
+      // caseSessionCaseIdsToRecalc في offlineQueue.ts).
+      toast('📥 الجلسة محفوظة محلياً — ستُزامن عند عودة الإنترنت');
+      setSessionForm({ date: '', time_period: 'صباحي', location_floor: '', location_hall: '', description: '', result: '', next_action: '' });
+      setShowAddSession(false);
+      return;
+    }
     if (error) { toast('❌ فشل إضافة الجلسة — تحقق من الاتصال وأعد المحاولة', true); return; }
+    // تحديث أقرب جلسة في جدول القضايا — بمقارنة حقيقية، مش استبدال أعمى
+    await recalcNextHearing(caseData.id);
     toast('✅ تمت إضافة الجلسة');
     logActivity(db, 'إضافة جلسة', {
       entity_type: 'session', details: `${caseData.title} — ${sessionForm.date}`,
@@ -89,7 +103,20 @@ export function useCaseSessions(
   };
 
   const handleDeleteSession = async (sessionId: string) => {
-    const { error } = await db.from('case_sessions').delete().eq('id', sessionId);
+    // 🆕 المرحلة 6.5: __dbWrite بدل db.from(...).delete() المباشر.
+    // `_offlineSessionCaseId` sentinel (بيتحذف قبل أي كتابة حقيقية، زي أي
+    // sentinel تاني في offlineQueue.ts — DELETE أصلاً مبيستخدمش `data` في
+    // التنفيذ الفعلي): غرضه الوحيد إن offlineQueue.ts يعرف بعد المزامنة
+    // الفعلية إن next_hearing للقضية دي محتاج إعادة حساب (راجع
+    // caseSessionCaseIdsToRecalc هناك).
+    const { error, offline, queued } = await window.__dbWrite({
+      type: 'DELETE', table: 'case_sessions', id: sessionId,
+      data: { _offlineSessionCaseId: caseData.id }
+    });
+    if (offline && queued) {
+      toast('📥 الحذف محفوظ محلياً — سيُزامن عند عودة الإنترنت');
+      return;
+    }
     if (error) { toast('❌ فشل حذف الجلسة، حاول مرة أخرى', true); return; }
     // FIX (2.3): لو الجلسة المحذوفة كانت هي الأقرب، لازم next_hearing يتحدّث
     await recalcNextHearing(caseData.id);
@@ -105,17 +132,35 @@ export function useCaseSessions(
 
   const handleUpdateSession = async (sessionId: string, form: { date: string; time_period?: string; location_floor?: string; location_hall?: string; description?: string; result?: string; next_action?: string }) => {
     const session = sessions.find((s) => s.id === sessionId);
-    const { success, conflict } = await safeUpdate(db, 'case_sessions', sessionId, {
-      session_date: form.date,
-      session_time: form.time_period || null,
-      session_floor: form.location_floor || null,
-      session_hall: form.location_hall || null,
-      description: form.description || null,
-      result: form.result || null,
-      next_action: form.next_action || null,
-    }, session?.updated_at || null);
-    if (conflict) return;
-    if (!success) { toast('❌ فشل تعديل بيانات الجلسة — تحقق من الاتصال وأعد المحاولة', true); return; }
+    // 🆕 المرحلة 6.5: __dbWrite بدل safeUpdate — بيحافظ على نفس فحص
+    // التعارض (knownUpdatedAt) أونلاين، وكمان بيقيّد في طابور الأوفلاين لو
+    // النت مقطوع (بعكس safeUpdate اللي كانت بترجع فشل صريح بس). نفس
+    // `_offlineSessionCaseId` sentinel اللي في handleDeleteSession فوق —
+    // بيتحذف قبل أي UPDATE حقيقي (stripOfflineSentinels)، غرضه بس تتبّع
+    // القضية لإعادة حساب next_hearing بعد المزامنة.
+    // ⚠️ تحسين إضافي عن السلوك القديم: safeUpdate كانت بترجع conflict من
+    // غير أي toast خالص (سكوت تام). دلوقتي بقى فيه رسالة واضحة، بنفس نمط
+    // handleUpdateNote في useCaseDetailActions.ts.
+    const { error, offline, queued, conflict } = await window.__dbWrite({
+      type: 'UPDATE', table: 'case_sessions', id: sessionId,
+      data: {
+        session_date: form.date,
+        session_time: form.time_period || null,
+        session_floor: form.location_floor || null,
+        session_hall: form.location_hall || null,
+        description: form.description || null,
+        result: form.result || null,
+        next_action: form.next_action || null,
+        _offlineSessionCaseId: caseData.id,
+      },
+      knownUpdatedAt: session?.updated_at || null,
+    });
+    if (offline && queued) {
+      toast('📥 التعديل محفوظ محلياً — سيُزامن عند عودة الإنترنت');
+      return;
+    }
+    if (conflict) { toast('⚠️ هذه الجلسة عدّلها شخص آخر بعد ما فتحتها — أعد المحاولة', true); return; }
+    if (error) { toast('❌ فشل تعديل بيانات الجلسة — تحقق من الاتصال وأعد المحاولة', true); return; }
     // FIX (2.3): تاريخ الجلسة ممكن يكون اتغيّر، فلازم next_hearing يتحدّث معاه
     await recalcNextHearing(caseData.id);
     toast('✅ تم تعديل الجلسة');
