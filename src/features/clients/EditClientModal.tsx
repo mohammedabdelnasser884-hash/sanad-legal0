@@ -33,9 +33,13 @@ interface EditClientModalProps {
     client: ClientRow;
     onClose: () => void;
     onSave: (form: EditClientForm, idFile?: File | null, poaFile?: File | null) => void;
+    // 🔒 FIX (تقرير الموثوقية — نتيجة 1): المودال ده ما كانش فيه أي حماية
+    // دبل كليك خالص (بعكس NewClientModal). بنستقبل نفس savingClient state
+    // من App.tsx عشان نقفل الزرار أثناء الحفظ.
+    saving?: boolean;
 }
 
-function EditClientModal({client: c, onClose, onSave}: EditClientModalProps) {
+function EditClientModal({client: c, onClose, onSave, saving = false}: EditClientModalProps) {
     const [form, setForm] = useState<EditClientForm>({
         full_name:   c.full_name   || '',
         type:        c.client_type || c.type || 'individual',
@@ -146,7 +150,9 @@ function EditClientModal({client: c, onClose, onSave}: EditClientModalProps) {
                 // زر الحفظ
                 React.createElement('button', {
                     'data-testid': 'save-client-edit-button',
+                    disabled: saving,
                     onClick: () => {
+                        if(saving) return;
                         if(!form.full_name || !form.full_name.trim()){ toast('يرجى إدخال اسم الموكل', true); return; }
                         const nameErr = validateFullNameParts(form.full_name);
                         if(nameErr){ toast(nameErr, true); return; }
@@ -156,8 +162,8 @@ function EditClientModal({client: c, onClose, onSave}: EditClientModalProps) {
                         if(form.national_id.length!==14){ toast('⚠️ الرقم القومي لازم يكون 14 رقم بالظبط', true); return; }
                         onSave(form, idFile, poaFile);
                     },
-                    className:"w-full py-3.5 bg-gradient-to-tr from-emerald-500 to-emerald-400 text-white rounded-xl font-black text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform mt-2"
-                }, React.createElement(I.Check), "حفظ التعديلات")
+                    className:"w-full py-3.5 bg-gradient-to-tr from-emerald-500 to-emerald-400 text-white rounded-xl font-black text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform mt-2 disabled:opacity-60"
+                }, React.createElement(I.Check), saving ? "⏳ جاري الحفظ..." : "حفظ التعديلات")
             )
         )),
         document.body
