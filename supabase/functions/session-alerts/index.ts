@@ -122,6 +122,32 @@ const sendSessionAlert = async (token: string, chat: string, sessions: any[], la
 };
 
 // ─────────────────────────────────────────────
+// 🔒 FIX (تقرير الموثوقية الشامل — H-6، المرحلة 5): محاولة "حجز" slot
+// الإشعار (مكتب + نوع + يوم) قبل أي إرسال فعلي. الحجز بيعتمد على قيد
+// UNIQUE فى session_alerts_log (مستوى القاعدة، مش فحص SELECT منفصل)
+// عشان يفضل safe حتى لو الفانكشن اتنادت مرتين فى نفس اللحظة بالظبط.
+// لو الحجز فشل (23505 — الصف موجود بالفعل)، يبقى الإشعار ده اتبعت
+// خلاص النهارده لنفس المكتب/النوع، فبنتخطاه بصمت من غير أي إرسال.
+// ─────────────────────────────────────────────
+const claimAlertSlot = async (tenantId: string, alertType: string, alertDate: string): Promise<boolean> => {
+  const { data, error } = await supabase
+    .from("session_alerts_log")
+    .insert({ tenant_id: tenantId, alert_type: alertType, alert_date: alertDate })
+    .select()
+    .maybeSingle();
+
+  if (error) {
+    if ((error as any).code === "23505") return false; // اتبعت بالفعل — مش خطأ حقيقي
+    // أي خطأ تاني (مش تعارض تكرار) — بنسجّله لكن بنكمل الإرسال بدل ما
+    // نمنعه بالغلط بسبب مشكلة فى جدول التتبّع نفسه (fail-open هنا،
+    // عكس فحص الصلاحيات اللي لازم يبقى fail-closed)
+    await logError("خطأ فى حجز slot إشعار", error.message, tenantId);
+    return true;
+  }
+  return !!data;
+};
+
+// ─────────────────────────────────────────────
 // تشغيل الفحص اليومي لمكتب واحد (tenant) — بياناته وبوته الخاص بيه
 // ─────────────────────────────────────────────
 const runForTenant = async (office: any, type: string) => {
@@ -138,6 +164,14 @@ const runForTenant = async (office: any, type: string) => {
   const todayStr = fmt(today);
   const tmrwStr  = fmt(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1));
   const day2Str  = fmt(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 2));
+
+  const claimed = await claimAlertSlot(tenantId, type, todayStr);
+  if (!claimed) {
+    // الإشعار ده ("morning"/"evening") اتبعت بالفعل النهارده لنفس
+    // المكتب — تخطّاه بصمت (مش خطأ، ده السلوك المطلوب بالظبط)
+    return;
+  }
+
 
   // ══════════════════════════════════════════
   // ── ٨ صبح: جلسات ومهام الغد وبعد غد ──
