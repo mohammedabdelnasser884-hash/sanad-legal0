@@ -217,7 +217,8 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
             const currentPaid = editFee?.paid_fees || 0;
             const payloadWithStatus = { ...payload, status: computeFeeStatus(newTotal, currentPaid) };
             const { conflict } = await safeUpdate(db, 'case_fees', editId, payloadWithStatus, editFee?.updated_at || null);
-            if (conflict) { setSaving(false); return; }
+            // 🔒 FIX (تقرير الموثوقية — القسم 12، Concurrent Editing): توست بدل السكوت التام.
+            if (conflict) { setSaving(false); toast('⚠️ سجل الأتعاب ده عدّله شخص آخر بعد ما فتحته — أعد المحاولة', true); return; }
             toast('✅ تم تحديث الأتعاب');
             logActivity(db, 'تعديل أتعاب', {
                 entity_type: 'fee', entity_id: editId, details: clientName || form.case_id,
