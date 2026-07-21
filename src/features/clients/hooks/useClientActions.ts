@@ -393,7 +393,8 @@ export function useClientActions(params: {
             contact_info: { id_url: idUrl, poa_url: poaUrl } as ClientContactInfo as unknown as Json,
         }, client?.updated_at || null);
         setSavingClient(false);
-        if (conflict) return;
+        // 🔒 FIX (تقرير الموثوقية — القسم 12، Concurrent Editing): توست بدل السكوت التام.
+        if (conflict) { toast('⚠️ هذا الموكل عدّله شخص آخر بعد ما فتحته — أعد المحاولة', true); return; }
         if (!success) {
             // 🔒 FIX (تقرير الموثوقية — نتيجة 3): نفس خط الدفاع الأخير المستخدم
             // في handleSaveClient — راجع التعليق هناك.
