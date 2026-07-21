@@ -373,7 +373,9 @@ ${PDF_FONT_LINK}
     setShowStatusPicker?.(false);
     const { success, conflict } = await safeUpdate(db, 'cases', caseData.id, { status: newStatus }, caseData.updated_at || null);
     setChangingStatus(false);
-    if (conflict) return;
+    // 🔒 FIX (تقرير الموثوقية — القسم 12، Concurrent Editing): كانت بترجع
+    // بصمت تام عند التعارض. نفس نمط الرسالة المستخدم في case_notes/cases.
+    if (conflict) { toast('⚠️ هذه القضية عدّلها شخص آخر بعد ما فتحتها — أعد المحاولة', true); return; }
     if (!success) { toast('❌ فشل تغيير الحالة', true); return; }
     toast('✅ تم تحديث حالة القضية');
     logActivity(db, 'تغيير حالة قضية', {
