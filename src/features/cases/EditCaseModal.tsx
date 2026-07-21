@@ -4,6 +4,7 @@ import { Inp } from '@/shared/ui/Inp';
 import { PoaInput } from '@/shared/ui/PoaInput';
 import { Sel } from '@/shared/ui/Sel';
 import { toast } from '../../shared/lib/notifications';
+import { validateFullNameParts } from '../../shared/lib/clientValidation';
 import DatePicker from '@/shared/ui/DatePicker';
 import type { MappedCase } from '../../hooks/useAppData';
 import type { CaseFormSubmitData } from './hooks/useCaseActions';
@@ -14,6 +15,10 @@ interface EditCaseModalProps {
     onSave: (form: CaseFormSubmitData) => void;
     countryCourts?: string[];
     countryCaseTypes?: string[];
+    // 🔒 FIX (تقرير الموثوقية — نتيجة 1): المودال ده ما كانش فيه أي حماية
+    // دبل كليك خالص (بعكس NewCaseModal). بنستقبل نفس savingCase state من
+    // App.tsx عشان نقفل الزرار أثناء الحفظ.
+    saving?: boolean;
 }
 
 interface EditCaseForm {
@@ -31,7 +36,7 @@ interface EditCaseForm {
 
 const onlyDigits = (v: string, max = 14) => v.replace(/\D/g, '').slice(0, max);
 
-function EditCaseModal({caseData, onClose, onSave, countryCourts, countryCaseTypes}: EditCaseModalProps){
+function EditCaseModal({caseData, onClose, onSave, countryCourts, countryCaseTypes, saving = false}: EditCaseModalProps){
     const splitNum = (num: string) => {
         if(!num||num==='—') return {n:'',y:''};
         const parts = num.split('/');
@@ -150,7 +155,8 @@ function EditCaseModal({caseData, onClose, onSave, countryCourts, countryCaseTyp
             React.createElement(PoaInput, {value:form.plaintiff_power_of_attorney, onChange:(v: string) =>s('plaintiff_power_of_attorney',v)}),
 
             // الرقم القومي للموكل
-            React.createElement(Inp, {label:"الرقم القومي للموكل", value:form.plaintiff_national_id, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('plaintiff_national_id',onlyDigits(e.target.value)), placeholder:"14 رقم", inputMode:"numeric", maxLength:14, 'data-testid':'edit-case-plaintiff-national-id'}),
+            // 🔒 FIX (تقرير الموثوقية — نتيجة 4): إجباري للموكل، اختياري للخصم — نفس قرار NewCaseModal.tsx.
+            React.createElement(Inp, {label:"الرقم القومي للموكل", value:form.plaintiff_national_id, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('plaintiff_national_id',onlyDigits(e.target.value)), placeholder:"14 رقم", required:true, inputMode:"numeric", maxLength:14, 'data-testid':'edit-case-plaintiff-national-id'}),
 
             // الخصم + صفته
             React.createElement('div', {className:"grid grid-cols-2 gap-2"},
@@ -305,13 +311,19 @@ function EditCaseModal({caseData, onClose, onSave, countryCourts, countryCaseTyp
 
             // زر الحفظ
             React.createElement('button', {
+                disabled: saving,
                 onClick: () => {
+                    if(saving) return;
                     if(!form.title.trim()){ toast('يرجى إدخال موضوع ومسمى الدعوى', true); return; }
                     if(!form.client_name.trim()){ toast('يرجى إدخال اسم الموكل', true); return; }
                     if(!form.client_capacity.trim()){ toast('يرجى إدخال صفة الموكل', true); return; }
                     if(!form.opponent.trim()){ toast('يرجى إدخال اسم الخصم', true); return; }
+                    // 🔒 FIX (تقرير الموثوقية — نتيجة 5 الفرعية): نفس فحص الاسم
+                    // الثلاثي المستخدم في NewCaseModal — من غير فحص تكرار.
+                    const oppNameErr = validateFullNameParts(form.opponent);
+                    if(oppNameErr){ toast('⚠️ اسم الخصم لازم يكون ثلاثي على الأقل (الاسم الأول، الأب، الجد)', true); return; }
                     if(!form.opponent_capacity.trim()){ toast('يرجى إدخال صفة الخصم', true); return; }
-                    if(form.plaintiff_national_id && form.plaintiff_national_id.length!==14){ toast('⚠️ الرقم القومي للموكل لازم يكون 14 رقم بالظبط', true); return; }
+                    if(form.plaintiff_national_id.length!==14){ toast('⚠️ الرقم القومي للموكل مطلوب ولازم يكون 14 رقم بالظبط', true); return; }
                     if(form.defendant_national_id && form.defendant_national_id.length!==14){ toast('⚠️ الرقم القومي للخصم لازم يكون 14 رقم بالظبط', true); return; }
                     const number = form.caseNum&&form.caseYear ? form.caseNum+'/'+form.caseYear : form.caseNum||form.caseYear||'';
                     const finalCourtLevel = form.court_level==='أخرى' ? form.court_level_other : form.court_level;
@@ -334,8 +346,8 @@ function EditCaseModal({caseData, onClose, onSave, countryCourts, countryCaseTyp
                     };
                     onSave(saveData);
                 },
-                className: "w-full py-3.5 bg-gradient-to-tr from-premium-gold to-amber-200 text-premium-bg rounded-xl font-black text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform mt-2"
-            }, React.createElement(I.Check), "حفظ التعديلات")
+                className: "w-full py-3.5 bg-gradient-to-tr from-premium-gold to-amber-200 text-premium-bg rounded-xl font-black text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform mt-2 disabled:opacity-60"
+            }, React.createElement(I.Check), saving ? "⏳ جاري الحفظ..." : "حفظ التعديلات")
         )
     );
 }
