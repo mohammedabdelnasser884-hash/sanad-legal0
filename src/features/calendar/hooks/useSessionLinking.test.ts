@@ -189,6 +189,24 @@ describe('useSessionLinking', () => {
       expect(toast).toHaveBeenCalledWith('❌ خطأ غير متوقع', true);
       expect(result.current.linkingCase).toBe(false);
     });
+
+    it('🆕 FIX: الجلسة معاها client_id بالفعل (اتربط قبل إنشاء القضية) → INSERT:cases بياخد نفس client_id، ومفيش بحث بالاسم (ilikeSpy متتناداش)، وclientStep=done على طول', async () => {
+      dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-with-client-1' } });
+      const mockDb = makeMockDb({ data: [{ id: 'should-not-be-used', full_name: 'محمد أحمد' }] });
+      const onDone = vi.fn();
+      const { result } = renderHook(() =>
+        useSessionLinking(makeSession({ client_id: 'client-already-linked' }), mockDb, onDone),
+      );
+
+      await act(async () => { await result.current.handleLinkCase(); });
+
+      expect(dbWrite.callsFor('INSERT:cases')[0].data).toEqual(expect.objectContaining({
+        client_id: 'client-already-linked',
+      }));
+      expect(mockDb.ilikeSpy).not.toHaveBeenCalled();
+      expect(result.current.clientStep).toBe('done');
+      expect(onDone).toHaveBeenCalled();
+    });
   });
 
   describe('handleLinkExistingClient', () => {
