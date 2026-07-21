@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { toast } from '../../shared/lib/notifications';
+import { validateFullNameParts } from '../../shared/lib/clientValidation';
 import { I } from '../../constants';
 import { Inp } from '@/shared/ui/Inp';
 import { PoaInput } from '@/shared/ui/PoaInput';
@@ -82,7 +83,11 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
                 React.createElement(PoaInput,{value:form.plaintiff_power_of_attorney,onChange:(v: string) =>s('plaintiff_power_of_attorney',v)}),
 
                 // الرقم القومي للموكل
-                React.createElement(Inp,{label:"الرقم القومي للموكل",value:form.plaintiff_national_id,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('plaintiff_national_id',onlyDigits(e.target.value)),placeholder:"14 رقم",inputMode:"numeric",maxLength:14,'data-testid':'new-case-plaintiff-national-id'}),
+                // 🔒 FIX (تقرير الموثوقية — نتيجة 4): الرقم القومي للموكل بقى
+                // إجباري (required + فحص 14 رقم بالظبط في زرار الحفظ) — القرار
+                // المتخذ: إجباري للموكل بس، اختياري للخصم (غالبًا مش بيبقى
+                // معانا)، وفحص الصيغة (أرقام فقط + 14 رقم) لو الخصم اتكتب.
+                React.createElement(Inp,{label:"الرقم القومي للموكل",value:form.plaintiff_national_id,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('plaintiff_national_id',onlyDigits(e.target.value)),placeholder:"14 رقم",required:true,inputMode:"numeric",maxLength:14,'data-testid':'new-case-plaintiff-national-id'}),
 
                 // الخصم + صفته
                 React.createElement('div',{className:"grid grid-cols-2 gap-2"},
@@ -238,8 +243,13 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
                         if(!form.client_name.trim()){toast('يرجى إدخال اسم الموكل',true);return;}
                         if(!form.client_capacity.trim()){toast('يرجى إدخال صفة الموكل',true);return;}
                         if(!form.opponent.trim()){toast('يرجى إدخال اسم الخصم',true);return;}
+                        // 🔒 FIX (تقرير الموثوقية — نتيجة 5 الفرعية): اسم الخصم لازم
+                        // يكون ثلاثي على الأقل زي اسم الموكل بالظبط — بس من غير فحص
+                        // تكرار خالص (تكرار اسم الخصم في أكتر من قضية أمر طبيعي جدًا).
+                        const oppNameErr = validateFullNameParts(form.opponent);
+                        if(oppNameErr){toast('⚠️ اسم الخصم لازم يكون ثلاثي على الأقل (الاسم الأول، الأب، الجد)',true);return;}
                         if(!form.opponent_capacity.trim()){toast('يرجى إدخال صفة الخصم',true);return;}
-                        if(form.plaintiff_national_id && form.plaintiff_national_id.length!==14){toast('⚠️ الرقم القومي للموكل لازم يكون 14 رقم بالظبط',true);return;}
+                        if(form.plaintiff_national_id.length!==14){toast('⚠️ الرقم القومي للموكل مطلوب ولازم يكون 14 رقم بالظبط',true);return;}
                         if(form.defendant_national_id && form.defendant_national_id.length!==14){toast('⚠️ الرقم القومي للخصم لازم يكون 14 رقم بالظبط',true);return;}
                         const number = form.caseNum&&form.caseYear ? form.caseNum+'/'+form.caseYear : form.caseNum||form.caseYear||'';
                         const finalCourtLevel = form.court_level==='أخرى' ? form.court_level_other : form.court_level;
