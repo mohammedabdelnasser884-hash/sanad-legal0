@@ -120,7 +120,8 @@ function EditStandaloneModal({ session, db, onClose, onSaved }: EditStandaloneMo
             next_action: form.next_action || null,
         }, session.updated_at || null);
         setSaving(false);
-        if (conflict) return;
+        // 🔒 FIX (تقرير الموثوقية — القسم 12، Concurrent Editing): توست بدل السكوت التام.
+        if (conflict) { toast('⚠️ هذه الجلسة عدّلها شخص آخر بعد ما فتحتها — أعد المحاولة', true); return; }
         if (!success) {
             showErrorToast('session_save', error, 'تعذّر حفظ الجلسة. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'حفظ الجلسة');
             return;
