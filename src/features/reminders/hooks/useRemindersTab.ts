@@ -133,16 +133,27 @@ export function useRemindersTab(initialFilter?: string | null, profile: ProfileR
         const tenantId = profile?.tenant_id ?? null;
         if(!tenantId){ toast('❌ تعذر تحديد المكتب الحالي، أعد تسجيل الدخول وحاول مرة أخرى', true); return; }
         setSaving(true);
-        const {error} = await db.from('reminders').insert([{
-            title: form.title.trim(),
-            due_date: form.due_date,
-            notes: form.notes||null,
-            done: false,
-            tenant_id: tenantId
-        }]);
+        // 🆕 المرحلة 6 (توسيع الأوفلاين — H-3): __dbWrite بدل db.from(...).insert()
+        // المباشر — بيسيب السلوك الأونلاين زي ما هو بالظبط، وبيضيف تلقائيًا حفظ
+        // في طابور IndexedDB لو النت مقطوع، بدل ما التذكير يتفقد بالكامل (نفس
+        // الحماية الموجودة فعلاً لـ clients/cases/case_sessions).
+        const {error, offline, queued} = await window.__dbWrite({
+            type: 'INSERT', table: 'reminders', data: {
+                title: form.title.trim(),
+                due_date: form.due_date,
+                notes: form.notes||null,
+                done: false,
+                tenant_id: tenantId
+            }
+        });
         setSaving(false);
+        if(offline && queued){
+            toast('📥 التذكير محفوظ محلياً — سيُزامن عند عودة الإنترنت');
+            setShowForm(false); setForm({title:'',due_date:'',notes:''});
+            return;
+        }
         if(error){
-            recordError('reminder_save', error.message, {label:'حفظ التذكيرات', message:'تعذّر حفظ التذكير. تحقق من الاتصال بالإنترنت.'});
+            recordError('reminder_save', (error as {message?: string})?.message, {label:'حفظ التذكيرات', message:'تعذّر حفظ التذكير. تحقق من الاتصال بالإنترنت.'});
             toast('❌ حدث خطأ، يرجى المحاولة مرة أخرى', true);
             return;
         }
@@ -157,9 +168,23 @@ export function useRemindersTab(initialFilter?: string | null, profile: ProfileR
         const update = r.done
             ? { done: false,  completed_at: null }
             : { done: true,   completed_at: nowISO };
-        const {success, error} = await safeUpdate(db, 'reminders', r.id, update, r.updated_at || null);
-        if(!success){
-            recordError('reminder_save', error?.message, {label:'حفظ التذكيرات', message:'تعذّر تحديث التذكير. تحقق من الاتصال بالإنترنت.'});
+        // 🆕 المرحلة 6 (توسيع الأوفلاين — H-3): __dbWrite بدل safeUpdate — بيحافظ
+        // على نفس فحص التعارض (knownUpdatedAt) لما نكون أونلاين، وكمان بيقيّد
+        // العملية في طابور الأوفلاين لو النت مقطوع (safeUpdate القديمة كانت
+        // بترجع فشل صريح بس من غير أي حفظ محلي في الحالة دي).
+        const {error, offline, queued, conflict} = await window.__dbWrite({
+            type: 'UPDATE', table: 'reminders', data: update, id: r.id, knownUpdatedAt: r.updated_at || null
+        });
+        if(offline && queued){
+            toast('📥 التعديل محفوظ محلياً — سيُزامن عند عودة الإنترنت');
+            return;
+        }
+        if(conflict){
+            toast('⚠️ هذا التذكير عدّله شخص آخر بعد ما فتحته — أعد المحاولة', true);
+            return;
+        }
+        if(error){
+            recordError('reminder_save', (error as {message?: string})?.message, {label:'حفظ التذكيرات', message:'تعذّر تحديث التذكير. تحقق من الاتصال بالإنترنت.'});
             toast('❌ تعذّر تحديث التذكير',true);
             return;
         }
@@ -168,9 +193,16 @@ export function useRemindersTab(initialFilter?: string | null, profile: ProfileR
     };
 
     const handleDelete = async (id: string) => {
-        const {error} = await db.from('reminders').delete().eq('id',id);
+        // 🆕 المرحلة 6 (توسيع الأوفلاين — H-3): __dbWrite بدل db.from(...).delete()
+        // المباشر — لو النت مقطوع، الحذف بيتقيّد في الطابور ويتنفذ وقت المزامنة
+        // بدل ما يفشل ويرجع المستخدم يحاول تاني لما النت يرجع.
+        const {error, offline, queued} = await window.__dbWrite({ type: 'DELETE', table: 'reminders', id });
+        if(offline && queued){
+            toast('📥 الحذف محفوظ محلياً — سيُزامن عند عودة الإنترنت');
+            return;
+        }
         if(error){
-            recordError('reminder_save', error.message, {label:'حذف التذكيرات', message:'تعذّر حذف التذكير. تحقق من الاتصال بالإنترنت.'});
+            recordError('reminder_save', (error as {message?: string})?.message, {label:'حذف التذكيرات', message:'تعذّر حذف التذكير. تحقق من الاتصال بالإنترنت.'});
             toast('❌ تعذّر حذف التذكير',true);
             return;
         }
