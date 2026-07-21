@@ -51,6 +51,17 @@ export function useCaseDocuments(
     if (validationError) { toast('❌ ' + validationError, true); return; }
     const tenantId = getCurrentTenantId();
     if (!tenantId) { toast('❌ تعذر تحديد المكتب الحالي، أعد تحميل الصفحة وحاول مرة أخرى', true); return; }
+    // 🔒 قرار عمل محسوم مع صاحب المشروع (21 يوليو — المرحلة 6، تكملة
+    // ثانية): رفع مستند بيُمنع تمامًا أوفلاين (رسالة صريحة) بدل ما يتقيّد
+    // في الطابور — نفس فلسفة قرار case_fees/fee_payments بالظبط. السبب هنا
+    // مختلف شوية: مش تعقيد خطوات متعددة، لكن استحالة مادية — بايتات الملف
+    // نفسها (db.storage.from('case-docs').upload) لازم توصل فعليًا للسيرفر،
+    // مفيش تمثيل ممكن ليها في طابور IndexedDB زي صف DB عادي (راجع تعليق
+    // DbWriteTable في offlineQueue.ts لتفصيل القرار).
+    if (!navigator.onLine) {
+      toast('⚠️ رفع مستند يتطلب اتصالاً بالإنترنت — أعد المحاولة عند توفر الاتصال', true);
+      return;
+    }
     setUploadingDoc(true);
     const ext = (pendingFile.name.split('.').pop() || '').toLowerCase();
     // FIX (5.6): المسار لازم يبدأ بـ tenant_id عشان نقدر نفعّل RLS
@@ -95,6 +106,13 @@ export function useCaseDocuments(
   // — عرّفناه هنا تحت) مش من الصف الكامل CaseDocWithUrl، فالنوع لازم
   // يبقى بس الحقول الثلاثة دي عشان يتوافق مع كل نداءاته الفعليين.
   const handleDeleteDoc = async (doc: { id: string; file_name: string | null; storage_path: string | null }) => {
+    // 🔒 نفس قرار الرفع فوق بالظبط: حذف مستند خطوتين معتمدتين على الشبكة
+    // فعليًا (حذف من Storage، بعدين حذف صف DB) — مش صف عادي يتقيّد في
+    // الطابور. رسالة صريحة بدل محاولة جزئية ممكن تسيب ملف يتيم أو صف عالق.
+    if (!navigator.onLine) {
+      toast('⚠️ حذف مستند يتطلب اتصالاً بالإنترنت — أعد المحاولة عند توفر الاتصال', true);
+      return;
+    }
     setDeletingDocId(doc.id);
     const { error: storageErr } = await db.storage.from('case-docs').remove([doc.storage_path || '']);
     if (storageErr) {
