@@ -61,6 +61,11 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
     const [saving, setSaving] = useState(false);
     const [editId, setEditId] = useState<string | null>(null);
     const [addPaymentFor, setAddPaymentFor] = useState<string | null>(null);
+    // 🔒 FIX (تقرير الموثوقية الشامل — H-1): زرار "تسجيل" دفعة أتعاب كان الوحيد
+    // من غير حماية دبل كليك/دبل تاب (بعكس باقي أزرار الحفظ في المشروع). بنقفل
+    // بـ id الأتعاب الحالية فورًا في أول سطر من handleAddPayment، نفس فلسفة
+    // "نتيجة 0" (saving/savingCase/... إلخ) المطبّقة في باقي المشروع.
+    const [payingFeeId, setPayingFeeId] = useState<string | null>(null);
     const [payAmount, setPayAmount] = useState('');
     const [payDate, setPayDate] = useState('');
     const [payNote, setPayNote] = useState('');
@@ -221,14 +226,24 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
                 case_type: cases.find((c) => c.id === form.case_id)?.type || null,
             });
         } else {
-            const initialPaid = parseFloat(form.paid) > 0 ? parseFloat(form.paid) : 0;
+            const initialPaidAmount = parseFloat(form.paid) > 0 ? parseFloat(form.paid) : 0;
+            // 🔒 قرار عمل محسوم مع صاحب المشروع (21 يوليو — المرحلة 6): إضافة
+            // سجل أتعاب جديد (بدفعة مبدئية أو من غيرها) بتُمنع تمامًا أوفلاين
+            // برضو — رسالة صريحة "يتطلب اتصال بالإنترنت" بدل التقييد في
+            // الطابور. نفس فلسفة تسجيل/حذف الدفعة (منطق مالي، أفضل نمنعه
+            // كامل من إنه يتقيّد وينفّذ بعدين في وقت مختلف تمامًا).
+            if (!navigator.onLine) {
+                toast('⚠️ إضافة أتعاب جديدة يتطلب اتصالاً بالإنترنت — أعد المحاولة عند توفر الاتصال', true);
+                setSaving(false);
+                return;
+            }
             const {data:inserted, error} = await db.from('case_fees')
-                .insert([{...payload, paid_fees:0, status: computeFeeStatus(payload.total_fees, initialPaid)}]).select().single();
+                .insert([{...payload, paid_fees:0, status: computeFeeStatus(payload.total_fees, initialPaidAmount)}]).select().single();
             if(error){ toast('❌ فشل حفظ الأتعاب الجديدة — تحقق من الاتصال وأعد المحاولة', true); setSaving(false); return; }
-            if(inserted && parseFloat(form.paid)>0){
+            if(inserted && initialPaidAmount>0){
                 await db.from('fee_payments').insert([{
                     fee_id: inserted.id,
-                    amount: parseFloat(form.paid),
+                    amount: initialPaidAmount,
                     payment_date: form.payment_date||new Date().toISOString().slice(0,10),
                     notes: 'مقدم أتعاب',
                     received_by: form.receiver||null,
@@ -259,8 +274,21 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
     };
 
     const handleAddPayment = async (fee: CaseFeeRow) => {
+        if (payingFeeId) return; // دفعة تانية لسه شغالة — تجاهل أي استدعاء إضافي
+        setPayingFeeId(fee.id);
         const amount = parseFloat(payAmount)||0;
-        if(amount<=0){ toast('أدخل مبلغاً صحيحاً',true); return; }
+        if(amount<=0){ toast('أدخل مبلغاً صحيحاً',true); setPayingFeeId(null); return; }
+        // 🔒 قرار عمل محسوم مع صاحب المشروع (21 يوليو — المرحلة 6، توسيع
+        // الأوفلاين): تسجيل دفعة بينادي RPC ذرّية (record_fee_payment) —
+        // نظام طابور الأوفلاين (__dbWrite) بيدعم بس INSERT/UPDATE/DELETE على
+        // جدول، مش نداء RPC. بنمنع العملية بالكامل أوفلاين (رسالة صريحة) بدل
+        // ما نبني نسخة أوفلاين متعددة الخطوات وترجعنا لمشكلة الـ partial-save
+        // اللي المرحلة 4 حلّتها أصلاً.
+        if (!navigator.onLine) {
+            toast('⚠️ تسجيل الدفعة يتطلب اتصالاً بالإنترنت — أعد المحاولة عند توفر الاتصال', true);
+            setPayingFeeId(null);
+            return;
+        }
         const remaining = (fee.total_fees || 0) - (fee.paid_fees || 0);
         if ((fee.total_fees || 0) > 0 && amount > remaining) {
             toast(`⚠️ المبلغ (${formatArNumber(amount)}) يتجاوز المتبقي (${formatArNumber(remaining)} ${currency}). تأكد من الصحة.`, true);
@@ -278,23 +306,22 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
             resolvedClientName = fee.client_name || null;
             resolvedClientId = fee.client_id || null;
         }
-        const { error: insertError } = await db.from('fee_payments').insert([{
-            fee_id: fee.id,
-            amount: amount,
-            payment_date: payDate||new Date().toISOString().slice(0,10),
-            notes: payNote||null,
-            received_by: payReceiver||null,
-            client_id: resolvedClientId,
-            client_name: resolvedClientName
-        }]);
-        if(insertError){ toast('❌ فشل تسجيل الدفعة، يرجى المحاولة مرة أخرى', true); return; }
-        const {data:allPays} = await db.from('fee_payments').select('amount').eq('fee_id',fee.id);
-        const realPaid = (allPays||[]).reduce((s: number, p: { amount: number | null }) => s+(p.amount||0), 0);
-        const upd: Partial<CaseFeeRow> = {paid_fees: realPaid, status: computeFeeStatus(fee.total_fees || 0, realPaid)};
-        if(resolvedClientName || resolvedClientId){ upd.client_name = resolvedClientName; upd.client_id = resolvedClientId; }
-        if(payDate) upd.last_payment_date = payDate;
-        const { error: updateError } = await db.from('case_fees').update(upd).eq('id',fee.id);
-        if(updateError){ toast('⚠️ تم تسجيل الدفعة لكن فشل تحديث إجمالي المدفوع، يرجى تحديث الصفحة', true); fetchFees(0, feesFilter, feesSearch, false); fetchGrandSummary(); return; }
+        // 🔒 FIX (تقرير الموثوقية الشامل — H-2، المرحلة 4): كان ده 3
+        // استعلامات منفصلة (insert → select → update) بلا transaction
+        // حقيقية بينهم — فشل نت فى النص كان بيسيب دفعة متسجلة والإجمالي
+        // مش متحدّث (partial save موثّق فى الكود القديم). دلوقتي التلاتة
+        // بقوا جوه RPC واحدة (record_fee_payment) بتتنفذ فى transaction
+        // حقيقية على مستوى القاعدة — إما تنجح كلها أو ترجع كلها.
+        const { error: rpcError } = await db.rpc('record_fee_payment', {
+            p_fee_id: fee.id,
+            p_amount: amount,
+            p_payment_date: payDate || null,
+            p_notes: payNote || null,
+            p_received_by: payReceiver || null,
+            p_client_id: resolvedClientId,
+            p_client_name: resolvedClientName,
+        });
+        if(rpcError){ toast('❌ فشل تسجيل الدفعة، يرجى المحاولة مرة أخرى', true); setPayingFeeId(null); return; }
         toast('✅ تم تسجيل الدفعة');
         logActivity(db, 'تسجيل دفعة', {
             entity_type: 'fee', entity_id: fee.id,
@@ -303,6 +330,7 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
             case_name: cases.find((c) => c.id === fee.case_id)?.title || null,
             case_type: cases.find((c) => c.id === fee.case_id)?.type || null,
         });
+        setPayingFeeId(null);
         setAddPaymentFor(null); setPayAmount(''); setPayDate(''); setPayNote(''); setPayReceiver(''); setPayClientName(''); setPayClientNameText('');
         fetchFees(0, feesFilter, feesSearch, false);
         fetchGrandSummary();
@@ -310,11 +338,24 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
     };
 
     const handleDeletePayment = async (payId: string, fee: CaseFeeRow) => {
-        const { error: deleteError } = await db.from('fee_payments').delete().eq('id',payId);
+        // 🔒 قرار عمل (21 يوليو — المرحلة 6): حذف دفعة عملية خطوتين متعتمدتين
+        // (حذف الدفعة → إعادة حساب paid_fees من مجموع الباقي → تحديث case_fees)
+        // بنفس طبيعة تسجيل دفعة بالظبط — بتُمنع تمامًا أوفلاين لنفس السبب
+        // (تجنّب partial-save لو الخطوة الأولى نجحت والتانية اتقيّدت في طابور
+        // منفصل هيتنفذ فى وقت مختلف تمامًا وقت المزامنة).
+        if (!navigator.onLine) {
+            toast('⚠️ حذف الدفعة يتطلب اتصالاً بالإنترنت — أعد المحاولة عند توفر الاتصال', true);
+            return;
+        }
+        const { error: deleteError } = await window.__dbWrite({ type: 'DELETE', table: 'fee_payments', id: payId });
         if(deleteError){ toast('❌ فشل حذف الدفعة، يرجى المحاولة مرة أخرى', true); return; }
         const {data:allPays} = await db.from('fee_payments').select('amount').eq('fee_id',fee.id);
         const realPaid = (allPays||[]).reduce((s: number, p: { amount: number | null }) => s+(p.amount||0), 0);
-        const { error: updateError } = await db.from('case_fees').update({paid_fees: realPaid, status: computeFeeStatus(fee.total_fees || 0, realPaid)}).eq('id',fee.id);
+        const { error: updateError } = await window.__dbWrite({
+            type: 'UPDATE', table: 'case_fees',
+            data: {paid_fees: realPaid, status: computeFeeStatus(fee.total_fees || 0, realPaid)},
+            id: fee.id,
+        });
         if(updateError){ toast('⚠️ تم حذف الدفعة لكن فشل تحديث إجمالي المدفوع، يرجى تحديث الصفحة', true); fetchFees(0, feesFilter, feesSearch, false); fetchGrandSummary(); return; }
         toast('🗑 تم حذف الدفعة');
         logActivity(db, 'حذف دفعة', {
@@ -336,7 +377,8 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
     // يعني الدالة دي مش محتاجة أي كاسكيد يدوي.
     const handlePermanentDeleteFee = async (id: string) => {
         const targetFee = fees.find((f) => f.id === id);
-        const { error } = await db.from('case_fees').delete().eq('id', id);
+        const { error, offline, queued } = await window.__dbWrite({ type: 'DELETE', table: 'case_fees', id });
+        if (offline && queued) { toast('📥 الحذف محفوظ محلياً — سيُزامن عند عودة الإنترنت'); return; }
         if (error) { toast('❌ فشل حذف الأتعاب نهائياً — تحقق من الاتصال وأعد المحاولة', true); return; }
         toast('🗑️ تم حذف الأتعاب نهائياً');
         logActivity(db, 'حذف أتعاب نهائياً', {
@@ -353,7 +395,10 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
     // ─ أرشفة سجل أتعاب (بدل حذف نهائي — البند 8 من قائمة الإجراءات) ─
     const handleDelete = async (id: string) => {
         const targetFee = fees.find((f) => f.id === id);
-        const { error: feeError } = await db.from('case_fees').update({ deleted_at: new Date().toISOString() }).eq('id',id);
+        const { error: feeError, offline, queued } = await window.__dbWrite({
+            type: 'UPDATE', table: 'case_fees', data: { deleted_at: new Date().toISOString() }, id
+        });
+        if (offline && queued) { toast('📥 الأرشفة محفوظة محلياً — ستُزامن عند عودة الإنترنت'); return; }
         if(feeError){ toast('❌ فشل أرشفة الأتعاب — تحقق من الاتصال وأعد المحاولة', true); return; }
         toast('📦 تم نقل الأتعاب للأرشيف');
         logActivity(db, 'أرشفة أتعاب', {
@@ -369,7 +414,8 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
 
     // ─ استرجاع أتعاب من الأرشيف ─
     const handleRestoreFee = async (id: string) => {
-        const { error } = await db.from('case_fees').update({ deleted_at: null }).eq('id', id);
+        const { error, offline, queued } = await window.__dbWrite({ type: 'UPDATE', table: 'case_fees', data: { deleted_at: null }, id });
+        if (offline && queued) { toast('📥 الاسترجاع محفوظ محلياً — سيُزامن عند عودة الإنترنت'); return; }
         if (error) { toast('❌ فشل استرجاع الأتعاب — تحقق من الاتصال وأعد المحاولة', true); return; }
         toast('✅ تم استرجاع الأتعاب');
         logActivity(db, 'استرجاع أتعاب من الأرشيف', { entity_type: 'fee', entity_id: id });
@@ -435,7 +481,7 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
   return {
     fees, setFees, payments, setPayments, expandedPayments, setExpandedPayments,
     loading, showForm, setShowForm, form, setForm, saving, editId, setEditId,
-    addPaymentFor, setAddPaymentFor, payAmount, setPayAmount, payDate, setPayDate,
+    addPaymentFor, setAddPaymentFor, payingFeeId, payAmount, setPayAmount, payDate, setPayDate,
     payNote, setPayNote, confirmDeletePay, setConfirmDeletePay,
     confirmDeleteFee, setConfirmDeleteFee, invoiceModal, setInvoiceModal,
     payReceiver, setPayReceiver, payClientName, setPayClientName,
