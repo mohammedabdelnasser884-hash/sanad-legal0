@@ -397,7 +397,7 @@ describe('useCaseActions', () => {
       expect(params.setCases).toHaveBeenCalled();
     });
 
-    it('قضية عندها مستندات (storage_path) → بتحذف الملفات من bucket case-docs الأول قبل حذف صف القضية', async () => {
+    it('قضية عندها مستندات (storage_path) → بتحذف صف القضية (DB) الأول، وتنضيف ملفات bucket case-docs بعده [مرحلة 3 — M-3]', async () => {
       mockDb.setResult('case_documents:select', { data: [{ storage_path: 'tenant-1/doc-a.pdf' }, { storage_path: 'tenant-1/doc-b.pdf' }], error: null });
       mockDb.setResult('cases:delete', { error: null });
       const targetCase = makeCase({ id: 'case-with-docs' });
@@ -409,6 +409,23 @@ describe('useCaseActions', () => {
       expect(mockDb.storageRemoveSpy).toHaveBeenCalledWith(['tenant-1/doc-a.pdf', 'tenant-1/doc-b.pdf']);
       expect(mockDb.deleteSpy).toHaveBeenCalledWith('cases');
       expect(toast).toHaveBeenCalledWith('🗑️ تم حذف القضية نهائياً');
+
+      const deleteOrder = mockDb.deleteSpy.mock.invocationCallOrder[0];
+      const storageOrder = mockDb.storageRemoveSpy.mock.invocationCallOrder[0];
+      expect(deleteOrder).toBeLessThan(storageOrder);
+    });
+
+    it('[مرحلة 3 — M-3] فشل حذف صف القضية ومعاها مستندات → تنضيف Storage ما بيتنفذش خالص', async () => {
+      mockDb.setResult('case_documents:select', { data: [{ storage_path: 'tenant-1/doc-a.pdf' }], error: null });
+      mockDb.setResult('cases:delete', { error: { message: 'delete failed' } });
+      const targetCase = makeCase({ id: 'case-delete-fail-with-docs' });
+      const params = makeParams({ cases: [targetCase] });
+      const { handlePermanentDeleteCase } = useCaseActions(params);
+
+      await handlePermanentDeleteCase('case-delete-fail-with-docs');
+
+      expect(mockDb.storageRemoveSpy).not.toHaveBeenCalled();
+      expect(toast).toHaveBeenCalledWith('❌ فشل حذف القضية نهائياً — تحقق من الاتصال وأعد المحاولة', true);
     });
 
     it('قضية من غير مستندات → مفيش أي نداء لـ storage.remove خالص', async () => {
