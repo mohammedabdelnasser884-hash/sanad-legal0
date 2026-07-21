@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from '../../shared/lib/notifications';
+import { validateFullNameParts } from '../../shared/lib/clientValidation';
 import { escapeTelegramHtml } from '../../shared/lib/sanitize';
 import { logActivity } from '../../shared/lib/dataAccess';
 import { db } from '../../supabaseClient';
@@ -155,8 +156,20 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                 toast('⚠️ صفة الموكل وصفة الخصم إجبارية', true);
                 return;
             }
-            if (form.plaintiff_national_id && form.plaintiff_national_id.length !== 14) {
-                toast('⚠️ الرقم القومي للموكل لازم يكون 14 رقم بالظبط', true);
+            // 🔒 FIX (تقرير الموثوقية — نتيجة 5 الفرعية): اسم الخصم لازم يكون
+            // ثلاثي على الأقل — من غير فحص تكرار خالص (تكرار اسم الخصم في
+            // أكتر من جلسة/قضية أمر طبيعي جدًا). اسم الموكل (form.plaintiff)
+            // بيتفحص بالفعل في useSessionLinking.ts وقت تحويله لموكل فعلي.
+            const oppNameErr = validateFullNameParts(form.defendant || '');
+            if (oppNameErr) {
+                toast('⚠️ اسم الخصم لازم يكون ثلاثي على الأقل (الاسم الأول، الأب، الجد)', true);
+                return;
+            }
+            // 🔒 FIX (تقرير الموثوقية — نتيجة 4): القرار المتخذ — إجباري
+            // للموكل، اختياري للخصم (غالبًا مش بيبقى معانا وقت تسجيل جلسة
+            // مستقلة)، وفحص الصيغة (14 رقم بالظبط) لو الخصم اتكتب.
+            if (form.plaintiff_national_id.length !== 14) {
+                toast('⚠️ الرقم القومي للموكل مطلوب ولازم يكون 14 رقم بالظبط', true);
                 return;
             }
             if (form.defendant_national_id && form.defendant_national_id.length !== 14) {
@@ -586,9 +599,10 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                         placeholder: 'مثال: مدعي، مستأنف'
                     })
                 ),
-                // رقم قومي الموكل
+                // رقم قومي الموكل — إجباري (راجع نتيجة 4 في تقرير الموثوقية)
                 React.createElement(Inp, {
                     label: 'الرقم القومي',
+                    required: true,
                     value: form.plaintiff_national_id,
                     onChange: (e: React.ChangeEvent<HTMLInputElement>) => setForm((f: Form) => ({ ...f, plaintiff_national_id: onlyDigits(e.target.value) })),
                     placeholder: '14 رقم',
