@@ -587,7 +587,7 @@ describe('useClientActions', () => {
       expect(params.setSelectedClient).toHaveBeenCalledWith(null);
     });
 
-    it('تعارض (conflict:true) → وقف فوري من غير توست نجاح أو fetchClients', async () => {
+    it('تعارض (conflict:true) → وقف فوري من غير توست نجاح أو fetchClients، مع توست تعارض صريح', async () => {
       safeUpdate.mockResolvedValue({ success: false, conflict: true });
       const params = makeParams();
       const { handleUpdateClient } = useClientActions(params);
@@ -596,6 +596,7 @@ describe('useClientActions', () => {
 
       expect(toast).not.toHaveBeenCalledWith('✅ تم تحديث بيانات الموكل');
       expect(params.fetchClients).not.toHaveBeenCalled();
+      expect(toast).toHaveBeenCalledWith('⚠️ هذا الموكل عدّله شخص آخر بعد ما فتحته — أعد المحاولة', true);
     });
 
     it('فشل (success:false, conflict:false) → توست فشل، من غير fetchClients', async () => {
