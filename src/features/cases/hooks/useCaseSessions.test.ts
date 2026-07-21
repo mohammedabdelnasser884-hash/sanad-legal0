@@ -4,21 +4,19 @@ import type { ClientRow, ProfileRow } from '../../../types';
 import type { MappedCase } from '../../../hooks/useAppData';
 
 // ══════════════════════════════════════════════════════════════════
-// Mock db (supabaseClient) — بيغطي بالظبط سلاسل الاستدعاءات المباشرة
-// الموجودة فعليًا في useCaseSessions.ts (اتأكدت منها بقراءة الكود):
-//   - db.from('case_sessions').select('session_date').eq('case_id', x)  [recalcNextHearing]
-//   - db.from('cases').update({next_hearing}).eq('id', x)               [recalcNextHearing]
-//   - db.from('case_sessions').insert([{...}])                         [handleAddSession]
-//   - db.from('case_sessions').delete().eq('id', x)                    [handleDeleteSession]
-// handleUpdateSession بيعدي عن طريق safeUpdate (دالة من dataAccess.ts)
-// مش db.from مباشرة — بنعملها mock كدالة منفصلة.
+// Mock db (supabaseClient) — بيغطي بس سلسلة الاستدعاء اللي recalcNextHearing
+// (dataAccess.ts، Mock مماثل تحت) بتستخدمها فعليًا:
+//   - db.from('case_sessions').select('session_date').eq('case_id', x)
+//   - db.from('cases').update({next_hearing}).eq('id', x)
+// 🆕 المرحلة 6.5 (توسيع الأوفلاين — H-3، تكملة ثالثة): handleAddSession/
+// handleDeleteSession/handleUpdateSession بقوا بينادوا window.__dbWrite بدل
+// db.from(...)/safeUpdate مباشرة — نفس نمط useCaseDetailActions.test.ts
+// (case_notes) بالظبط. mockDb هنا بقى مسؤول بس عن recalcNextHearing.
 // ══════════════════════════════════════════════════════════════════
 type Result = { data?: unknown; error?: unknown };
 
 function makeMockDb() {
   const configured: Record<string, Result> = {};
-  const insertSpy = vi.fn();
-  const deleteSpy = vi.fn();
   const updateSpy = vi.fn();
   const selectEqSpy = vi.fn();
 
@@ -36,34 +34,29 @@ function makeMockDb() {
       updateSpy(table, payload);
       return { eq: vi.fn(() => Promise.resolve(get(`${table}:update`, { error: null }))) };
     }),
-    insert: vi.fn((payload: unknown) => {
-      insertSpy(table, payload);
-      return Promise.resolve(get(`${table}:insert`, { error: null }));
-    }),
-    delete: vi.fn(() => ({
-      eq: vi.fn((col: string, val: unknown) => {
-        deleteSpy(table, val);
-        return Promise.resolve(get(`${table}:delete`, { error: null }));
-      }),
-    })),
   }));
 
-  return { from, setResult, insertSpy, deleteSpy, updateSpy, selectEqSpy };
+  return { from, setResult, updateSpy, selectEqSpy };
 }
 
 let mockDb = makeMockDb();
 vi.mock('../../../supabaseClient', () => ({ db: { from: (...a: Parameters<typeof mockDb.from>) => mockDb.from(...a) } }));
 
+// 🆕 المرحلة 6.5: mock لـ window.__dbWrite — نفس نمط useCaseDetailActions.test.ts
+// (dbWriteMock() بترجع نفس الـ vi.fn ثابتة عبر إعادة إسنادها في beforeEach).
+function dbWriteMock(): ReturnType<typeof vi.fn> {
+  return window.__dbWrite as unknown as ReturnType<typeof vi.fn>;
+}
+
 const toast = vi.fn();
 vi.mock('../../../shared/lib/notifications', () => ({ toast: (...a: unknown[]) => toast(...a) }));
 
-const safeUpdate = vi.fn();
 const logActivity = vi.fn();
-// recalcNextHearing اتنقلت لملف dataAccess.ts المشترك (بعد الـ refactor)،
-// فبنعمل mock ليها هنا كمان بنفس منطق النسخة الحقيقية، عشان تفضل شغالة
-// على mockDb الموجود فوق (بتقرأ case_sessions وتحدّث cases.next_hearing).
+// recalcNextHearing اتنقلت لملف dataAccess.ts المشترك (قبل خطوة 6.5) — بنعمل
+// mock ليها هنا بنفس منطق النسخة الحقيقية، عشان تفضل شغالة على mockDb
+// الموجود فوق (بتقرأ case_sessions وتحدّث cases.next_hearing). صفر تغيير
+// هنا عن قبل خطوة 6.5 — الدالة دي مالهاش علاقة بـ __dbWrite أصلاً.
 vi.mock('../../../shared/lib/dataAccess', () => ({
-  safeUpdate: (...a: unknown[]) => safeUpdate(...a),
   logActivity: (...a: unknown[]) => logActivity(...a),
   recalcNextHearing: async (
     db: {
@@ -109,7 +102,8 @@ function renderSessionsHook(caseData: MappedCase = makeCase(), onNotify: ((m: st
 beforeEach(() => {
   mockDb = makeMockDb();
   vi.clearAllMocks();
-  // افتراضي آمن لـ recalcNextHearing (بيتنادى بعد كل إضافة/حذف/تعديل ناجح)
+  window.__dbWrite = vi.fn() as unknown as typeof window.__dbWrite;
+  // افتراضي آمن لـ recalcNextHearing (بيتنادى بعد كل إضافة/حذف/تعديل ناجح أونلاين)
   mockDb.setResult('case_sessions:select', { data: [], error: null });
 });
 
@@ -126,7 +120,6 @@ describe('useCaseSessions — recalcNextHearing', () => {
     const { result } = renderSessionsHook();
     await act(async () => { await result.current.recalcNextHearing('case-1'); });
     expect(mockDb.selectEqSpy).toHaveBeenCalledWith('case_sessions', 'case_id', 'case-1');
-    // أقرب تاريخ فعلي: اليوم نفسه (todayStr) لأنه <= future2 وأصغر أو يساوي كل الباقي
     expect(mockDb.updateSpy).toHaveBeenCalledWith('cases', { next_hearing: todayStr });
   });
 
@@ -140,25 +133,27 @@ describe('useCaseSessions — recalcNextHearing', () => {
 });
 
 describe('useCaseSessions — handleAddSession', () => {
-  it('من غير تاريخ (date فاضي) → مفيش أي نداء قاعدة بيانات خالص', async () => {
+  it('من غير تاريخ (date فاضي) → مفيش أي نداء __dbWrite خالص', async () => {
     const { result } = renderSessionsHook();
     await act(async () => { await result.current.handleAddSession(); });
-    expect(mockDb.insertSpy).not.toHaveBeenCalled();
+    expect(dbWriteMock()).not.toHaveBeenCalled();
     expect(toast).not.toHaveBeenCalled();
   });
 
-  it('نجاح → INSERT صحيح، إعادة حساب next_hearing، توست نجاح، تسجيل نشاط، رسالة تيليجرام، وتصفير الفورم', async () => {
-    mockDb.setResult('case_sessions:insert', { error: null });
+  it('نجاح أونلاين → __dbWrite INSERT صحيح، إعادة حساب next_hearing، توست نجاح، تسجيل نشاط، رسالة تيليجرام، وتصفير الفورم', async () => {
+    dbWriteMock().mockResolvedValue({ error: null });
     const onNotify = vi.fn();
     const { result, refetchAll } = renderSessionsHook(makeCase(), onNotify);
     act(() => { result.current.setSessionForm({ date: '2026-08-01', time_period: 'مسائي', location_floor: '3', location_hall: 'أ', description: 'مرافعة أولى', result: '', next_action: '' }); });
     await act(async () => { await result.current.handleAddSession(); });
 
-    expect(mockDb.insertSpy).toHaveBeenCalledWith('case_sessions', [{
-      case_id: 'case-1', session_date: '2026-08-01', session_time: 'مسائي',
-      session_floor: '3', session_hall: 'أ', description: 'مرافعة أولى', result: null, next_action: null,
-    }]);
-    expect(mockDb.updateSpy).toHaveBeenCalledWith('cases', expect.any(Object)); // recalcNextHearing اتنادت
+    expect(dbWriteMock()).toHaveBeenCalledWith({
+      type: 'INSERT', table: 'case_sessions', data: {
+        case_id: 'case-1', session_date: '2026-08-01', session_time: 'مسائي',
+        session_floor: '3', session_hall: 'أ', description: 'مرافعة أولى', result: null, next_action: null,
+      },
+    });
+    expect(mockDb.updateSpy).toHaveBeenCalledWith('cases', expect.any(Object));
     expect(toast).toHaveBeenCalledWith('✅ تمت إضافة الجلسة');
     expect(logActivity).toHaveBeenCalledWith(expect.anything(), 'إضافة جلسة', expect.objectContaining({
       entity_type: 'session', case_type: 'مدني', client_name: 'أحمد محمد', userName: 'المحامي سالم',
@@ -174,15 +169,29 @@ describe('useCaseSessions — handleAddSession', () => {
   });
 
   it('نجاح من غير onNotify (undefined) → يكمل عادي من غير أي استثناء', async () => {
-    mockDb.setResult('case_sessions:insert', { error: null });
+    dbWriteMock().mockResolvedValue({ error: null });
     const { result } = renderSessionsHook(makeCase(), undefined);
     act(() => { result.current.setSessionForm({ ...result.current.sessionForm, date: '2026-08-01' }); });
     await act(async () => { await result.current.handleAddSession(); });
     expect(toast).toHaveBeenCalledWith('✅ تمت إضافة الجلسة');
   });
 
+  it('أوفلاين ومتقيّدة → توست "محفوظة محلياً"، تصفير الفورم، من غير إعادة حساب next_hearing ولا تسجيل نشاط', async () => {
+    dbWriteMock().mockResolvedValue({ error: null, offline: true, queued: true });
+    const { result, refetchAll } = renderSessionsHook();
+    act(() => { result.current.setSessionForm({ ...result.current.sessionForm, date: '2026-08-01' }); });
+    await act(async () => { await result.current.handleAddSession(); });
+
+    expect(toast).toHaveBeenCalledWith('📥 الجلسة محفوظة محلياً — ستُزامن عند عودة الإنترنت');
+    expect(mockDb.updateSpy).not.toHaveBeenCalled();
+    expect(logActivity).not.toHaveBeenCalled();
+    expect(result.current.sessionForm).toEqual({ date: '', time_period: 'صباحي', location_floor: '', location_hall: '', description: '', result: '', next_action: '' });
+    expect(result.current.showAddSession).toBe(false);
+    expect(refetchAll).not.toHaveBeenCalled();
+  });
+
   it('فشل الإدخال → توست فشل، من غير إعادة حساب next_hearing ولا تسجيل نشاط', async () => {
-    mockDb.setResult('case_sessions:insert', { error: { message: 'insert failed' } });
+    dbWriteMock().mockResolvedValue({ error: { message: 'insert failed' } });
     const { result, refetchAll } = renderSessionsHook();
     act(() => { result.current.setSessionForm({ ...result.current.sessionForm, date: '2026-08-01' }); });
     await act(async () => { await result.current.handleAddSession(); });
@@ -195,20 +204,33 @@ describe('useCaseSessions — handleAddSession', () => {
 });
 
 describe('useCaseSessions — handleDeleteSession', () => {
-  it('نجاح → DELETE صحيح، إعادة حساب next_hearing، توست نجاح، تسجيل نشاط بـ entity_id، وrefetchAll', async () => {
-    mockDb.setResult('case_sessions:delete', { error: null });
+  it('نجاح أونلاين → __dbWrite DELETE صحيح مع sentinel القضية، إعادة حساب next_hearing، توست نجاح، تسجيل نشاط بـ entity_id، وrefetchAll', async () => {
+    dbWriteMock().mockResolvedValue({ error: null });
     const { result, refetchAll } = renderSessionsHook();
     await act(async () => { await result.current.handleDeleteSession('sess-1'); });
 
-    expect(mockDb.deleteSpy).toHaveBeenCalledWith('case_sessions', 'sess-1');
+    expect(dbWriteMock()).toHaveBeenCalledWith({
+      type: 'DELETE', table: 'case_sessions', id: 'sess-1', data: { _offlineSessionCaseId: 'case-1' },
+    });
     expect(mockDb.updateSpy).toHaveBeenCalled();
     expect(toast).toHaveBeenCalledWith('🗑 تم حذف الجلسة');
     expect(logActivity).toHaveBeenCalledWith(expect.anything(), 'حذف جلسة', expect.objectContaining({ entity_type: 'session', entity_id: 'sess-1' }));
     expect(refetchAll).toHaveBeenCalled();
   });
 
+  it('أوفلاين ومتقيّدة → توست "الحذف محفوظ محلياً"، من غير إعادة حساب أو تسجيل نشاط', async () => {
+    dbWriteMock().mockResolvedValue({ error: null, offline: true, queued: true });
+    const { result, refetchAll } = renderSessionsHook();
+    await act(async () => { await result.current.handleDeleteSession('sess-1'); });
+
+    expect(toast).toHaveBeenCalledWith('📥 الحذف محفوظ محلياً — سيُزامن عند عودة الإنترنت');
+    expect(mockDb.updateSpy).not.toHaveBeenCalled();
+    expect(logActivity).not.toHaveBeenCalled();
+    expect(refetchAll).not.toHaveBeenCalled();
+  });
+
   it('فشل الحذف → توست فشل بس، من غير إعادة حساب أو تسجيل نشاط', async () => {
-    mockDb.setResult('case_sessions:delete', { error: { message: 'delete failed' } });
+    dbWriteMock().mockResolvedValue({ error: { message: 'delete failed' } });
     const { result, refetchAll } = renderSessionsHook();
     await act(async () => { await result.current.handleDeleteSession('sess-1'); });
 
@@ -220,18 +242,18 @@ describe('useCaseSessions — handleDeleteSession', () => {
 });
 
 describe('useCaseSessions — handleUpdateSession', () => {
-  it('تعارض (conflict) → مفيش توست ولا إعادة حساب ولا refetchAll', async () => {
-    safeUpdate.mockResolvedValue({ success: false, conflict: true });
+  it('تعارض (conflict) → توست تعارض واضح (🆕 تحسين عن السلوك القديم — safeUpdate كانت بترجع صمت تام)، من غير إعادة حساب ولا refetchAll', async () => {
+    dbWriteMock().mockResolvedValue({ error: { message: 'conflict' }, conflict: true, offline: false });
     const { result, refetchAll } = renderSessionsHook();
     await act(async () => { await result.current.handleUpdateSession('sess-1', { date: '2026-08-01' }); });
 
-    expect(toast).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith('⚠️ هذه الجلسة عدّلها شخص آخر بعد ما فتحتها — أعد المحاولة', true);
     expect(mockDb.updateSpy).not.toHaveBeenCalled();
     expect(refetchAll).not.toHaveBeenCalled();
   });
 
-  it('فشل (success: false, conflict: false) → توست فشل بس', async () => {
-    safeUpdate.mockResolvedValue({ success: false, conflict: false });
+  it('فشل (error بلا conflict) → توست فشل بس', async () => {
+    dbWriteMock().mockResolvedValue({ error: { message: 'update failed' } });
     const { result, refetchAll } = renderSessionsHook();
     await act(async () => { await result.current.handleUpdateSession('sess-1', { date: '2026-08-01' }); });
 
@@ -239,16 +261,28 @@ describe('useCaseSessions — handleUpdateSession', () => {
     expect(refetchAll).not.toHaveBeenCalled();
   });
 
-  it('الجلسة مش موجودة في الـ state المحلي (sessions فاضية) → safeUpdate بيتنادى بـ knownUpdatedAt: null', async () => {
-    safeUpdate.mockResolvedValue({ success: true, conflict: false });
+  it('أوفلاين ومتقيّدة → توست "التعديل محفوظ محلياً"، من غير إعادة حساب أو تسجيل نشاط', async () => {
+    dbWriteMock().mockResolvedValue({ error: null, offline: true, queued: true });
+    const { result, refetchAll } = renderSessionsHook();
+    await act(async () => { await result.current.handleUpdateSession('sess-1', { date: '2026-08-01' }); });
+
+    expect(toast).toHaveBeenCalledWith('📥 التعديل محفوظ محلياً — سيُزامن عند عودة الإنترنت');
+    expect(logActivity).not.toHaveBeenCalled();
+    expect(refetchAll).not.toHaveBeenCalled();
+  });
+
+  it('الجلسة مش موجودة في الـ state المحلي (sessions فاضية) → __dbWrite بيتنادى بـ knownUpdatedAt: null', async () => {
+    dbWriteMock().mockResolvedValue({ error: null });
     const { result } = renderSessionsHook();
     await act(async () => { await result.current.handleUpdateSession('sess-not-in-state', { date: '2026-08-01' }); });
 
-    expect(safeUpdate).toHaveBeenCalledWith(expect.anything(), 'case_sessions', 'sess-not-in-state', expect.any(Object), null);
+    expect(dbWriteMock()).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'UPDATE', table: 'case_sessions', id: 'sess-not-in-state', knownUpdatedAt: null,
+    }));
   });
 
-  it('نجاح مع جلسة موجودة في الـ state → safeUpdate بـ updated_at الصحيح، إعادة حساب next_hearing، توست نجاح، تسجيل نشاط، ورسالة تيليجرام', async () => {
-    safeUpdate.mockResolvedValue({ success: true, conflict: false });
+  it('نجاح مع جلسة موجودة في الـ state → __dbWrite بـ updated_at الصحيح وsentinel القضية، إعادة حساب next_hearing، توست نجاح، تسجيل نشاط، ورسالة تيليجرام', async () => {
+    dbWriteMock().mockResolvedValue({ error: null });
     const onNotify = vi.fn();
     const { result, refetchAll } = renderSessionsHook(makeCase(), onNotify);
     act(() => { result.current.setSessions([{ id: 'sess-1', updated_at: '2026-07-01T00:00:00.000Z' } as never]); });
@@ -257,11 +291,11 @@ describe('useCaseSessions — handleUpdateSession', () => {
       await result.current.handleUpdateSession('sess-1', { date: '2026-08-05', time_period: 'صباحي', description: 'تعديل الوصف' });
     });
 
-    expect(safeUpdate).toHaveBeenCalledWith(
-      expect.anything(), 'case_sessions', 'sess-1',
-      expect.objectContaining({ session_date: '2026-08-05', session_time: 'صباحي', description: 'تعديل الوصف' }),
-      '2026-07-01T00:00:00.000Z',
-    );
+    expect(dbWriteMock()).toHaveBeenCalledWith({
+      type: 'UPDATE', table: 'case_sessions', id: 'sess-1',
+      data: expect.objectContaining({ session_date: '2026-08-05', session_time: 'صباحي', description: 'تعديل الوصف', _offlineSessionCaseId: 'case-1' }),
+      knownUpdatedAt: '2026-07-01T00:00:00.000Z',
+    });
     expect(mockDb.updateSpy).toHaveBeenCalled();
     expect(toast).toHaveBeenCalledWith('✅ تم تعديل الجلسة');
     expect(logActivity).toHaveBeenCalledWith(expect.anything(), 'تعديل جلسة', expect.objectContaining({ entity_type: 'session', entity_id: 'sess-1' }));
