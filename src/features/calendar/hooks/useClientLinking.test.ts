@@ -20,14 +20,19 @@ import { renderHook, act } from '@testing-library/react';
 // 🆕 المرحلة 3-2: handleAddAndLinkClient اتحوّل هو كمان بالكامل لـ
 // __dbWrite (INSERT:clients بتمبيد + UPDATE:cases بـ _offlineSelfTempId
 // و/أو _offlineFkTempId حسب الحالة — شوف تعليقات useClientLinking.ts).
-// db.from() فضل مستخدم مباشرة بس في البحث عن موكل مطابق (ilike، read-only)
+// db.from() فضل مستخدم مباشرة بس في البحث عن موكل مطابق (is/or، read-only)
 // في handleLinkCase — ده مقصود ومش هيتحول (زي ما الخطة نصّت).
+// ⚡ FIX: الاستعلام اتغيّر من .ilike('full_name', ...) لـ
+// .is('deleted_at', null).or('full_name.ilike...,client_name.ilike...') —
+// راجع تعليق FIX جوه useClientLinking.ts (فلتر deleted_at كان ناقص +
+// full_name كان مش مضمون امتلاؤه). الـ mock هنا بيتابع نفس السلسلة.
 // ══════════════════════════════════════════════════════════════════
 type Result = { data?: unknown; error?: unknown };
 
 function makeMockDb() {
   const configured: Record<string, Result> = {};
-  const clientsIlikeSpy = vi.fn();
+  const clientsOrSpy = vi.fn();
+  const clientsIsSpy = vi.fn();
 
   const setResult = (key: string, result: Result) => { configured[key] = result; };
   const get = (key: string, fallback: Result) => configured[key] ?? fallback;
@@ -37,9 +42,14 @@ function makeMockDb() {
       return {
         // البحث عن موكل مطابق — read-only، لسه db.from مباشر (زي ما الخطة نصّت)
         select: vi.fn(() => ({
-          ilike: vi.fn((col: string, val: string) => {
-            clientsIlikeSpy(col, val);
-            return { limit: vi.fn(() => Promise.resolve(get('clients:select', { data: [], error: null }))) };
+          is: vi.fn((col: string, val: unknown) => {
+            clientsIsSpy(col, val);
+            return {
+              or: vi.fn((clause: string) => {
+                clientsOrSpy(clause);
+                return { limit: vi.fn(() => Promise.resolve(get('clients:select', { data: [], error: null }))) };
+              }),
+            };
           }),
         })),
       };
@@ -47,7 +57,7 @@ function makeMockDb() {
     return {};
   });
 
-  return { from, setResult, clientsIlikeSpy };
+  return { from, setResult, clientsOrSpy, clientsIsSpy };
 }
 
 let mockDb = makeMockDb();
@@ -149,7 +159,8 @@ describe('useClientLinking', () => {
       expect(toast).toHaveBeenCalledWith('✅ تم إنشاء ملف القضية');
       expect(onSaved).toHaveBeenCalled();
       expect(result.current.createdCaseId).toBe('new-case-1');
-      expect(mockDb.clientsIlikeSpy).toHaveBeenCalledWith('full_name', '%أحمد محمد%');
+      expect(mockDb.clientsIsSpy).toHaveBeenCalledWith('deleted_at', null);
+      expect(mockDb.clientsOrSpy).toHaveBeenCalledWith('full_name.ilike.%أحمد محمد%,client_name.ilike.%أحمد محمد%');
       expect(result.current.clientStep).toBe('found');
       expect(result.current.foundClient).toEqual({ id: 'client-1', full_name: 'أحمد محمد' });
       expect(result.current.linkingCase).toBe(false);
@@ -174,7 +185,7 @@ describe('useClientLinking', () => {
 
       await act(async () => { await result.current.handleLinkCase(); });
 
-      expect(mockDb.clientsIlikeSpy).not.toHaveBeenCalled();
+      expect(mockDb.clientsOrSpy).not.toHaveBeenCalled();
       expect(result.current.clientStep).toBe('notfound');
     });
 
@@ -200,7 +211,7 @@ describe('useClientLinking', () => {
       expect(toast).toHaveBeenCalledWith('❌ تعذّر إنشاء القضية. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', true);
       expect(recordError).toHaveBeenCalledWith('case_create', 'insert failed', expect.objectContaining({ label: 'إنشاء قضية' }));
       expect(onSaved).not.toHaveBeenCalled();
-      expect(mockDb.clientsIlikeSpy).not.toHaveBeenCalled();
+      expect(mockDb.clientsOrSpy).not.toHaveBeenCalled();
       expect(result.current.linkingCase).toBe(false);
     });
 
