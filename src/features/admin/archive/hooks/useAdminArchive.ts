@@ -48,7 +48,10 @@ export function useAdminArchive(clients: ClientRow[], profile?: ProfileRow | nul
             if (data) setArchivedCases(data);
             if (count !== null && count !== undefined) setArchivedCasesTotal(count);
         } catch (e) {
-            // فشل جلب صامت (زي نمط useAdminActivity) — الشاشة هتفضل فاضية بدل ما تكسر الأبلكيشن
+            // 🔒 FIX (تقرير الموثوقية الشامل — L-1): كانت فشل جلب صامت تمامًا
+            // (الشاشة تفضل فاضية بلا أي تفسير للمستخدم). دلوقتي بتوستّت برسالة
+            // واضحة بدل السكوت، بنفس نمط رسائل الفشل التانية فى الملف ده.
+            toast('❌ فشل تحميل القضايا المؤرشفة — تحقق من الاتصال وأعد المحاولة', true);
         }
         setLoadingArchivedCases(false);
     }, [archivedCasesPage, archivedCasesSearch]);
@@ -58,7 +61,19 @@ export function useAdminArchive(clients: ClientRow[], profile?: ProfileRow | nul
         setRestoringCaseId(caseId);
         const { error } = await db.from('cases').update({ deleted_at: null }).eq('id', caseId);
         setRestoringCaseId(null);
-        if (error) { toast('❌ فشل استرجاع القضية — تحقق من الاتصال وأعد المحاولة', true); return; }
+        if (error) {
+            // 🔒 FIX (تقرير الموثوقية الشامل — C-2): استرجاع قضية ممكن يتصادم مع
+            // الـ UNIQUE index الجزئي (case_number_official + court_level + case_type
+            // على غير المؤرشف) لو قضية جديدة اتسجلت بنفس البيانات بعد الأرشفة.
+            // بنميّز الرسالة زي نفس نمط useCaseActions.ts بدل رسالة "تحقق من الاتصال"
+            // المُضلِّلة اللي بتوجّه المستخدم للاتجاه الغلط.
+            if ((error as { code?: string }).code === '23505') {
+                toast('⚠️ فيه قضية نشطة تانية بنفس رقم القيد — عدّل بياناتها الأول قبل الاسترجاع', true);
+            } else {
+                toast('❌ فشل استرجاع القضية — تحقق من الاتصال وأعد المحاولة', true);
+            }
+            return;
+        }
         toast('✅ تم استرجاع القضية — قد تحتاج لتحديث الصفحة لرؤيتها في القوائم الأخرى');
         logActivity(db, 'استرجاع قضية من الأرشيف', { userName: _userName, entity_type: 'case', entity_id: caseId });
         setArchivedCases((prev) => prev.filter((c) => c.id !== caseId));
@@ -66,11 +81,15 @@ export function useAdminArchive(clients: ClientRow[], profile?: ProfileRow | nul
     };
 
     // ─ حذف قضية نهائيًا من الأرشيف (نفس منطق handlePermanentDeleteCase فى useCaseActions.ts بالحرف —
-    //   تنضيف ملفات Storage الأول، بعدين حذف الصف، والداتابيز بتكمل الباقي تلقائيًا CASCADE/SET NULL) ─
+    //   [مرحلة 3 — M-3] الترتيب اتعكس عمدًا: حذف صف القضية (DB) الأول، والداتابيز بتكمل
+    //   الباقي تلقائيًا CASCADE/SET NULL، وتنضيف ملفات Storage بعد كده. لو حصل انقطاع بعد
+    //   نجاح حذف الصف وقبل تنضيف الـ Storage، أسوأ حالة هي ملفات يتيمة فى bucket (تسرب
+    //   تخزين بسيط)، مش صف قضية عالق وملفاته اتمسحت زي ما كان ممكن يحصل مع الترتيب القديم) ─
     const handlePermanentDeleteCase = async (caseId: string) => {
         const c = archivedCases.find((x) => x.id === caseId);
         setDeletingCase(true);
 
+        // ─ خطوة 1: جلب storage_path لمستندات القضية (قبل ما صفوفها تتحذف تلقائيًا) ─
         const { data: docs, error: docsFetchError } = await db.from('case_documents')
             .select('storage_path').eq('case_id', caseId);
         if (docsFetchError) {
@@ -79,15 +98,24 @@ export function useAdminArchive(clients: ClientRow[], profile?: ProfileRow | nul
             return;
         }
         const paths = (docs || []).map((d) => d.storage_path).filter((p): p is string => !!p);
+
+        // ─ خطوة 2: حذف صف القضية أولًا ─
+        const { error } = await db.from('cases').delete().eq('id', caseId);
+        if (error) {
+            setDeletingCase(false);
+            setConfirmDeleteCase(null);
+            toast('❌ فشل حذف القضية نهائياً — تحقق من الاتصال وأعد المحاولة', true);
+            return;
+        }
+
+        // ─ خطوة 3: تنضيف ملفات Storage — بعد التأكد إن صف القضية اتمسح فعليًا ─
         if (paths.length > 0) {
             const { error: storageErr } = await db.storage.from('case-docs').remove(paths);
             if (storageErr) toast('⚠️ تعذّر حذف بعض ملفات المستندات من التخزين — راجع bucket المستندات يدويًا', true);
         }
 
-        const { error } = await db.from('cases').delete().eq('id', caseId);
         setDeletingCase(false);
         setConfirmDeleteCase(null);
-        if (error) { toast('❌ فشل حذف القضية نهائياً — تحقق من الاتصال وأعد المحاولة', true); return; }
         toast('🗑️ تم حذف القضية نهائياً');
         logActivity(db, 'حذف قضية نهائياً', {
             userName: _userName,
@@ -133,7 +161,8 @@ export function useAdminArchive(clients: ClientRow[], profile?: ProfileRow | nul
             if (data) setArchivedClients(data);
             if (count !== null && count !== undefined) setArchivedClientsTotal(count);
         } catch (e) {
-            // فشل جلب صامت (نفس نمط fetchArchivedCases)
+            // 🔒 FIX (L-1): توست بدل الفشل الصامت — نفس تعديل fetchArchivedCases فوق.
+            toast('❌ فشل تحميل الموكلين المؤرشفين — تحقق من الاتصال وأعد المحاولة', true);
         }
         setLoadingArchivedClients(false);
     }, [archivedClientsPage, archivedClientsSearch]);
@@ -143,7 +172,18 @@ export function useAdminArchive(clients: ClientRow[], profile?: ProfileRow | nul
         setRestoringClientId(clientId);
         const { error } = await db.from('clients').update({ deleted_at: null }).eq('id', clientId);
         setRestoringClientId(null);
-        if (error) { toast('❌ فشل استرجاع الموكل — تحقق من الاتصال وأعد المحاولة', true); return; }
+        if (error) {
+            // 🔒 FIX (تقرير الموثوقية الشامل — C-2): استرجاع موكل ممكن يتصادم مع
+            // الـ UNIQUE index الجزئي (الاسم/الرقم القومي على غير المؤرشف) لو موكل
+            // جديد اتسجل بنفس البيانات بعد الأرشفة. بنميّز الرسالة زي نفس نمط
+            // useClientActions.ts بدل رسالة "تحقق من الاتصال" المُضلِّلة.
+            if ((error as { code?: string }).code === '23505') {
+                toast('⚠️ فيه موكل نشط تاني بنفس الاسم أو الرقم القومي — عدّل بياناته الأول قبل الاسترجاع', true);
+            } else {
+                toast('❌ فشل استرجاع الموكل — تحقق من الاتصال وأعد المحاولة', true);
+            }
+            return;
+        }
         toast('✅ تم استرجاع الموكل — قد تحتاج لتحديث الصفحة لرؤيته في القوائم الأخرى');
         logActivity(db, 'استرجاع موكل من الأرشيف', { userName: _userName, entity_type: 'client', entity_id: clientId });
         setArchivedClients((prev) => prev.filter((c) => c.id !== clientId));
@@ -203,7 +243,8 @@ export function useAdminArchive(clients: ClientRow[], profile?: ProfileRow | nul
             if (data) setArchivedFees(data);
             if (count !== null && count !== undefined) setArchivedFeesTotal(count);
         } catch (e) {
-            // فشل جلب صامت (نفس نمط fetchArchivedCases)
+            // 🔒 FIX (L-1): توست بدل الفشل الصامت — نفس تعديل fetchArchivedCases فوق.
+            toast('❌ فشل تحميل سجلات الأتعاب المؤرشفة — تحقق من الاتصال وأعد المحاولة', true);
         }
         setLoadingArchivedFees(false);
     }, [archivedFeesPage, archivedFeesSearch]);
