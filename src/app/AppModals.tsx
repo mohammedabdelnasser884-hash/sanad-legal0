@@ -180,6 +180,11 @@ function AppModals({
             cases: cases.filter((c) => c.client_id === selectedClient?.id),
             onClose: () => { nav.closeModal('clientDetail'); _setSelectedClient(null); },
             onDelete: handleDeleteClient, onEdit: handleUpdateClient,
+            // 🔒 FIX (تقرير الموثوقية — نتيجة 1): EditClientModal ما كانش عنده
+            // أي حماية دبل كليك خالص — بنمرر savingClient نفسها المستخدمة في
+            // NewClientModal فوق (نفس الـ state، الاتنين بيستخدموا
+            // handleSaveClient/handleUpdateClient من useClientActions.ts).
+            savingClient,
             onOpenCase: (ca) => { nav.closeModal('clientDetail'); _setSelectedClient(null); setSelectedCase(ca); }
         }),
         selectedCase && nav.isOpen('caseDetail') && React.createElement(CaseDetailView, {
@@ -194,6 +199,9 @@ function AppModals({
                 setCasesFilter(newStatus); setCasesPage(0); fetchCases(0, newStatus);
             },
             onDelete: handleDeleteCase, onEdit: handleUpdateCase, onLinkClient: handleLinkClient, onCreateAndLinkClient: handleCreateAndLinkClient, onNotify: sendTelegram, profile, country,
+            // 🔒 FIX (تقرير الموثوقية — نتيجة 1): EditCaseModal ما كانش عنده
+            // أي حماية دبل كليك خالص.
+            savingCase,
         }),
     );
 }
