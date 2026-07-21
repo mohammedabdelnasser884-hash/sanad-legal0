@@ -10,11 +10,11 @@ import type { MappedCase } from '../../../hooks/useAppData';
 //   - db.from('case_sessions').select('*').eq('case_id',x).order('session_date',{ascending:false})  [fetchSessions]
 //   - db.from('case_notes').select('*').eq('case_id',x).order('created_at',{ascending:false})        [fetchSessions]
 //   - db.from('case_documents').select('*').eq('case_id',x).order('created_at',{ascending:false})    [fetchSessions]
-//   - db.from('case_notes').insert([{case_id,content}])                                               [handleAddNote]
-//   - db.from('case_notes').delete().eq('id', noteId)                                                 [handleDeleteNote]
-// تعديل حالة القضية (handleChangeStatus) وتعديل الملاحظة (handleUpdateNote)
-// بيعديا عن طريق safeUpdate (دالة من dataAccess.ts) مش db.from مباشرة —
-// فبنعملها mock كدالة منفصلة، مش عن طريق db.from.
+// 🆕 المرحلة 6 (تكملة ثانية، 21 يوليو): إضافة/حذف/تعديل الملاحظة
+// (handleAddNote/handleDeleteNote/handleUpdateNote) بقوا بينادوا
+// window.__dbWrite بدل db.from مباشرة أو safeUpdate — نفس نمط useCaseActions.test.ts
+// (dbWriteMock هنا تحت). تعديل حالة القضية (handleChangeStatus) فضل زي ما
+// هو على safeUpdate (خارج نطاق الخطوة دي — cases مش case_notes).
 // useCaseSessions/useCaseDocuments هوكس فرعية منفصلة (ليها ملفات تست
 // مستقلة في الخطة) — بنعملهم mock هنا عشان نعزل منطق useCaseDetailActions.ts
 // نفسه بس (fetchSessions المجمّعة + الملاحظات + تغيير الحالة).
@@ -24,8 +24,6 @@ const DEFAULT_RESULT: Result = { data: [], error: null };
 
 function makeMockDb() {
   const configured: Record<string, Result> = {};
-  const insertSpy = vi.fn();
-  const deleteSpy = vi.fn();
 
   const setResult = (key: string, result: Result) => { configured[key] = result; };
   const get = (key: string) => configured[key] ?? DEFAULT_RESULT;
@@ -40,23 +38,26 @@ function makeMockDb() {
     return c;
   }
 
+  // 🆕 المرحلة 6 (تكملة ثانية): case_notes بقت بتعدّي على window.__dbWrite
+  // مش db.from مباشرة (شوف dbWriteMock تحت) — from هنا فضل مسؤول بس عن
+  // سلاسل select اللي fetchSessions بتستخدمها فعليًا (case_sessions/case_notes/case_documents).
   const from = vi.fn((table: string) => ({
     select: vi.fn(() => buildSelectChain(table)),
-    insert: vi.fn((payload: unknown) => {
-      insertSpy(table, payload);
-      return Promise.resolve(get(`${table}:insert`));
-    }),
-    delete: vi.fn(() => {
-      deleteSpy(table);
-      return { eq: vi.fn(() => Promise.resolve(get(`${table}:delete`))) };
-    }),
   }));
 
-  return { from, setResult, insertSpy, deleteSpy };
+  return { from, setResult };
 }
 
 let mockDb = makeMockDb();
 vi.mock('../../../supabaseClient', () => ({ db: { from: (...a: Parameters<typeof mockDb.from>) => mockDb.from(...a) } }));
+
+// 🆕 المرحلة 6 (تكملة ثانية): mock لـ window.__dbWrite — نفس نمط
+// useCaseActions.test.ts بالظبط (dbWriteMock() بترجع نفس الـ vi.fn ثابتة
+// عبر إعادة إسنادها في beforeEach، عشان أي test يقدر يتحكم في mockResolvedValue
+// بتاعتها من غير إعادة استيراد).
+function dbWriteMock(): ReturnType<typeof vi.fn> {
+  return window.__dbWrite as unknown as ReturnType<typeof vi.fn>;
+}
 
 const toast = vi.fn();
 vi.mock('../../../shared/lib/notifications', () => ({ toast: (...a: unknown[]) => toast(...a) }));
@@ -134,6 +135,7 @@ describe('useCaseDetailActions', () => {
     resolveStorageUrl.mockReset();
     resolveStorageUrl.mockResolvedValue('https://signed-url.example/doc1');
     vi.clearAllMocks();
+    window.__dbWrite = vi.fn() as unknown as typeof window.__dbWrite;
   });
 
   describe('fetchSessions — التجميع عند mount', () => {
@@ -152,22 +154,24 @@ describe('useCaseDetailActions', () => {
   });
 
   describe('handleAddNote', () => {
-    it('نص فاضي (بعد trim) → مفيش أي نداء قاعدة بيانات خالص', async () => {
+    it('نص فاضي (بعد trim) → مفيش أي نداء __dbWrite خالص', async () => {
       const { result } = await renderDetailHook();
       act(() => { result.current.setNoteText('   '); });
       await act(async () => { await result.current.handleAddNote(); });
 
-      expect(mockDb.insertSpy).not.toHaveBeenCalled();
+      expect(dbWriteMock()).not.toHaveBeenCalled();
       expect(toast).not.toHaveBeenCalled();
     });
 
-    it('نجاح → INSERT بمحتوى مقصوص (trim)، توست نجاح، تسجيل نشاط بـ case_type من caseData.type، وتصفير الفورم', async () => {
-      mockDb.setResult('case_notes:insert', { error: null });
+    it('نجاح أونلاين → __dbWrite INSERT بمحتوى مقصوص (trim)، توست نجاح، تسجيل نشاط بـ case_type من caseData.type، وتصفير الفورم', async () => {
+      dbWriteMock().mockResolvedValue({ error: null });
       const { result } = await renderDetailHook(makeCase({ type: 'جنائي' }));
       act(() => { result.current.setNoteText('  ملاحظة جديدة  '); });
       await act(async () => { await result.current.handleAddNote(); });
 
-      expect(mockDb.insertSpy).toHaveBeenCalledWith('case_notes', [{ case_id: 'case-1', content: 'ملاحظة جديدة' }]);
+      expect(dbWriteMock()).toHaveBeenCalledWith({
+        type: 'INSERT', table: 'case_notes', data: { case_id: 'case-1', content: 'ملاحظة جديدة' },
+      });
       expect(toast).toHaveBeenCalledWith('✅ تمت إضافة الملاحظة');
       expect(logActivity).toHaveBeenCalledWith(expect.anything(), 'إضافة ملاحظة', expect.objectContaining({
         entity_type: 'note', case_type: 'جنائي', client_name: 'أحمد محمد', userName: 'المحامي سالم',
@@ -176,8 +180,20 @@ describe('useCaseDetailActions', () => {
       expect(result.current.showAddNote).toBe(false);
     });
 
+    it('أوفلاين ومتقيّدة → توست "محفوظة محلياً"، تصفير الفورم، من غير تسجيل نشاط', async () => {
+      dbWriteMock().mockResolvedValue({ error: null, offline: true, queued: true });
+      const { result } = await renderDetailHook();
+      act(() => { result.current.setNoteText('ملاحظة أوفلاين'); });
+      await act(async () => { await result.current.handleAddNote(); });
+
+      expect(toast).toHaveBeenCalledWith('📥 الملاحظة محفوظة محلياً — ستُزامن عند عودة الإنترنت');
+      expect(logActivity).not.toHaveBeenCalled();
+      expect(result.current.noteText).toBe('');
+      expect(result.current.showAddNote).toBe(false);
+    });
+
     it('فشل الإدخال → توست فشل، من غير تسجيل نشاط', async () => {
-      mockDb.setResult('case_notes:insert', { error: { message: 'insert failed' } });
+      dbWriteMock().mockResolvedValue({ error: { message: 'insert failed' } });
       const { result } = await renderDetailHook();
       act(() => { result.current.setNoteText('ملاحظة هتفشل'); });
       await act(async () => { await result.current.handleAddNote(); });
@@ -188,18 +204,27 @@ describe('useCaseDetailActions', () => {
   });
 
   describe('handleDeleteNote', () => {
-    it('نجاح → DELETE بالـ id، توست نجاح، تسجيل نشاط بالـ entity_id الصح', async () => {
-      mockDb.setResult('case_notes:delete', { error: null });
+    it('نجاح أونلاين → __dbWrite DELETE بالـ id، توست نجاح، تسجيل نشاط بالـ entity_id الصح', async () => {
+      dbWriteMock().mockResolvedValue({ error: null });
       const { result } = await renderDetailHook();
       await act(async () => { await result.current.handleDeleteNote('note-del-1'); });
 
-      expect(mockDb.deleteSpy).toHaveBeenCalledWith('case_notes');
+      expect(dbWriteMock()).toHaveBeenCalledWith({ type: 'DELETE', table: 'case_notes', id: 'note-del-1' });
       expect(toast).toHaveBeenCalledWith('🗑 تم حذف الملاحظة');
       expect(logActivity).toHaveBeenCalledWith(expect.anything(), 'حذف ملاحظة', expect.objectContaining({ entity_id: 'note-del-1' }));
     });
 
+    it('أوفلاين ومتقيّدة → توست "الحذف محفوظ محلياً"، من غير تسجيل نشاط', async () => {
+      dbWriteMock().mockResolvedValue({ error: null, offline: true, queued: true });
+      const { result } = await renderDetailHook();
+      await act(async () => { await result.current.handleDeleteNote('note-del-1'); });
+
+      expect(toast).toHaveBeenCalledWith('📥 الحذف محفوظ محلياً — سيُزامن عند عودة الإنترنت');
+      expect(logActivity).not.toHaveBeenCalled();
+    });
+
     it('فشل الحذف → توست فشل، من غير تسجيل نشاط', async () => {
-      mockDb.setResult('case_notes:delete', { error: { message: 'delete failed' } });
+      dbWriteMock().mockResolvedValue({ error: { message: 'delete failed' } });
       const { result } = await renderDetailHook();
       await act(async () => { await result.current.handleDeleteNote('note-del-2'); });
 
@@ -209,30 +234,43 @@ describe('useCaseDetailActions', () => {
   });
 
   describe('handleUpdateNote', () => {
-    it('نجاح → بيستخدم safeUpdate على case_notes بالـ updated_at الحقيقي المحفوظ في state الملاحظات', async () => {
+    it('نجاح أونلاين → __dbWrite UPDATE على case_notes بالـ knownUpdatedAt الحقيقي المحفوظ في state الملاحظات', async () => {
       mockDb.setResult('case_notes:select', { data: [{ id: 'note-1', case_id: 'case-1', content: 'قديم', updated_at: '2026-07-16T09:00:00.000Z' }], error: null });
-      safeUpdate.mockResolvedValue({ success: true, conflict: false, error: null });
+      dbWriteMock().mockResolvedValue({ error: null });
       const { result } = await renderDetailHook();
 
       await act(async () => { await result.current.handleUpdateNote('note-1', 'نص محدّث'); });
 
-      expect(safeUpdate).toHaveBeenCalledWith(expect.anything(), 'case_notes', 'note-1', { content: 'نص محدّث' }, '2026-07-16T09:00:00.000Z');
+      expect(dbWriteMock()).toHaveBeenCalledWith({
+        type: 'UPDATE', table: 'case_notes', data: { content: 'نص محدّث' }, id: 'note-1', knownUpdatedAt: '2026-07-16T09:00:00.000Z',
+      });
       expect(toast).toHaveBeenCalledWith('✅ تم تعديل الملاحظة');
       expect(logActivity).toHaveBeenCalledWith(expect.anything(), 'تعديل ملاحظة', expect.objectContaining({ entity_id: 'note-1' }));
     });
 
-    it('تعارض (conflict:true) → وقف فوري من غير توست نجاح أو تسجيل نشاط (الـ toast اتعرض جوه safeUpdate نفسها)', async () => {
-      safeUpdate.mockResolvedValue({ success: false, conflict: true, error: null });
+    it('أوفلاين ومتقيّدة → توست "التعديل محفوظ محلياً"، من غير تسجيل نشاط', async () => {
+      dbWriteMock().mockResolvedValue({ error: null, offline: true, queued: true });
+      const { result } = await renderDetailHook();
+
+      await act(async () => { await result.current.handleUpdateNote('note-1', 'نص أوفلاين'); });
+
+      expect(toast).toHaveBeenCalledWith('📥 التعديل محفوظ محلياً — سيُزامن عند عودة الإنترنت');
+      expect(logActivity).not.toHaveBeenCalled();
+    });
+
+    it('تعارض (conflict:true) → توست تعارض صريح، من غير توست نجاح أو تسجيل نشاط', async () => {
+      dbWriteMock().mockResolvedValue({ error: null, conflict: true });
       const { result } = await renderDetailHook();
 
       await act(async () => { await result.current.handleUpdateNote('note-1', 'نص متعارض'); });
 
+      expect(toast).toHaveBeenCalledWith('⚠️ هذه الملاحظة عدّلها شخص آخر بعد ما فتحتها — أعد المحاولة', true);
       expect(toast).not.toHaveBeenCalledWith('✅ تم تعديل الملاحظة');
       expect(logActivity).not.toHaveBeenCalled();
     });
 
-    it('فشل (success:false, conflict:false) → توست فشل، من غير تسجيل نشاط', async () => {
-      safeUpdate.mockResolvedValue({ success: false, conflict: false, error: { message: 'update failed' } });
+    it('فشل (error بدون offline/conflict) → توست فشل، من غير تسجيل نشاط', async () => {
+      dbWriteMock().mockResolvedValue({ error: { message: 'update failed' } });
       const { result } = await renderDetailHook();
 
       await act(async () => { await result.current.handleUpdateNote('note-1', 'نص فاشل'); });
