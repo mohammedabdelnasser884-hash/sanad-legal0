@@ -14,9 +14,13 @@ interface ClientDetailModalProps {
     onDelete?: (clientId: string) => void;
     onEdit?: (clientId: string, form: ClientFormData, idFile?: File | null, poaFile?: File | null) => void;
     onOpenCase?: (ca: MappedCase) => void;
+    // 🔒 FIX (تقرير الموثوقية — نتيجة 1): بتتمرر لـ EditClientModal عشان
+    // تقفل زرار "حفظ التعديلات" أثناء عملية الحفظ — نفس الـ state
+    // (savingClient) المستخدمة أصلاً في NewClientModal.
+    savingClient?: boolean;
 }
 
-function ClientDetailModal({client:c, cases, onClose, onDelete, onEdit, onOpenCase}: ClientDetailModalProps){
+function ClientDetailModal({client:c, cases, onClose, onDelete, onEdit, onOpenCase, savingClient}: ClientDetailModalProps){
     const typeLabel=c.type==='individual'?'فرد':c.type==='company'?'شركة':c.type==='government'?'جهة حكومية':c.type||'فرد';
     const [imgViewer,setImgViewer]=useState<string|null>(null);
     const [showEditClient, setShowEditClient]=useState(false);
@@ -72,6 +76,7 @@ function ClientDetailModal({client:c, cases, onClose, onDelete, onEdit, onOpenCa
             // مودال تعديل الموكل
             showEditClient && React.createElement(EditClientModal,{
                 client:c,
+                saving: savingClient,
                 onClose:()=>setShowEditClient(false),
                 onSave:(form: ClientFormData,idFile?: File | null,poaFile?: File | null)=>{ onEdit?.(c.id, form, idFile, poaFile); setShowEditClient(false); }
             }),
