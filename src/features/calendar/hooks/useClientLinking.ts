@@ -4,6 +4,9 @@ import { db } from '../../../supabaseClient';
 import { showErrorToast } from '../../../shared/lib/errorReporting';
 import { recalcNextHearing } from '../../../shared/lib/dataAccess';
 import type { Form } from '../NewStandaloneSessionModal';
+import {
+  makeOfflineTempId, isOfflineTempId, withFkOfflineSentinel, withCaseSelfOfflineSentinel, findMatchingClientByName, buildCaseInsertData,
+} from './caseSessionLinkingShared';
 
 export type SavedFormData = { form: Form; finalCaseType: string; finalCourtLevel: string; fullCaseNumber: string; sessionId: string | null };
 
@@ -65,42 +68,33 @@ export function useClientLinking(
       // نمط offlineTempId الموجود فعلاً في useCaseActions.ts (handleSaveCase)
       // — بيتبعت مع القضية بغض النظر عن حالة الاتصال، وبيتشال قبل أي INSERT
       // حقيقي (stripOfflineSentinels في offlineQueue.ts).
-      const offlineTempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const offlineTempId = makeOfflineTempId();
       const { error, offline, queued, data: insertedCase } = await window.__dbWrite({
         type: 'INSERT',
         table: 'cases',
-        data: {
-          title: caseTitle,
-          court_name: f.court || caseTitle,
-          case_number_official: cn || caseTitle,
-          case_number: cn || null,
-          court: f.court || null,
-          case_type: ct || null,
-          plaintiff: f.plaintiff || null,
-          plaintiff_role: f.plaintiff_role || null,
-          plaintiff_national_id: f.plaintiff_national_id || null,
-          plaintiff_power_of_attorney: f.plaintiff_power_of_attorney || null,
-          defendant: f.defendant || null,
-          defendant_role: f.defendant_role || null,
-          defendant_national_id: f.defendant_national_id || null,
-          circuit_number: f.circuit_number || null,
-          // ⚡ FIX: كانت الصفة (plaintiff_role/defendant_role) والدور/القاعة
-          // بيتسجلوا صح في الجلسة المستقلة لكن بيضيعوا وقت تحويلها لملف
-          // قضية. دلوقتي session_hall هو الحقل الموحّد الوحيد لمكان الجلسة
-          // (مش court_floor القديم المهجور)، وبننقل درجة التقاضي وبيانات
-          // السكرتير كمان بنفس المنطق.
-          session_hall: f.session_hall || null,
-          // ⚡ FIX: session_time كان بيضيع تمامًا عند تحويل جلسة مستقلة
-          // لقضية — الحقل ده كان متسجل صح في الجلسة، بس مكانش بينتقل للقضية
-          // الجديدة، فكان بيبان فاضي في تاب البيانات وتقرير الـ PDF.
-          session_time: f.session_time || null,
-          court_level: cl || null,
-          secretary_hall: f.secretary_hall || null,
-          secretary_name: f.secretary_name || null,
-          secretary_mobile: f.secretary_mobile || null,
-          status: 'نشطة',
-          _offlineTempId: offlineTempId,
-        },
+        // ⚡ FIX (توحيد): بناء بيانات القضية دلوقتي في buildCaseInsertData
+        // (caseSessionLinkingShared.ts) بدل نسخة يدوية هنا — نفس المنطق
+        // بالظبط المستخدم في useSessionLinking.ts، مكان واحد بس للفيكسات
+        // المستقبلية (session_hall/session_time اللي كانوا بيضيعوا، إلخ).
+        data: buildCaseInsertData({
+          court: f.court,
+          caseNumber: cn,
+          caseType: ct,
+          plaintiff: f.plaintiff,
+          plaintiffRole: f.plaintiff_role,
+          plaintiffNationalId: f.plaintiff_national_id,
+          plaintiffPoa: f.plaintiff_power_of_attorney,
+          defendant: f.defendant,
+          defendantRole: f.defendant_role,
+          defendantNationalId: f.defendant_national_id,
+          circuitNumber: f.circuit_number,
+          sessionHall: f.session_hall,
+          sessionTime: f.session_time,
+          courtLevel: cl,
+          secretaryHall: f.secretary_hall,
+          secretaryName: f.secretary_name,
+          secretaryMobile: f.secretary_mobile,
+        }, caseTitle, offlineTempId),
         returning: true,
       });
       if (error) {
@@ -126,13 +120,10 @@ export function useClientLinking(
           type: 'UPDATE',
           table: 'case_sessions',
           id: savedFormData.sessionId,
-          data: {
-            case_id: realOrTempCaseId,
-            // 🆕 المرحلة 2: sentinel التمبيد العام بيتبعت بس لما القضية نفسها
-            // لسه تمبيد (أوفلاين) — لو نجحت أونلاين، case_id بالفعل id حقيقي
-            // ومحتاجش أي حل وقت المزامنة.
-            ...((offline && queued) ? { _offlineFkTempId: [{ field: 'case_id', tempId: offlineTempId, table: 'cases' as const, fallbackNameValue: caseTitle }] } : {}),
-          },
+          // 🆕 المرحلة 2: sentinel التمبيد العام بيتبعت بس لما القضية نفسها
+          // لسه تمبيد (أوفلاين) — لو نجحت أونلاين، case_id بالفعل id حقيقي
+          // ومحتاجش أي حل وقت المزامنة.
+          data: withFkOfflineSentinel(offline, queued, 'case_id', offlineTempId, 'cases', caseTitle, { case_id: realOrTempCaseId }),
         });
         if (sessionLinkErr) {
           showErrorToast('session_case_link', sessionLinkErr, 'تم إنشاء القضية لكن تعذّر ربط الجلسة بها. حاول تحديث الصفحة.', 'ربط الجلسة بالقضية');
@@ -152,10 +143,14 @@ export function useClientLinking(
       // فاضية طبيعي لو مفيش نت، وده مقبول ومش تغيير سلوك — نفس قرار الخطة).
       const plaintiffName = f.plaintiff?.trim();
       if (!plaintiffName) { setClientStep('notfound'); return; }
-      const { data: clients } = await db.from('clients').select('id,full_name').ilike(`full_name`, `%${plaintiffName}%`).limit(3);
-      if (clients && clients.length > 0) {
-        setFoundClient(clients[0]);
-        setFoundClientMatchType('fuzzy');
+      // ⚡ FIX (توحيد): findMatchingClientByName (caseSessionLinkingShared.ts)
+      // بدل استعلام يدوي هنا — نفس المنطق بالظبط اللي في useSessionLinking.ts
+      // (فلتر deleted_at + بحث على client_name + تحديد matchType)، مكان
+      // واحد بس للفيكسات المستقبلية.
+      const match = await findMatchingClientByName(db, plaintiffName);
+      if (match) {
+        setFoundClient(match.client);
+        setFoundClientMatchType(match.matchType);
         setClientStep('found');
       } else {
         setClientStep('notfound');
@@ -177,7 +172,7 @@ export function useClientLinking(
       // resolveOfflineSelfId في offlineQueue.ts — اكتشاف معماري جديد: هنا
       // الـ id بتاع السطر المستهدف نفسه هو التمبيد، مش حقل FK جوه data
       // زي _offlineFkTempId العادية).
-      const isTempCaseId = createdCaseId.startsWith('tmp-');
+      const isTempCaseId = isOfflineTempId(createdCaseId);
       const caseTitle = isTempCaseId && savedFormData
         ? (savedFormData.form.title || savedFormData.fullCaseNumber || 'قضية من جلسة مستقلة')
         : undefined;
@@ -185,10 +180,7 @@ export function useClientLinking(
         type: 'UPDATE',
         table: 'cases',
         id: createdCaseId,
-        data: {
-          client_id: foundClient.id,
-          ...(isTempCaseId ? { _offlineSelfTempId: createdCaseId, _offlineSelfFallbackName: caseTitle } : {}),
-        },
+        data: withCaseSelfOfflineSentinel(createdCaseId, { client_id: foundClient.id }, caseTitle),
       });
       if (error) {
         showErrorToast('session_client_link', error, 'تعذّر ربط الموكل بالجلسة. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'ربط الموكل بالجلسة');
@@ -214,7 +206,7 @@ export function useClientLinking(
     if (!savedFormData || !createdCaseId) return;
     const { form: f } = savedFormData;
     if (!f.plaintiff?.trim()) return;
-    const isTempCaseId = createdCaseId.startsWith('tmp-');
+    const isTempCaseId = isOfflineTempId(createdCaseId);
     const caseTitle = isTempCaseId ? (f.title || savedFormData.fullCaseNumber || 'قضية من جلسة مستقلة') : undefined;
     onOpenCreateClientForCase?.(
       createdCaseId, f.plaintiff, f.plaintiff_national_id, f.plaintiff_power_of_attorney,
