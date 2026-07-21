@@ -11,8 +11,10 @@ import type { ClientRow, ProfileRow } from '../../../../types';
 //       [.or(...)]? .order('deleted_at',{ascending:false}).range(from,to)   [fetchArchivedCases]
 //   - db.from('cases').update({deleted_at:null}).eq('id', caseId)          [handleRestoreCase]
 //   - db.from('case_documents').select('storage_path').eq('case_id', X)   [handlePermanentDeleteCase — خطوة 1]
-//   - db.storage.from('case-docs').remove(paths)                          [handlePermanentDeleteCase — خطوة 1]
 //   - db.from('cases').delete().eq('id', caseId)                          [handlePermanentDeleteCase — خطوة 2]
+//   - db.storage.from('case-docs').remove(paths)                          [handlePermanentDeleteCase — خطوة 3]
+//   [مرحلة 3 — M-3] الترتيب اتعكس: حذف صف القضية بقى قبل تنضيف Storage، فلو حذف
+//   الصف فشل، تنضيف الـ Storage مش هيتنفذ خالص (مش زي الترتيب القديم).
 // نفس فلسفة الموك في useAdminActivity.test.ts (query builder thenable قابل
 // للتسلسل) مدموجة مع نمط case_documents/storage الموجود فعليًا فى
 // useCaseActions.test.ts (نفس المنطق بالحرف، منقول هنا لهوك مستقل).
@@ -246,12 +248,13 @@ describe('useAdminArchive', () => {
     expect(result.current.archivedCasesTotal).toBe(5);
   });
 
-  it('استثناء أثناء الاستعلام → بيتلقط في catch من غير كراش، loadingArchivedCases بيرجع false', async () => {
+  it('استثناء أثناء الاستعلام → بيتلقط في catch من غير كراش، loadingArchivedCases بيرجع false، وتوست خطأ بيظهر (L-1)', async () => {
     mockDb.setSelectResult({ reject: true });
     const { result } = setup();
     await act(async () => { await result.current.fetchArchivedCases(); });
     expect(result.current.loadingArchivedCases).toBe(false);
     expect(result.current.archivedCases).toEqual([]);
+    expect(toast).toHaveBeenCalledWith('❌ فشل تحميل القضايا المؤرشفة — تحقق من الاتصال وأعد المحاولة', true);
   });
 
   it('handleRestoreCase نجاح → update({deleted_at:null}).eq، toast نجاح، logActivity بالنوع الصحيح، العنصر بيتشال من القائمة والعداد بينقص', async () => {
@@ -283,7 +286,7 @@ describe('useAdminArchive', () => {
     expect(result.current.archivedCases).toHaveLength(1);
   });
 
-  it('handlePermanentDeleteCase مع مستندات → بيجيب storage_path الأول، بيحذف الملفات، بعدين بيحذف صف القضية، وبيسجل النشاط مع اسم الموكل الصحيح', async () => {
+  it('handlePermanentDeleteCase مع مستندات → بيجيب storage_path الأول، بيحذف صف القضية، بعدين بينضّف ملفات Storage [مرحلة 3 — M-3]، وبيسجل النشاط مع اسم الموكل الصحيح', async () => {
     mockDb.setSelectResult({ data: [{ id: 'c1', title: 'قضية 1', client_id: 'cl-1', case_type: 'مدني' }], count: 1 });
     const { result } = setup();
     await act(async () => { await result.current.fetchArchivedCases(); });
@@ -363,6 +366,35 @@ describe('useAdminArchive', () => {
     expect(result.current.archivedCases).toHaveLength(1);
   });
 
+  it('[M-3] فشل حذف صف القضية ومعاها مستندات → تنضيف Storage ما بيتنفذش خالص (لتفادي ملفات تتمسح لصف لسه موجود)', async () => {
+    mockDb.setSelectResult({ data: [{ id: 'c1', title: 'قضية 1' }], count: 1 });
+    const { result } = setup();
+    await act(async () => { await result.current.fetchArchivedCases(); });
+
+    mockDb.setSimpleResult('case_documents:select', { data: [{ storage_path: 'docs/a.pdf' }], error: null });
+    mockDb.setSimpleResult('cases:delete', { error: { message: 'fail' } });
+
+    await act(async () => { await result.current.handlePermanentDeleteCase('c1'); });
+
+    expect(mockDb.storageRemoveSpy).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith('❌ فشل حذف القضية نهائياً — تحقق من الاتصال وأعد المحاولة', true);
+  });
+
+  it('[M-3] الترتيب الفعلي: حذف صف القضية (cases:delete) بيتنفذ قبل تنضيف Storage (storage.remove)', async () => {
+    mockDb.setSelectResult({ data: [{ id: 'c1', title: 'قضية 1' }], count: 1 });
+    const { result } = setup();
+    await act(async () => { await result.current.fetchArchivedCases(); });
+
+    mockDb.setSimpleResult('case_documents:select', { data: [{ storage_path: 'docs/a.pdf' }], error: null });
+    mockDb.setSimpleResult('cases:delete', { error: null });
+
+    await act(async () => { await result.current.handlePermanentDeleteCase('c1'); });
+
+    const deleteOrder = mockDb.deleteSpy.mock.invocationCallOrder[0];
+    const storageOrder = mockDb.storageRemoveSpy.mock.invocationCallOrder[0];
+    expect(deleteOrder).toBeLessThan(storageOrder);
+  });
+
   // ══════════════════════════════════════════════════════════════
   //  المرحلة 4 — الموكلين
   // ══════════════════════════════════════════════════════════════
@@ -402,6 +434,14 @@ describe('useAdminArchive', () => {
         ilikeOrClause('client_name', 'أحمد'),
       ].join(',');
       expect(mockDb.orSpy).toHaveBeenCalledWith(expectedClause);
+    });
+
+    it('fetchArchivedClients استثناء أثناء الاستعلام → توست خطأ بيظهر (L-1)', async () => {
+      mockDb.setSelectResult({ reject: true });
+      const { result } = setup();
+      await act(async () => { await result.current.fetchArchivedClients(); });
+      expect(result.current.loadingArchivedClients).toBe(false);
+      expect(toast).toHaveBeenCalledWith('❌ فشل تحميل الموكلين المؤرشفين — تحقق من الاتصال وأعد المحاولة', true);
     });
 
     it('handleRestoreClient نجاح → update({deleted_at:null}).eq، toast نجاح، logActivity، العنصر بيتشال من القائمة', async () => {
@@ -500,6 +540,14 @@ describe('useAdminArchive', () => {
         ilikeOrClause('case_title', 'قضية'),
       ].join(',');
       expect(mockDb.orSpy).toHaveBeenCalledWith(expectedClause);
+    });
+
+    it('fetchArchivedFees استثناء أثناء الاستعلام → توست خطأ بيظهر (L-1)', async () => {
+      mockDb.setSelectResult({ reject: true });
+      const { result } = setup();
+      await act(async () => { await result.current.fetchArchivedFees(); });
+      expect(result.current.loadingArchivedFees).toBe(false);
+      expect(toast).toHaveBeenCalledWith('❌ فشل تحميل سجلات الأتعاب المؤرشفة — تحقق من الاتصال وأعد المحاولة', true);
     });
 
     it('handleRestoreFee نجاح → update({deleted_at:null}).eq، toast نجاح، logActivity، العنصر بيتشال من القائمة', async () => {
