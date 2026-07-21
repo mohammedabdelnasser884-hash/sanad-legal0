@@ -13,9 +13,15 @@ import type { MappedCase } from '../../../hooks/useAppData';
 //   - db.from('case_fees').insert([...]).select().single()                                    [handleSave create]
 //   - db.from('fee_payments').insert([...])                                                    [handleSave، دفعة مقدّمة وقت الإنشاء]
 //   - db.from('fee_payments').select('amount').eq('fee_id', id)                                [realPaid recompute — handleSave/handleDeletePayment]
-//   - db.from('case_fees').update({...}).eq('id', id)                                          [handleSave/handleDelete...]
-//   - db.from('fee_payments').delete().eq('id', payId)                                         [handleDeletePayment]
+//   - db.from('case_fees').update({...}).eq('id', id)                                          [handleSave]
 //   - db.rpc('record_fee_payment', {...})                                                       [handleAddPayment — نداء ذرّي واحد]
+// 🆕 (21 يوليو — المرحلة 6): حذف/تحديث حذف الدفعة (fee_payments)، والأرشفة/الاسترجاع/الحذف
+// النهائي لسجل الأتعاب (case_fees) بقوا بينادوا window.__dbWrite بدل db.from
+// مباشرة — نفس نمط useCaseDetailActions.test.ts (dbWriteMock() تحت):
+//   - window.__dbWrite({type:'DELETE', table:'fee_payments', id})                                [handleDeletePayment]
+//   - window.__dbWrite({type:'UPDATE', table:'case_fees', data:{paid_fees,status}, id})           [handleDeletePayment]
+//   - window.__dbWrite({type:'DELETE', table:'case_fees', id})                                    [handlePermanentDeleteFee]
+//   - window.__dbWrite({type:'UPDATE', table:'case_fees', data:{deleted_at}, id})                 [handleDelete/handleRestoreFee]
 // ══════════════════════════════════════════════════════════════════
 type Result = { data?: unknown; error?: unknown; count?: number | null };
 const DEFAULT_RESULT: Result = { data: [], error: null, count: 0 };
@@ -99,6 +105,11 @@ vi.mock('../../../supabaseClient', () => ({
   },
 }));
 
+// 🆕 (21 يوليو — المرحلة 6): mock لـ window.__dbWrite — نفس نمط useCaseDetailActions.test.ts بالظبط.
+function dbWriteMock(): ReturnType<typeof vi.fn> {
+  return window.__dbWrite as unknown as ReturnType<typeof vi.fn>;
+}
+
 const toast = vi.fn();
 vi.mock('../../../shared/lib/notifications', () => ({ toast: (...a: unknown[]) => toast(...a) }));
 
@@ -142,6 +153,7 @@ describe('useFeesActions', () => {
   beforeEach(() => {
     mockDb = makeMockDb();
     vi.clearAllMocks();
+    window.__dbWrite = vi.fn() as unknown as typeof window.__dbWrite;
   });
 
   describe('handleSave — فاليديشن', () => {
@@ -376,48 +388,55 @@ describe('useFeesActions', () => {
     it('بيحذف الدفعة، يعيد حساب الرصيد من المتبقي فعليًا (مش بالطرح)، وبيحدّث status', async () => {
       // بعد الحذف، دفعة واحدة بس فاضلة بـ 200 (مش 500-300 بالطرح، القيمة بترجع من DB مباشرة)
       mockDb.setResult('fee_payments:eqFeeId', { data: [{ amount: 200 }], error: null });
+      dbWriteMock().mockResolvedValue({ error: null });
       const { result } = await renderFeesHook();
       const fee = makeFee({ total_fees: 1000, paid_fees: 500 });
 
       await act(async () => { await result.current.handleDeletePayment('pay-1', fee); });
 
-      expect(mockDb.deleteSpy).toHaveBeenCalledWith('fee_payments');
-      expect(mockDb.updateSpy).toHaveBeenCalledWith('case_fees', expect.objectContaining({
-        paid_fees: 200, status: 'deferred',
-      }));
+      expect(dbWriteMock()).toHaveBeenCalledWith({ type: 'DELETE', table: 'fee_payments', id: 'pay-1' });
+      expect(dbWriteMock()).toHaveBeenCalledWith({
+        type: 'UPDATE', table: 'case_fees', data: { paid_fees: 200, status: 'deferred' }, id: fee.id,
+      });
       expect(toast).toHaveBeenCalledWith('🗑 تم حذف الدفعة');
     });
 
     it('حذف آخر دفعة (يرجع الرصيد لصفر) → status ترجع open لو total كمان صفر، أو deferred لو لسه فيه total', async () => {
       mockDb.setResult('fee_payments:eqFeeId', { data: [], error: null });
+      dbWriteMock().mockResolvedValue({ error: null });
       const { result } = await renderFeesHook();
       const fee = makeFee({ total_fees: 1000, paid_fees: 500 });
 
       await act(async () => { await result.current.handleDeletePayment('pay-1', fee); });
 
-      expect(mockDb.updateSpy).toHaveBeenCalledWith('case_fees', expect.objectContaining({ paid_fees: 0, status: 'deferred' }));
+      expect(dbWriteMock()).toHaveBeenCalledWith({
+        type: 'UPDATE', table: 'case_fees', data: { paid_fees: 0, status: 'deferred' }, id: fee.id,
+      });
     });
 
     it('فشل الحذف → توست خطأ، من غير أي إعادة حساب أو تحديث', async () => {
-      mockDb.setResult('fee_payments:delete', { error: { message: 'delete failed' } });
+      dbWriteMock().mockResolvedValue({ error: { message: 'delete failed' } });
       const { result } = await renderFeesHook();
 
       await act(async () => { await result.current.handleDeletePayment('pay-1', makeFee()); });
 
       expect(toast).toHaveBeenCalledWith('❌ فشل حذف الدفعة، يرجى المحاولة مرة أخرى', true);
-      expect(mockDb.updateSpy).not.toHaveBeenCalledWith('case_fees', expect.anything());
+      expect(dbWriteMock()).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'UPDATE', table: 'case_fees' }));
     });
   });
 
   describe('handleDelete — أرشفة (soft delete)', () => {
     it('بيحدّث deleted_at بس (مش حذف فعلي)، وبيسجّل النشاط ببيانات القضية/الموكل الصح', async () => {
+      dbWriteMock().mockResolvedValue({ error: null });
       const { result } = await renderFeesHook();
       const targetFee = makeFee({ id: 'fee-archive-1', client_name: 'موكل الأرشفة' });
       act(() => { result.current.setFees([targetFee]); });
 
       await act(async () => { await result.current.handleDelete('fee-archive-1'); });
 
-      expect(mockDb.updateSpy).toHaveBeenCalledWith('case_fees', expect.objectContaining({ deleted_at: expect.any(String) }));
+      expect(dbWriteMock()).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'UPDATE', table: 'case_fees', data: { deleted_at: expect.any(String) }, id: 'fee-archive-1',
+      }));
       expect(logActivity).toHaveBeenCalledWith(expect.anything(), 'أرشفة أتعاب', expect.objectContaining({
         entity_type: 'fee', entity_id: 'fee-archive-1',
         client_name: 'موكل الأرشفة', case_name: 'قضية عمالية', case_type: 'عمالي',
@@ -426,7 +445,7 @@ describe('useFeesActions', () => {
     });
 
     it('فشل الأرشفة → توست خطأ، من غير logActivity', async () => {
-      mockDb.setResult('case_fees:update', { error: { message: 'archive failed' } });
+      dbWriteMock().mockResolvedValue({ error: { message: 'archive failed' } });
       const { result } = await renderFeesHook();
 
       await act(async () => { await result.current.handleDelete('fee-1'); });
@@ -438,14 +457,14 @@ describe('useFeesActions', () => {
 
   describe('handlePermanentDeleteFee — حذف نهائي (باتش 1.3)', () => {
     it('بيحذف صف case_fees فعليًا (مش تحديث deleted_at)، وبيسجّل النشاط ببيانات القضية/الموكل الصح', async () => {
-      mockDb.setResult('case_fees:delete', { error: null });
+      dbWriteMock().mockResolvedValue({ error: null });
       const { result } = await renderFeesHook();
       const targetFee = makeFee({ id: 'fee-perm-1', client_name: 'موكل الحذف النهائي' });
       act(() => { result.current.setFees([targetFee]); });
 
       await act(async () => { await result.current.handlePermanentDeleteFee('fee-perm-1'); });
 
-      expect(mockDb.deleteSpy).toHaveBeenCalledWith('case_fees');
+      expect(dbWriteMock()).toHaveBeenCalledWith({ type: 'DELETE', table: 'case_fees', id: 'fee-perm-1' });
       expect(logActivity).toHaveBeenCalledWith(expect.anything(), 'حذف أتعاب نهائياً', expect.objectContaining({
         entity_type: 'fee', entity_id: 'fee-perm-1',
         client_name: 'موكل الحذف النهائي', case_name: 'قضية عمالية', case_type: 'عمالي',
@@ -454,7 +473,7 @@ describe('useFeesActions', () => {
     });
 
     it('فشل الحذف النهائي → توست فشل، من غير logActivity', async () => {
-      mockDb.setResult('case_fees:delete', { error: { message: 'delete failed' } });
+      dbWriteMock().mockResolvedValue({ error: { message: 'delete failed' } });
       const { result } = await renderFeesHook();
 
       await act(async () => { await result.current.handlePermanentDeleteFee('fee-1'); });
@@ -466,12 +485,12 @@ describe('useFeesActions', () => {
 
   describe('handleRestoreFee — استرجاع من الأرشيف', () => {
     it('نجاح → update({deleted_at:null})، توست نجاح، تسجيل نشاط بالنوع الصحيح', async () => {
-      mockDb.setResult('case_fees:update', { error: null });
+      dbWriteMock().mockResolvedValue({ error: null });
       const { result } = await renderFeesHook();
 
       await act(async () => { await result.current.handleRestoreFee('fee-1'); });
 
-      expect(mockDb.updateSpy).toHaveBeenCalledWith('case_fees', { deleted_at: null });
+      expect(dbWriteMock()).toHaveBeenCalledWith({ type: 'UPDATE', table: 'case_fees', data: { deleted_at: null }, id: 'fee-1' });
       expect(logActivity).toHaveBeenCalledWith(expect.anything(), 'استرجاع أتعاب من الأرشيف', expect.objectContaining({
         entity_type: 'fee', entity_id: 'fee-1',
       }));
@@ -479,7 +498,7 @@ describe('useFeesActions', () => {
     });
 
     it('فشل → توست خطأ، من غير logActivity', async () => {
-      mockDb.setResult('case_fees:update', { error: { message: 'restore failed' } });
+      dbWriteMock().mockResolvedValue({ error: { message: 'restore failed' } });
       const { result } = await renderFeesHook();
 
       await act(async () => { await result.current.handleRestoreFee('fee-1'); });
