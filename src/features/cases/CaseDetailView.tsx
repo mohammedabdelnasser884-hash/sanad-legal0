@@ -60,9 +60,13 @@ interface CaseDetailViewProps {
     initialTab?: string;
     profile?: ProfileRow | null;
     country?: string | null;
+    // 🔒 FIX (تقرير الموثوقية — نتيجة 1): بتتمرر لـ EditCaseModal عشان تقفل
+    // زرار "حفظ التعديلات" أثناء الحفظ — نفس savingCase المستخدمة في
+    // NewCaseModal.
+    savingCase?: boolean;
 }
 
-function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDelete, onEdit, onLinkClient, onCreateAndLinkClient, onNotify, initialTab='timeline', profile=null, country=null}: CaseDetailViewProps){
+function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDelete, onEdit, onLinkClient, onCreateAndLinkClient, onNotify, initialTab='timeline', profile=null, country=null, savingCase=false}: CaseDetailViewProps){
     const [activeSection, setActiveSection] = useState(initialTab);
     const [showEditCase, setShowEditCase] = useState(false);
     const [linkingClient, setLinkingClient] = useState(false);
@@ -174,6 +178,7 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
         showEditCase && React.createElement('div', {className: "fixed inset-0 z-[60] flex items-end justify-center bg-black/80 backdrop-blur-sm"},
             React.createElement(EditCaseModal, {
                 caseData,
+                saving: savingCase,
                 onClose: () => setShowEditCase(false),
                 onSave: (form: CaseFormSubmitData) => { onEdit?.(caseData.id, form); setShowEditCase(false); },
                 countryCourts: COUNTRY_CONFIGS[country as string]?.courts,
