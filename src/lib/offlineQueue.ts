@@ -9,12 +9,50 @@ import { logActivity, recalcNextHearing } from '../shared/lib/dataAccess';
 // ══════════════════════════════════════════════════════════
 
 // ⚠️ الجداول الحقيقية اللي ممكن توصل لـ __dbWrite — اتأكدت من كل نداء فعلي
-// في المشروع كله (useCaseActions.ts، useClientActions.ts): القيم الوحيدة
-// اللي بتتبعت فعليًا كـ `table` هي التلاتة دول. مستخدمة في توقيع __dbWrite
-// نفسه، وكمان في OfflineQueueItem.table تحت (لأن __offlineEnqueue بيتنادى
-// حصريًا من جوه __dbWrite بنفس القيم دي بالظبط — مفيش أي نداء تاني ليها في
-// المشروع كله).
-export type DbWriteTable = 'clients' | 'cases' | 'case_sessions';
+// في المشروع كله (useCaseActions.ts، useClientActions.ts، useRemindersTab.ts).
+// مستخدمة في توقيع __dbWrite نفسه، وكمان في OfflineQueueItem.table تحت (لأن
+// __offlineEnqueue بيتنادى حصريًا من جوه __dbWrite بنفس القيم دي بالظبط —
+// مفيش أي نداء تاني ليها في المشروع كله).
+//
+// 🆕 المرحلة 6 (خطة توسيع نظام الأوفلاين — H-3، 21 يوليو): 'reminders' اتضافت
+// كأول جدول من الأربعة المتبقية (الأولوية: بساطة، صفر أعمدة FK بتشاور على
+// جدول تاني ممكن يكون لسه في الطابور — بعكس case_fees مثلًا).
+//
+// 🆕 المرحلة 6 (تكملة): 'case_fees' و'fee_payments' اتضافوا تانيًا. ⚠️ قرار
+// عمل محسوم مع صاحب المشروع (21 يوليو): تسجيل دفعة أتعاب (`handleAddPayment`،
+// بينادي RPC ذرّية `record_fee_payment`) وحذف دفعة (`handleDeletePayment`،
+// عمليتين متتاليتين متعتمدتين — حذف + إعادة حساب) **ممنوعين تمامًا أوفلاين**
+// (رسالة صريحة "يتطلب اتصال بالإنترنت")، مش مقيّدين في الطابور — عشان منرجعش
+// لمشكلة الـ partial-save اللي المرحلة 4 حلّتها أصلاً لو حاولنا نبني نسخة
+// أوفلاين من عملية متعددة الخطوات معتمدة على نتيجة السيرفر. عمليات case_fees
+// التانية (إضافة سجل جديد من غير دفعة مبدئية، حذف/أرشفة/استرجاع) عمليات
+// وحيدة الخطوة، فهي دي اللي فعليًا بتستخدم __dbWrite/الطابور تحت.
+//
+// 🆕 المرحلة 6 (تكملة ثانية، 21 يوليو): 'case_notes' اتضافت — تحويلات خالصة
+// على جدول واحد (INSERT/UPDATE/DELETE)، صفر تفاعل مع Storage، وصفر FK فعلي
+// على case_id (مؤكَّد بالقسم 0.1 من التقرير: case_notes مالهاش FK نحو
+// cases)، فمفيش داعي لـ _offlineFkTempId هنا أصلاً — وقت ما المستخدم بيضيف
+// ملاحظة، القضية نفسها لازم تكون محمّلة ومعروضة على الشاشة بالفعل (يعني
+// سجل حقيقي متزامن، مش تمبيد لسه في الطابور).
+// ⚠️ 'case_documents' اتفحصت وقُرِّر عمدًا إنها **متتضافش** هنا: كل عملية
+// عليها (رفع/حذف) خطوة معتمدة ماديًا على الشبكة (بايتات الملف نفسها لازم
+// توصل فعليًا لـ Supabase Storage — مفيش تمثيل ممكن للملف في IndexedDB/
+// الطابور زي صف DB عادي)، فمينفعش "نقيّدها" زي باقي الجداول. نفس فلسفة
+// قرار case_fees/fee_payments بالظبط — راجع useCaseDocuments.ts للتفصيل.
+//
+// 🆕 المرحلة 6.5 (تكملة ثالثة، 21 يوليو): `case_sessions` كانت مُدرجة هنا
+// من الأول (من التلات جداول الأصلية)، لكن استخدامها كان مقصور فعليًا على
+// تدفقات "ربط جلسة مستقلة بقضية" (useSessionLinking.ts/NewStandaloneSessionModal.tsx)
+// بس. إضافة/تعديل/حذف جلسة من *صفحة تفاصيل القضية مباشرة* (useCaseSessions.ts)
+// كانت لسه بتستخدم db.from()/safeUpdate مباشر. دلوقتي بقت بتستخدم __dbWrite
+// زيها زي باقي التدفقات. case_id في السيناريو ده دايمًا حقيقي (القضية
+// محمّلة ومعروضة على الشاشة بالفعل، مش تمبيد)، فمفيش داعي لـ
+// _offlineFkTempId/_offlineCaseTempId هنا — لكن عشان next_hearing يتحدّث
+// صح بعد المزامنة (مش بس أونلاين فورًا)، useCaseSessions.ts بيبعت sentinel
+// جديد `_offlineSessionCaseId` (INSERT: case_id نفسه موجود أصلاً كعمود
+// حقيقي فمش محتاج سنتينل؛ UPDATE/DELETE: محتاجين السنتينل لأن case_id مش
+// جزء من بيانات العملية أصلاً) — شوف caseSessionCaseIdsToRecalc تحت.
+export type DbWriteTable = 'clients' | 'cases' | 'case_sessions' | 'reminders' | 'case_fees' | 'fee_payments' | 'case_notes';
 
 // ⚠️ قيد معروف في supabase-js + TypeScript: تسلسل .insert()/.update()/.delete()
 // ثم .select()/.eq() على db.from(table) لما `table` يكون Generic (T extends
@@ -459,6 +497,13 @@ window.__syncOfflineQueue = async function() {
     // اللي next_hearing بتاعه كان بيفضل فاضي بعد المزامنة قبل الفيكس ده.
     const syncedCaseIds = new Set<string>();
     const casesLinkedThisCycle = new Set<string>();
+    // 🆕 المرحلة 6.5: قضايا (حقيقية بالفعل، مش تمبيد) محتاجة إعادة حساب
+    // next_hearing بعد المزامنة بسبب عملية case_sessions (INSERT/UPDATE/
+    // DELETE) اتزامنت بنجاح من useCaseSessions.ts — بعكس casesLinkedThisCycle
+    // فوق اللي مقصورة على تقاطعها مع syncedCaseIds (سيناريو قضية جديدة
+    // بالكامل أوفلاين)، هنا القضية موجودة أصلاً من قبل الدورة دي، فالتحديث
+    // مطلوب دايمًا (بلا شرط تقاطع) لأي case_id اتجمّع هنا.
+    const caseSessionCaseIdsToRecalc = new Set<string>();
     // 🔒 FIX (تتبع "إضافة قضية" — 18 يوليو 2026): سقف محاولات — عنصر فشل
     // ~15 مرة متتالية (يعني قريب من ربع ساعة بمعدل محاولة كل دقيقة، غير
     // محاولات أحداث 'online'/'load' الإضافية) بيتحسب "عالق" ويتجمع في
@@ -479,6 +524,10 @@ window.__syncOfflineQueue = async function() {
             // جلسة بقضية (case_sessions.case_id) — شوف linksCaseSession
             // واستخدامها في فرع النجاح تحت.
             let linkedCaseIdForRecalc: string | null = null;
+            // 🆕 المرحلة 6.5: هيتحدد جوه فرع UPDATE (تعديل جلسة من صفحة
+            // تفاصيل القضية) — لازم يتصرّح هنا (مش جوه الفرع نفسه) عشان
+            // يفضل متاح لفرع النجاح تحت بعد ما الـ if/else-if كله يخلص.
+            let sessionCaseIdForRecalc: string | null = null;
 
             if (op.type === 'INSERT') {
                 // البيانات هنا Record<string, unknown> عام (زي useAdminBackup.ts) —
@@ -552,6 +601,14 @@ window.__syncOfflineQueue = async function() {
                     }
                 } else {
                     ({ error } = await db.from(op.table).insert([insertData as Database['public']['Tables'][typeof op.table]['Insert']]));
+                    // 🆕 المرحلة 6.5: إضافة جلسة من صفحة تفاصيل القضية مباشرة
+                    // (useCaseSessions.ts) — case_id هنا حقيقي دايمًا (مفيش
+                    // _offlineTempId ولا _offlineFkTempId في العملية دي أصلاً)،
+                    // موجود كعمود حقيقي في insertData نفسها، فمش محتاجين
+                    // sentinel منفصل للـ INSERT (بعكس UPDATE/DELETE تحت).
+                    if (!error && op.table === 'case_sessions' && insertData?.case_id) {
+                        caseSessionCaseIdsToRecalc.add(insertData.case_id as string);
+                    }
                 }
             } else if (op.type === 'UPDATE') {
                 // 🆕 المرحلة 3-1: لازم نحل تمبيد id السطر نفسه (لو موجود) قبل أي
@@ -559,6 +616,14 @@ window.__syncOfflineQueue = async function() {
                 // update أصلاً (بعكس _offlineFkTempId اللي بيحل حقول *جوه*
                 // data، مش هوية السطر المستهدف نفسه).
                 let resolvedOpId = op.id as string;
+                // 🆕 المرحلة 6.5: sentinel `_offlineSessionCaseId` من
+                // useCaseSessions.ts (تعديل جلسة من صفحة تفاصيل القضية
+                // مباشرة) — case_id حقيقي دايمًا هنا (مش تمبيد)، بنلقطه هنا
+                // قبل أي strip عشان نعرف نعيد حساب next_hearing بعد نجاح
+                // الـ UPDATE تحت (شوف caseSessionCaseIdsToRecalc).
+                sessionCaseIdForRecalc = op.table === 'case_sessions'
+                    ? (op.data?._offlineSessionCaseId as string | undefined) || null
+                    : null;
                 if (op.data?._offlineSelfTempId) {
                     const selfResolved = await resolveOfflineSelfId(db, op, tempIdToRealId, queue);
                     if (selfResolved.shouldRetry || !selfResolved.realId) {
@@ -659,6 +724,14 @@ window.__syncOfflineQueue = async function() {
                 if (op.type === 'UPDATE' && linkedCaseIdForRecalc) {
                     casesLinkedThisCycle.add(linkedCaseIdForRecalc);
                 }
+                // 🆕 المرحلة 6.5: تعديل/حذف جلسة من صفحة تفاصيل القضية
+                // مباشرة — القضية دي حقيقية وموجودة من قبل الدورة دي (مش
+                // محتاجة تقاطع مع syncedCaseIds زي casesLinkedThisCycle فوق).
+                if (op.type === 'UPDATE' && sessionCaseIdForRecalc) {
+                    caseSessionCaseIdsToRecalc.add(sessionCaseIdForRecalc);
+                } else if (op.type === 'DELETE' && op.table === 'case_sessions' && (op.data?._offlineSessionCaseId as string | undefined)) {
+                    caseSessionCaseIdsToRecalc.add(op.data._offlineSessionCaseId as string);
+                }
             } else {
                 // BUG FIX: كان بيتجاهل تفاصيل الخطأ تمامًا، فمستحيل تعرف ليه
                 // عملية معينة فاضلة عالقة في الـ queue ومش بتتزامن أبدًا
@@ -696,6 +769,18 @@ window.__syncOfflineQueue = async function() {
             await recalcNextHearing(db, caseId);
         } catch (err) {
             console.error('[Offline Sync] فشل إعادة حساب next_hearing بعد المزامنة للقضية', caseId, '—', err);
+        }
+    }
+    // 🆕 المرحلة 6.5: نفس فكرة الحلقة فوق، لكن لجلسات اتضافت/اتعدّلت/اتحذفت
+    // من صفحة تفاصيل القضية مباشرة (useCaseSessions.ts) وإحنا أوفلاين.
+    // بعكس الحلقة فوق، هنا مفيش شرط تقاطع مع syncedCaseIds — القضية دايمًا
+    // كانت موجودة وحقيقية من قبل الدورة دي أصلاً (مش قضية جديدة بالكامل
+    // اتزامنت في نفس الوقت)، فالتحديث مطلوب لكل عنصر جُمع هنا بلا استثناء.
+    for (const caseId of caseSessionCaseIdsToRecalc) {
+        try {
+            await recalcNextHearing(db, caseId);
+        } catch (err) {
+            console.error('[Offline Sync] فشل إعادة حساب next_hearing بعد مزامنة جلسة للقضية', caseId, '—', err);
         }
     }
     if (successCount > 0 && failCount === 0) {
