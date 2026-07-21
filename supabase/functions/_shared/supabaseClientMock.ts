@@ -43,7 +43,7 @@ type RpcResponder = QueryResult | ((args: unknown) => QueryResult | Promise<Quer
 
 const CHAIN_METHODS = [
   'select', 'eq', 'neq', 'is', 'in', 'lt', 'lte', 'gt', 'gte',
-  'limit', 'order', 'single', 'update', 'insert', 'delete', 'upsert',
+  'limit', 'order', 'single', 'maybeSingle', 'update', 'insert', 'delete', 'upsert',
 ] as const;
 
 /**
