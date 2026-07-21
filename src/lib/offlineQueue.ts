@@ -664,8 +664,8 @@ window.__syncOfflineQueue = async function() {
                 // `id as string` في __dbWrite تحت.
                 // Optimistic Locking — نتحقق إن السجل مش اتعدل من حد تاني
                 if (op.knownUpdatedAt) {
-                    const { data: current, error: fetchErr } = await db
-                        .from(op.table).select('updated_at').eq('id', resolvedOpId).single();
+                    const { data: current, error: fetchErr } = await dbFrom(op.table)
+                        .select('updated_at').eq('id', resolvedOpId).single();
 
                     if (!fetchErr && current && current.updated_at) {
                         const serverTime = new Date(current.updated_at).getTime();
@@ -729,7 +729,7 @@ window.__syncOfflineQueue = async function() {
                 // محتاجة تقاطع مع syncedCaseIds زي casesLinkedThisCycle فوق).
                 if (op.type === 'UPDATE' && sessionCaseIdForRecalc) {
                     caseSessionCaseIdsToRecalc.add(sessionCaseIdForRecalc);
-                } else if (op.type === 'DELETE' && op.table === 'case_sessions' && (op.data?._offlineSessionCaseId as string | undefined)) {
+                } else if (op.type === 'DELETE' && op.table === 'case_sessions' && op.data?._offlineSessionCaseId) {
                     caseSessionCaseIdsToRecalc.add(op.data._offlineSessionCaseId as string);
                 }
             } else {
