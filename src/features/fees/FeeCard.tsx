@@ -25,6 +25,7 @@ interface FeeCardProps {
   setConfirmDeletePay: (v: ConfirmDeletePayState | null) => void;
   addPaymentFor: string | null;
   setAddPaymentFor: (v: string | null) => void;
+  payingFeeId: string | null;
   payClientName: string;
   setPayClientName: (v: string) => void;
   payClientNameText: string;
@@ -51,7 +52,7 @@ function FeeCard({
   expandedPayments, setExpandedPayments,
   invoiceLoadingFor, setInvoiceLoadingFor, getOrCreateInvoice, setInvoiceModal, toast,
   printAllPayments, setConfirmDeletePay,
-  addPaymentFor, setAddPaymentFor,
+  addPaymentFor, setAddPaymentFor, payingFeeId,
   payClientName, setPayClientName, payClientNameText, setPayClientNameText,
   payAmount, setPayAmount, payDate, setPayDate, payReceiver, setPayReceiver, payNote, setPayNote,
   handleAddPayment, setEditId, setForm, setShowForm, setConfirmDeleteFee,
@@ -266,7 +267,11 @@ function FeeCard({
                                         style:{fontFamily:'Cairo,sans-serif'}
                                     }),
                                     React.createElement('div',{className:"flex gap-2"},
-                                        React.createElement('button',{onClick:()=>handleAddPayment(fee),className:"flex-1 py-2 bg-emerald-500 text-white rounded-xl text-xs font-black active:scale-95"},"✅ تسجيل"),
+                                        React.createElement('button',{
+                                            onClick:()=>handleAddPayment(fee),
+                                            disabled: payingFeeId === fee.id,
+                                            className:"flex-1 py-2 bg-emerald-500 text-white rounded-xl text-xs font-black active:scale-95 disabled:opacity-50"
+                                        }, payingFeeId === fee.id ? "... جارِ التسجيل" : "✅ تسجيل"),
                                         React.createElement('button',{onClick:()=>{setAddPaymentFor(null);setPayDate('');setPayAmount('');setPayNote('');setPayReceiver('');setPayClientName('');setPayClientNameText('');},className:"px-3 py-2 bg-white/5 text-slate-400 rounded-xl text-xs active:scale-95"},"✕")
                                     )
                                   )
