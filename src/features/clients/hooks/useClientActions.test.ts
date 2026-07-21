@@ -112,7 +112,7 @@ function dbWriteMock(): ReturnType<typeof vi.fn> {
 
 function makeForm(overrides: Partial<ClientFormData> = {}): ClientFormData {
   return {
-    full_name: 'أحمد محمد', type: 'individual', phone: '', phone2: '', email: '',
+    full_name: 'أحمد محمد علي', type: 'individual', phone: '', phone2: '', email: '',
     address: '', notes: '', national_id: '', cr_number: '', kin_name: '', kin_phone: '',
     ...overrides,
   };
@@ -188,11 +188,11 @@ describe('useClientActions', () => {
 
       expect(dbWriteMock()).toHaveBeenCalledWith(expect.objectContaining({
         type: 'INSERT', table: 'clients',
-        data: expect.objectContaining({ client_name: 'أحمد محمد', phone: '0100000000', client_type: 'individual' }),
+        data: expect.objectContaining({ client_name: 'أحمد محمد علي', phone: '0100000000', client_type: 'individual' }),
       }));
       expect(toast).toHaveBeenCalledWith('✅ تم إضافة الموكل بنجاح!');
       expect(logActivity).toHaveBeenCalledWith(expect.anything(), 'إضافة موكل', expect.objectContaining({
-        userName: 'المحامي سالم', entity_type: 'client', details: 'أحمد محمد', client_name: 'أحمد محمد',
+        userName: 'المحامي سالم', entity_type: 'client', details: 'أحمد محمد علي', client_name: 'أحمد محمد علي',
       }));
       expect(params.sendTelegram).toHaveBeenCalled();
       expect(params.fetchClients).toHaveBeenCalledWith(0, '');
@@ -336,7 +336,7 @@ describe('useClientActions', () => {
         data: { client_id: 'new-client-1' },
       }));
       expect(logActivity).toHaveBeenCalledWith(expect.anything(), 'ربط قضية بموكل', expect.objectContaining({
-        entity_type: 'case', entity_id: 'case-real-1', client_name: 'أحمد محمد',
+        entity_type: 'case', entity_id: 'case-real-1', client_name: 'أحمد محمد علي',
       }));
       expect(onClientLinked).toHaveBeenCalledWith({ type: 'case', caseId: 'case-real-1' }, 'new-client-1');
     });
@@ -372,7 +372,7 @@ describe('useClientActions', () => {
       });
       const { handleSaveClient } = useClientActions(params);
 
-      await handleSaveClient(makeForm({ full_name: 'موكل أوفلاين' }), null, null);
+      await handleSaveClient(makeForm({ full_name: 'موكل أوفلاين جديد' }), null, null);
 
       const updateCall = dbWriteMock().mock.calls
         .map((c: unknown[]) => c[0] as { type: string; table: string; data: Record<string, unknown> })
@@ -383,7 +383,7 @@ describe('useClientActions', () => {
       expect(clientTempId).toMatch(/^tmp-/);
       expect(updateCall.data).toEqual({
         client_id: clientTempId,
-        _offlineFkTempId: [{ field: 'client_id', tempId: clientTempId, table: 'clients', fallbackNameValue: 'موكل أوفلاين' }],
+        _offlineFkTempId: [{ field: 'client_id', tempId: clientTempId, table: 'clients', fallbackNameValue: 'موكل أوفلاين جديد' }],
         _offlineSelfTempId: 'tmp-case-2', _offlineSelfFallbackName: 'قضية أوفلاين د',
       });
     });
@@ -573,14 +573,14 @@ describe('useClientActions', () => {
       const params = makeParams();
       const { handleUpdateClient } = useClientActions(params);
 
-      await handleUpdateClient('client-1', makeForm({ full_name: 'أحمد معدّل' }));
+      await handleUpdateClient('client-1', makeForm({ full_name: 'أحمد معدّل حسن' }));
 
       expect(safeUpdate).toHaveBeenCalledWith(expect.anything(), 'clients', 'client-1', expect.objectContaining({
-        client_name: 'أحمد معدّل',
+        client_name: 'أحمد معدّل حسن',
       }), '2026-07-01T00:00:00.000Z');
       expect(toast).toHaveBeenCalledWith('✅ تم تحديث بيانات الموكل');
       expect(logActivity).toHaveBeenCalledWith(expect.anything(), 'تعديل موكل', expect.objectContaining({
-        entity_type: 'client', entity_id: 'client-1', client_name: 'أحمد معدّل',
+        entity_type: 'client', entity_id: 'client-1', client_name: 'أحمد معدّل حسن',
       }));
       expect(params.fetchClients).toHaveBeenCalledWith(0, '');
       expect(params.nav.closeModal).toHaveBeenCalledWith('clientDetail');
