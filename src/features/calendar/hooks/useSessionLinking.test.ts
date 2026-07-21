@@ -315,7 +315,7 @@ describe('useSessionLinking', () => {
       dbWrite.setResult('UPDATE:cases', { error: null, offline: false });
       const mockDb = makeMockDb({ data: [], error: null });
       const onClientAdded = vi.fn();
-      const session = makeSession({ plaintiff: 'موكل جديد', plaintiff_national_id: '12345' });
+      const session = makeSession({ plaintiff: 'موكل جديد تمامًا', plaintiff_national_id: '12345' });
       const { result } = renderHook(() => useSessionLinking(session, mockDb, vi.fn(), onClientAdded));
       await act(async () => { await result.current.handleLinkCase(); });
 
@@ -324,7 +324,7 @@ describe('useSessionLinking', () => {
       expect(dbWrite.callsFor('INSERT:clients')[0]).toEqual(expect.objectContaining({
         type: 'INSERT', table: 'clients',
         data: expect.objectContaining({
-          full_name: 'موكل جديد', client_name: 'موكل جديد', tenant_id: 'tenant-1', national_id: '12345',
+          full_name: 'موكل جديد تمامًا', client_name: 'موكل جديد تمامًا', tenant_id: 'tenant-1', national_id: '12345',
           _offlineTempId: expect.stringMatching(/^tmp-/),
         }),
         returning: true,
@@ -342,7 +342,7 @@ describe('useSessionLinking', () => {
       dbWrite.setResult('INSERT:clients', { error: null, offline: false, data: { id: 'new-client-online' } });
       dbWrite.setResult('UPDATE:cases', { error: null, offline: true, queued: true });
       const mockDb = makeMockDb({ data: [], error: null });
-      const session = makeSession({ id: 'session-offline-b', title: 'قضية أوفلاين ب', plaintiff: 'موكل ب' });
+      const session = makeSession({ id: 'session-offline-b', title: 'قضية أوفلاين ب', plaintiff: 'موكل حالة ب' });
       const { result } = renderHook(() => useSessionLinking(session, mockDb, vi.fn()));
       await act(async () => { await result.current.handleLinkCase(); });
       const tempCaseId = result.current.createdCaseId as string;
@@ -366,7 +366,7 @@ describe('useSessionLinking', () => {
       dbWrite.setResult('INSERT:clients', { error: null, offline: true, queued: true });
       dbWrite.setResult('UPDATE:cases', { error: null, offline: true, queued: true });
       const mockDb = makeMockDb({ data: [], error: null });
-      const session = makeSession({ plaintiff: 'موكل جـ' });
+      const session = makeSession({ plaintiff: 'موكل حالة جـ' });
       const { result } = renderHook(() => useSessionLinking(session, mockDb, vi.fn()));
       await act(async () => { await result.current.handleLinkCase(); });
 
@@ -379,7 +379,7 @@ describe('useSessionLinking', () => {
         type: 'UPDATE', table: 'cases', id: 'case-real-add-c',
         data: {
           client_id: clientTempId,
-          _offlineFkTempId: [{ field: 'client_id', tempId: clientTempId, table: 'clients', fallbackNameValue: 'موكل جـ' }],
+          _offlineFkTempId: [{ field: 'client_id', tempId: clientTempId, table: 'clients', fallbackNameValue: 'موكل حالة جـ' }],
         },
       });
       expect(toast).toHaveBeenCalledWith('📥 إضافة الموكل وربطه محفوظة محلياً — ستُزامن عند عودة الإنترنت');
@@ -391,7 +391,7 @@ describe('useSessionLinking', () => {
       dbWrite.setResult('INSERT:clients', { error: null, offline: true, queued: true });
       dbWrite.setResult('UPDATE:cases', { error: null, offline: true, queued: true });
       const mockDb = makeMockDb({ data: [], error: null });
-      const session = makeSession({ id: 'session-offline-d', title: 'قضية أوفلاين د', plaintiff: 'موكل د' });
+      const session = makeSession({ id: 'session-offline-d', title: 'قضية أوفلاين د', plaintiff: 'موكل حالة د' });
       const { result } = renderHook(() => useSessionLinking(session, mockDb, vi.fn()));
       await act(async () => { await result.current.handleLinkCase(); });
       const tempCaseId = result.current.createdCaseId as string;
@@ -407,7 +407,7 @@ describe('useSessionLinking', () => {
         data: {
           client_id: clientTempId,
           _offlineSelfTempId: tempCaseId, _offlineSelfFallbackName: 'قضية أوفلاين د',
-          _offlineFkTempId: [{ field: 'client_id', tempId: clientTempId, table: 'clients', fallbackNameValue: 'موكل د' }],
+          _offlineFkTempId: [{ field: 'client_id', tempId: clientTempId, table: 'clients', fallbackNameValue: 'موكل حالة د' }],
         },
       });
       expect(toast).toHaveBeenCalledWith('📥 إضافة الموكل وربطه محفوظة محلياً — ستُزامن عند عودة الإنترنت');
@@ -418,7 +418,7 @@ describe('useSessionLinking', () => {
       dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-real-add-2' } });
       dbWrite.setResult('INSERT:clients', { error: { message: 'client insert failed' }, offline: false });
       const mockDb = makeMockDb({ data: [], error: null });
-      const session = makeSession({ plaintiff: 'موكل فاشل' });
+      const session = makeSession({ plaintiff: 'موكل فاشل تمامًا' });
       const { result } = renderHook(() => useSessionLinking(session, mockDb, vi.fn()));
       await act(async () => { await result.current.handleLinkCase(); });
 
@@ -448,7 +448,7 @@ describe('useSessionLinking', () => {
     it('استثناء غير متوقع (__dbWrite ترمي) → توست خطأ عام، linkingToCase ترجع false', async () => {
       dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-real-add-4' } });
       const mockDb = makeMockDb({ data: [], error: null });
-      const session = makeSession({ plaintiff: 'موكل استثناء' });
+      const session = makeSession({ plaintiff: 'موكل حالة استثناء' });
       const { result } = renderHook(() => useSessionLinking(session, mockDb, vi.fn()));
       await act(async () => { await result.current.handleLinkCase(); });
       dbWrite.fn.mockImplementationOnce(() => { throw new Error('boom'); });
@@ -483,13 +483,13 @@ describe('useSessionLinking', () => {
       const mockDb = makeMockDb();
       const onClientAdded = vi.fn();
       const onDone = vi.fn();
-      const session = makeSession({ id: 'session-solo-1', plaintiff: 'موكل منفرد', plaintiff_national_id: '111' });
+      const session = makeSession({ id: 'session-solo-1', plaintiff: 'موكل منفرد جديد', plaintiff_national_id: '111' });
       const { result } = renderHook(() => useSessionLinking(session, mockDb, onDone, onClientAdded));
 
       await act(async () => { await result.current.handleAddClientOnly(); });
 
       expect(dbWrite.callsFor('INSERT:clients')[0].data).toEqual(expect.objectContaining({
-        full_name: 'موكل منفرد', client_name: 'موكل منفرد', tenant_id: 'tenant-1', national_id: '111',
+        full_name: 'موكل منفرد جديد', client_name: 'موكل منفرد جديد', tenant_id: 'tenant-1', national_id: '111',
       }));
       expect(dbWrite.callsFor('UPDATE:case_sessions')[0]).toEqual(expect.objectContaining({
         type: 'UPDATE', table: 'case_sessions', id: 'session-solo-1',
@@ -522,7 +522,7 @@ describe('useSessionLinking', () => {
     it('فشل إنشاء الموكل → توست خطأ، ومفيش أي UPDATE:case_sessions', async () => {
       dbWrite.setResult('INSERT:clients', { error: { message: 'insert failed' }, offline: false });
       const mockDb = makeMockDb();
-      const session = makeSession({ plaintiff: 'موكل فشل' });
+      const session = makeSession({ plaintiff: 'موكل فشل تمامًا' });
       const { result } = renderHook(() => useSessionLinking(session, mockDb, vi.fn()));
 
       await act(async () => { await result.current.handleAddClientOnly(); });
