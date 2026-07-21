@@ -297,7 +297,7 @@ describe('useCaseDetailActions', () => {
       expect(onUpdate).toHaveBeenCalledWith('مؤجلة');
     });
 
-    it('تعارض → وقف فوري، من غير onUpdate', async () => {
+    it('تعارض → وقف فوري، من غير onUpdate، وتوست تعارض صريح', async () => {
       safeUpdate.mockResolvedValue({ success: false, conflict: true, error: null });
       const { result, onUpdate } = await renderDetailHook();
 
@@ -305,6 +305,7 @@ describe('useCaseDetailActions', () => {
 
       expect(onUpdate).not.toHaveBeenCalled();
       expect(toast).not.toHaveBeenCalledWith('✅ تم تحديث حالة القضية');
+      expect(toast).toHaveBeenCalledWith('⚠️ هذه القضية عدّلها شخص آخر بعد ما فتحتها — أعد المحاولة', true);
     });
 
     it('فشل → توست فشل، من غير onUpdate', async () => {
