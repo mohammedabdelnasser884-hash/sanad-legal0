@@ -103,6 +103,19 @@ function queueActivityLogOk(times = 8) {
   }
 }
 
+// 🆕 (الجزء 4 — claimAlertSlot): runForTenant بتحاول "تحجز" slot الإشعار
+// جوه session_alerts_log (INSERT ... .select().maybeSingle()) قبل أي
+// إرسال فعلي — لكل tenant عدّى فحص token/chat. لازم رد مجهّز لكل مكتب
+// هيوصل للسطر ده، وإلا الموك بيرمي "لا يوجد رد مجهّز لجدول 'session_alerts_log'"
+// وده اللي كان بيتلقط في catch عام ويطلع "خطأ عام في معالجة مكتب" بدل
+// الرسائل المحددة المتوقعة في التستات. data غير null → claimed = true
+// (يعني "الحجز نجح، كمّل الإرسال عادي").
+function queueClaimOk(times = 1) {
+  for (let i = 0; i < times; i++) {
+    supabaseMock.queueTable('session_alerts_log', { data: { id: `claim-${i}` }, error: null });
+  }
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(FIXED_NOW);
@@ -185,6 +198,7 @@ describe('session-alerts — جلب المكاتب (RPC get_all_daily_tg_configs
       ],
       error: null,
     });
+    queueClaimOk();
     queueEmptyMorning();
     const res = await handler(correctReq({ type: 'morning' }));
     expect(await res.text()).toContain('لـ 2 مكتب');
@@ -200,6 +214,7 @@ describe('session-alerts — تحديد النوع (type)', () => {
       data: [{ tenant_id: 't1', token: 'tok1', chat: 'chat1' }],
       error: null,
     });
+    queueClaimOk();
     queueEmptyMorning();
     const res = await handler(correctReq({}));
     expect(res.status).toBe(200);
@@ -213,6 +228,7 @@ describe('session-alerts — تحديد النوع (type)', () => {
       data: [{ tenant_id: 't1', token: 'tok1', chat: 'chat1' }],
       error: null,
     });
+    queueClaimOk();
     queueEmptyMorning();
     const req = new Request('https://edge-function.local/', {
       method: 'POST',
@@ -232,6 +248,7 @@ describe('session-alerts — مسار "morning"', () => {
       data: [{ tenant_id: 't1', token: 'tok1', chat: 'chat1' }],
       error: null,
     });
+    queueClaimOk();
     queueEmptyMorning();
     const res = await handler(correctReq({ type: 'morning' }));
     expect(res.status).toBe(200);
@@ -249,6 +266,7 @@ describe('session-alerts — مسار "morning"', () => {
       data: [{ tenant_id: 't1', token: 'tok1', chat: 'chat1' }],
       error: null,
     });
+    queueClaimOk();
     supabaseMock.queueTable('case_sessions', {
       data: [
         {
@@ -302,6 +320,7 @@ describe('session-alerts — مسار "morning"', () => {
       data: [{ tenant_id: 't1', token: 'tok1', chat: 'chat1' }],
       error: null,
     });
+    queueClaimOk();
     supabaseMock.queueTable('case_sessions', { data: null, error: new Error('session-fetch-fail') });
     supabaseMock.queueTable('reminders', { data: [], error: null });
     queueActivityLogOk();
@@ -326,6 +345,7 @@ describe('session-alerts — مسار "evening"', () => {
       data: [{ tenant_id: 't1', token: 'tok1', chat: 'chat1' }],
       error: null,
     });
+    queueClaimOk();
     supabaseMock.queueTable('case_sessions', { data: [], error: null }); // tmrwSessions
     supabaseMock.queueTable('reminders', { data: [], error: null }); // tmrwReminders
     supabaseMock.queueTable('case_sessions', { data: [], error: null }); // allPastSessions
@@ -347,6 +367,7 @@ describe('session-alerts — مسار "evening"', () => {
       data: [{ tenant_id: 't1', token: 'tok1', chat: 'chat1' }],
       error: null,
     });
+    queueClaimOk();
     supabaseMock.queueTable('case_sessions', { data: [], error: null }); // tmrwSessions
     supabaseMock.queueTable('reminders', { data: [], error: null }); // tmrwReminders
     supabaseMock.queueTable('case_sessions', {
@@ -383,6 +404,7 @@ describe('session-alerts — مسار "evening"', () => {
       data: [{ tenant_id: 't1', token: 'tok1', chat: 'chat1' }],
       error: null,
     });
+    queueClaimOk();
     supabaseMock.queueTable('case_sessions', { data: [], error: null }); // tmrwSessions
     supabaseMock.queueTable('reminders', { data: [], error: null }); // tmrwReminders
     supabaseMock.queueTable('case_sessions', { data: [], error: null }); // allPastSessions
@@ -411,6 +433,7 @@ describe('session-alerts — فشل إرسال تيليجرام نفسه', () =>
       data: [{ tenant_id: 't1', token: 'tok1', chat: 'chat1' }],
       error: null,
     });
+    queueClaimOk();
     queueEmptyMorning();
     queueActivityLogOk();
 
@@ -430,6 +453,7 @@ describe('session-alerts — فشل إرسال تيليجرام نفسه', () =>
       data: [{ tenant_id: 't1', token: 'tok1', chat: 'chat1' }],
       error: null,
     });
+    queueClaimOk();
     queueEmptyMorning();
     queueActivityLogOk();
 
