@@ -200,7 +200,12 @@ async function signStorageUrl(bucket: string, path: string, expiresIn = 3600 * 6
 // ── actions ──────────────────────────────────────────
 
 /** بيخفي جزء من الاسم بحيث ميتسربش الاسم الكامل لأي زائر بدون تسجيل دخول */
-function maskName(fullName: string): string {
+function maskName(fullName: string | null | undefined): string {
+  // ⚡ FIX: full_name كان ممكن يكون NULL لموكلين مضافين من مسار مبيكتبش
+  // فيه (راجع migration 02-clients-full-name-sync.sql) — بدون الفحص
+  // ده، .trim() على null كان بيكرّش actionFind بـ 500 من غير أي رسالة
+  // مفهومة للموكل.
+  if (!fullName) return '';
   const parts = fullName.trim().split(/\s+/);
   if (!parts.length) return '';
   const first = parts[0];
@@ -221,7 +226,7 @@ async function actionFind(body: Record<string, string>, ip: string) {
 
   // ابحث في clients بـ phone أو email
   const rows = await rest(
-    `clients?or=(phone.eq.${encodeURIComponent(contact)},email.eq.${encodeURIComponent(contact)})&select=id,full_name,phone,email,tenant_id&limit=1`,
+    `clients?or=(phone.eq.${encodeURIComponent(contact)},email.eq.${encodeURIComponent(contact)})&select=id,full_name,client_name,phone,email,tenant_id&limit=1`,
   );
   if (!rows.length) {
     await recordAttempt(`find:${contact}`, ip, false);
@@ -229,7 +234,9 @@ async function actionFind(body: Record<string, string>, ip: string) {
   }
   // لا نُرجع الاسم كاملًا بدون تسجيل دخول — جزء من الاسم فقط
   // كافٍ لتأكيد الحساب الصحيح للمستخدم الشرعي.
-  return json({ client_name: maskName(rows[0].full_name) });
+  // ⚡ FIX: fallback على client_name (العمود المضمون امتلاؤه دايمًا) لو
+  // full_name لسه فاضي على أي صف قديم قبل ما migration المزامنة تتنفذ.
+  return json({ client_name: maskName(rows[0].full_name || rows[0].client_name) });
 }
 
 /** verify: تحقق من PIN وأعد token */
@@ -243,7 +250,7 @@ async function actionVerify(body: Record<string, string>, ip: string) {
   }
 
   const rows = await rest(
-    `clients?or=(phone.eq.${encodeURIComponent(contact)},email.eq.${encodeURIComponent(contact)})&select=id,full_name,phone,email,type,tenant_id&limit=1`,
+    `clients?or=(phone.eq.${encodeURIComponent(contact)},email.eq.${encodeURIComponent(contact)})&select=id,full_name,client_name,phone,email,type,tenant_id&limit=1`,
   );
   if (!rows.length) {
     await recordAttempt(contact, ip, false);
@@ -251,6 +258,9 @@ async function actionVerify(body: Record<string, string>, ip: string) {
   }
 
   const client = rows[0];
+  // ⚡ FIX: نفس fallback بتاع actionFind — full_name ممكن يكون لسه NULL لو
+  // migration المزامنة لسه ما اتنفذتش وقت الـ deploy ده.
+  client.full_name = client.full_name || client.client_name;
 
   // ⚠️ مصدر الـ PIN الحقيقي هو جدول client_portal_pins (اللي بتكتب فيه
   // لوحة الإدارة عبر useAdminPortal.ts) — وليس عمود clients.portal_pin
@@ -308,9 +318,12 @@ async function actionGetCases(claims: { client_id: string; tenant_id: string }) 
 /** getClient: بيانات الموكل */
 async function actionGetClient(claims: { client_id: string; tenant_id: string }) {
   const rows = await rest(
-    `clients?id=eq.${claims.client_id}&tenant_id=eq.${claims.tenant_id}&select=id,full_name,phone,email,type&limit=1`,
+    `clients?id=eq.${claims.client_id}&tenant_id=eq.${claims.tenant_id}&select=id,full_name,client_name,phone,email,type&limit=1`,
   );
-  return json({ data: rows[0] ?? null });
+  // ⚡ FIX: نفس fallback بتاع actionFind/actionVerify.
+  const client = rows[0];
+  if (client) client.full_name = client.full_name || client.client_name;
+  return json({ data: client ?? null });
 }
 
 /** getCaseFees: رسوم قضية */
