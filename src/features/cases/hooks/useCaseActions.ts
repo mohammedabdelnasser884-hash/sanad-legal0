@@ -1,6 +1,8 @@
 import { toast } from '../../../shared/lib/notifications';
 import { escapeTelegramHtml } from '../../../shared/lib/sanitize';
 import { logActivity } from '../../../shared/lib/dataAccess';
+import { checkCaseNumberDuplicate } from '../../../shared/lib/caseValidation';
+import { showErrorToast } from '../../../shared/lib/errorReporting';
 import { db } from '../../../supabaseClient';
 import type { Dispatch, SetStateAction } from 'react';
 import type { ClientRow, ProfileRow } from '../../../types';
@@ -111,6 +113,23 @@ export function useCaseActions(params: {
             return;
         }
         setSavingCase(true);
+        // 🔒 FIX (تقرير الموثوقية — نتيجة 2، مُصحَّحة): فحص تكرار رقم القيد
+        // الرسمي — نفس نمط checkClientDuplicate بالظبط (زرار مقفول قبل
+        // الفحص، راجع نتيجة 0)، بيرفض الحفظ لو نفس الرقم مسجل بالفعل لقضية
+        // بنفس المحكمة ونفس نوع الدعوى. رقم القيد لوحده مش كفاية — اتباعت
+        // court_level/type كمان (راجع caseValidation.ts) عشان رقمين قضية
+        // منفصلتين تمامًا يتصادفوا بنفس الرقم في محكمة أو نوع مختلف
+        // ميترفضوش بالغلط كتكرار. مفيش فحص لو الرقم فاضي أصلاً
+        // (caseValidation.ts بيرجع duplicate:false).
+        let caseDup;
+        try {
+            caseDup = await checkCaseNumberDuplicate(db, form.number, form.court_level, form.type);
+        } catch (e) {
+            showErrorToast('case_number_duplicate_check', e, 'تعذّر التحقق من رقم القيد. حاول مرة أخرى.', 'إضافة قضية');
+            setSavingCase(false);
+            return;
+        }
+        if (caseDup.duplicate) { toast(caseDup.message!, true); setSavingCase(false); return; }
         // 🔒 FIX (تتبع زر "إضافة قضية" — 18 يوليو 2026): معرّف مؤقت client-side
         // فريد لكل عملية إضافة قضية أوفلاين. بيتبعت مع القضية نفسها (وبيتشال
         // قبل أي INSERT حقيقي — شوف stripOfflineSentinels في offlineQueue.ts)،
@@ -142,6 +161,13 @@ export function useCaseActions(params: {
             plaintiff_national_id: form.plaintiff_national_id || null,
             plaintiff_power_of_attorney: form.plaintiff_power_of_attorney || null,
             defendant_national_id: form.defendant_national_id || null,
+            // 🔒 FIX (تقرير الموثوقية — نتيجة 3، ٦.٢): تحسين احتياطي —
+            // التريجر trg_tenant_id_cases (set_tenant_id_from_profile) بيملّ
+            // tenant_id تلقائيًا من current_tenant_id() لو الحقل جاي فاضي،
+            // وده كافي لأي INSERT جاي من التطبيق (فيه auth.uid() سليم). إضافة
+            // القيمة هنا صراحةً مش إصلاح باج — هي طبقة حماية إضافية لو حصل
+            // مستقبلًا استدعاء INSERT من سياق مفيهوش auth.uid() سليم.
+            tenant_id: profile?.tenant_id || null,
             _offlineTempId: offlineTempId,
         };
         const offlineId = 'offline-' + Date.now();
@@ -173,7 +199,13 @@ export function useCaseActions(params: {
             toast('📥 محفوظة محلياً — ستُضاف فور عودة الإنترنت');
             setCases((prev) => [{ ...payload, id: offlineId, ...form, status: 'نشطة', date: form.date || '—' } as unknown as MappedCase, ...prev]);
         } else if (error) {
-            toast('❌ فشل تسجيل القضية الجديدة — تحقق من الاتصال وأعد المحاولة', true);
+            // 🔒 FIX (تقرير الموثوقية — نتيجة 3): خط دفاع أخير — راجع
+            // التعليق المماثل في useClientActions.ts.
+            if ((error as { code?: string }).code === '23505') {
+                toast('⚠️ رقم القيد ده مسجل بالفعل لقضية موجودة', true);
+            } else {
+                toast('❌ فشل تسجيل القضية الجديدة — تحقق من الاتصال وأعد المحاولة', true);
+            }
             setSavingCase(false);
             return;
         } else {
@@ -230,19 +262,25 @@ export function useCaseActions(params: {
         setShowCaseModal(false);
     };
 
-    // ─ حذف قضية نهائيًا من قاعدة البيانات (مرحلة 2 — كاسكيد كامل) ─
+    // ─ حذف قضية نهائيًا من قاعدة البيانات (مرحلة 2 — كاسكيد كامل، ومرحلة 3 — M-3: عكس الترتيب) ─
     // ⚠️ النطاق مبني على القرار المحسوم فى الخطة (18 يوليو 2026) بعد تحقق فعلي
     // من delete_rule الحقيقي لكل الـ FKs فى الداتابيز الحية:
     //   - case_sessions / case_events → CASCADE تلقائي مع حذف صف القضية (مفيش كود مطلوب)
     //   - case_documents (سجل DB) → CASCADE تلقائي كمان، لكن الملفات الفعلية فى
-    //     Storage (bucket 'case-docs') لازم تتحذف يدويًا هنا الأول، لأن بعد حذف
-    //     صف القضية هنفقد storage_path بتاعتها (الصفوف هتتحذف تلقائيًا من الداتابيز).
+    //     Storage (bucket 'case-docs') لازم تتحذف يدويًا، فبنجيب storage_path بتاعتها
+    //     الأول (SELECT بلا أي أثر جانبي) قبل ما صفوفها تتحذف تلقائيًا من الداتابيز.
     //   - case_fees / fee_payments / invoices → SET NULL تلقائي، مايتحذفوش خالص
     //     (القرار الصريح: حذف قضية ميحذفش الأتعاب المرتبطة بيها) — مفيش كود مطلوب هنا.
+    // ⚠️ [مرحلة 3 — M-3] الترتيب بين حذف صف القضية وتنضيف Storage اتعكس عمدًا: حذف
+    // صف القضية (DB) بقى أولًا، وتنضيف الـ Storage بقى تانيًا. لو حصل انقطاع بعد
+    // الخطوة 1 (SELECT) وقبل حذف الصف، مفيش حاجة اتغيرت خالص (آمن). لو حصل انقطاع
+    // بعد نجاح حذف الصف وقبل تنضيف الـ Storage، أسوأ حالة هي ملفات يتيمة فى bucket
+    // 'case-docs' (تسرب تخزين بسيط) — مش روابط مكسورة أو صف قضية عالق زي ما كان
+    // ممكن يحصل مع الترتيب القديم (Storage الأول، DB تاني).
     const handlePermanentDeleteCase = async (caseId: string) => {
         const c = cases.find((x) => x.id === caseId);
 
-        // ─ خطوة 1: تنضيف ملفات Storage الخاصة بمستندات القضية (قبل ما صفوفها تتحذف تلقائيًا) ─
+        // ─ خطوة 1: جلب storage_path لمستندات القضية (قبل ما صفوفها تتحذف تلقائيًا) ─
         const { data: docs, error: docsFetchError } = await db.from('case_documents')
             .select('storage_path').eq('case_id', caseId);
         if (docsFetchError) {
@@ -250,20 +288,26 @@ export function useCaseActions(params: {
             return;
         }
         const paths = (docs || []).map((d) => d.storage_path).filter((p): p is string => !!p);
+
+        // ─ خطوة 2: حذف صف القضية أولًا — الداتابيز بتكمل الباقي تلقائيًا (CASCADE/SET NULL) ─
+        const { error } = await db.from('cases').delete().eq('id', caseId);
+        if (error) {
+            nav.closeModal('delete');
+            setDeleteConfirm(null);
+            toast('❌ فشل حذف القضية نهائياً — تحقق من الاتصال وأعد المحاولة', true);
+            return;
+        }
+
+        // ─ خطوة 3: تنضيف ملفات Storage — بعد التأكد إن صف القضية اتمسح فعليًا ─
         if (paths.length > 0) {
             const { error: storageErr } = await db.storage.from('case-docs').remove(paths);
-            // ⚠️ فشل حذف الملفات مش سبب لإيقاف حذف القضية نفسها — صفوف الـ DB هتتحذف
-            // تلقائيًا بالـ CASCADE بغض النظر، فمنع الحذف هنا هيسيب القضية عالقة من
-            // غير أي فايدة حقيقية. بنكمل الحذف ونحذّر المستخدم إنه يراجع bucket
-            // 'case-docs' يدويًا لو فيه ملفات يتيمة فضلت.
+            // ⚠️ فشل حذف الملفات مش سبب لإيقاف/إلغاء حذف القضية (اتحذفت خلاص) —
+            // بنحذّر المستخدم إنه يراجع bucket 'case-docs' يدويًا لو فيه ملفات يتيمة.
             if (storageErr) toast('⚠️ تعذّر حذف بعض ملفات المستندات من التخزين — راجع bucket المستندات يدويًا', true);
         }
 
-        // ─ خطوة 2: حذف صف القضية — الداتابيز بتكمل الباقي تلقائيًا (CASCADE/SET NULL) ─
-        const { error } = await db.from('cases').delete().eq('id', caseId);
         nav.closeModal('delete');
         setDeleteConfirm(null);
-        if (error) { toast('❌ فشل حذف القضية نهائياً — تحقق من الاتصال وأعد المحاولة', true); return; }
         toast('🗑️ تم حذف القضية نهائياً');
         logActivity(db, 'حذف قضية نهائياً', {
             userName: _userName,
@@ -333,7 +377,25 @@ export function useCaseActions(params: {
             toast('❌ حقل "موضوع ومسمى الدعوى" مطلوب', true);
             return;
         }
+        // 🔒 FIX (تقرير الموثوقية — نتيجة 1): الدالة دي ما كانش فيها أي
+        // حماية دبل كليك خالص (بعكس handleSaveCase اللي فيها setSavingCase).
+        // بنستخدم نفس savingCase state عشان EditCaseModal يقدر يقفل زراره.
+        setSavingCase(true);
         try {
+            // 🔒 FIX (تقرير الموثوقية — نتيجة 2، مُصحَّحة): نفس فحص تكرار
+            // رقم القيد (رقم + محكمة + نوع مع بعض) المستخدم في
+            // handleSaveCase، بس هنا بنستبعد القضية نفسها من المقارنة
+            // (excludeCaseId) عشان تعديل قضية بنفس رقمها الحالي (من غير
+            // تغيير) ميترفضش بالغلط كـ"تكرار مع نفسها".
+            let caseDup;
+            try {
+                caseDup = await checkCaseNumberDuplicate(db, form.number, form.court_level, form.type, caseId);
+            } catch (e) {
+                showErrorToast('case_number_duplicate_check', e, 'تعذّر التحقق من رقم القيد. حاول مرة أخرى.', 'تعديل قضية');
+                setSavingCase(false);
+                return;
+            }
+            if (caseDup.duplicate) { toast(caseDup.message!, true); setSavingCase(false); return; }
             const payload = {
                 case_number_official: form.number || null,
                 title: form.title,
@@ -378,9 +440,15 @@ export function useCaseActions(params: {
                 // فوق تعديله بصمت. بنسيب البيانات المعروضة زي ما هي ونطلب من
                 // المستخدم يفتح القضية تاني عشان يشوف آخر نسخة قبل ما يعدّل.
                 toast('⚠️ هذه القضية عدّلها شخص آخر بعد ما فتحتها — أعد فتحها وحاول التعديل مرة أخرى', true);
+                setSavingCase(false);
                 return;
             } else if (error) {
-                toast('❌ فشل تعديل بيانات القضية — تحقق من الاتصال وأعد المحاولة', true);
+                if ((error as { code?: string }).code === '23505') {
+                    toast('⚠️ رقم القيد ده مسجل بالفعل لقضية موجودة', true);
+                } else {
+                    toast('❌ فشل تعديل بيانات القضية — تحقق من الاتصال وأعد المحاولة', true);
+                }
+                setSavingCase(false);
                 return;
             } else {
                 // ── تسجيل جلسة جديدة لو تاريخ الجلسة تغيّر ──
@@ -434,8 +502,10 @@ export function useCaseActions(params: {
                 sendTelegram(updMsg);
                 fetchCases(0, casesFilter);
             }
+            setSavingCase(false);
         } catch (e) {
             toast('❌ خطأ في الاتصال، تحقق من الإنترنت وأعد المحاولة', true);
+            setSavingCase(false);
         }
     };
 
