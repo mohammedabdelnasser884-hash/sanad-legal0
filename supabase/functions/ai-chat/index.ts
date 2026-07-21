@@ -136,6 +136,13 @@ async function getOfficeGroqKey(tenantId: string | null) {
 // فعليًا لو الطلب مسموح. لو استعلام التتبّع نفسه فشل (مشكلة شبكة/DB
 // مؤقتة)، بنسمح بالطلب (fail-open) عشان عطل مؤقت في التتبّع مايوقفش
 // المساعد بالكامل — قرار مبدئي وسهل يتغيّر لـ fail-closed لو حابب.
+//
+// 📝 توثيق صريح للتريد-أوف (تقرير الموثوقية الشامل — L-2، مفيش تغيير
+// سلوك هنا): معنى العملي إن سقف الاستخدام اليومي (PLATFORM_DAILY_CAP)
+// **مش ضمانة صارمة 100%** — في أي فترة عطل مؤقت لـ `check_and_increment_ai_usage`
+// (حتى لو دقايق)، أي عدد من الطلبات ممكن يعدّي السقف بدون ما يتسجل
+// أو يتمنع. القرار مقصود: احتمال تجاوز بسيط للسقف وقت عطل نادر، أفضل
+// من إيقاف المساعد بالكامل لكل المكاتب بسبب مشكلة تتبّع مؤقتة.
 async function checkPlatformUsageAllowed(tenantId: string): Promise<boolean> {
   try {
     const allowed = await rpc('check_and_increment_ai_usage', {
@@ -144,7 +151,7 @@ async function checkPlatformUsageAllowed(tenantId: string): Promise<boolean> {
     });
     return allowed === true;
   } catch {
-    return true; // fail-open — راجع الملاحظة فوق
+    return true; // fail-open — راجع الملاحظة فوق (L-2)
   }
 }
 
