@@ -8,6 +8,9 @@ import { recalcNextHearing } from '../../../shared/lib/dataAccess';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '../../../database.types';
 import type { CaseSessionRow } from '../../../types';
+import {
+  makeOfflineTempId, isOfflineTempId, withFkOfflineSentinel, withCaseSelfOfflineSentinel, findMatchingClientByName, buildCaseInsertData,
+} from './caseSessionLinkingShared';
 
 export type ClientSearchResult = { id: string; full_name: string | null; client_name: string | null; national_id: string | null };
 
@@ -29,6 +32,13 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
   const [createdCaseId, setCreatedCaseId] = useState<string | null>(null);
   const [clientStep, setClientStep] = useState<'idle' | 'found' | 'notfound' | 'searching' | 'done'>('idle');
   const [foundClient, setFoundClient] = useState<{ id: string; full_name: string | null } | null>(null);
+  // ⚡ FIX: خطوة 'found' هنا كانت مبنية على تخمين بالاسم (ilike تقريبي) بس
+  // — لو الاسم مطابق بالظبط لموكل موجود، زرار "إضافة موكل جديد وربطه" كان
+  // بيوصل لطريق مسدود صامت: handleAddAndLinkClient بينده checkClientDuplicate
+  // بنفس الاسم فيلاقيه مكرر ويرجّع نفس خطوة 'found' من غير أي تغيير ظاهر
+  // للمستخدم (زرار بيدوس عليه ومفيش أي رد فعل). نفس فكرة foundClientMatchType
+  // الموجودة في useClientLinking.ts (مسار إنشاء الجلسة).
+  const [foundClientMatchType, setFoundClientMatchType] = useState<'exact' | 'fuzzy' | null>(null);
 
   const [clientSearch, setClientSearch] = useState('');
   const [searchResults, setSearchResults] = useState<ClientSearchResult[]>([]);
@@ -42,44 +52,39 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
       const caseTitle = session.title || session.case_number || 'قضية من جلسة مستقلة';
       // 🆕 المرحلة 2 (خطة توسيع الأوفلاين): نفس نمط useClientLinking.ts —
       // معرّف مؤقت client-side بيتبعت مع القضية بغض النظر عن حالة الاتصال.
-      const offlineTempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const offlineTempId = makeOfflineTempId();
       const { error, offline, queued, data: insertedCase } = await window.__dbWrite({
         type: 'INSERT',
         table: 'cases',
-        data: {
-          title: caseTitle,
-          court_name: session.court || caseTitle,
-          case_number_official: session.case_number || caseTitle,
-          case_number: session.case_number || null,
-          court: session.court || null,
-          case_type: session.case_type || null,
-          plaintiff: session.plaintiff || null,
-          plaintiff_role: session.plaintiff_role || null,
-          plaintiff_national_id: session.plaintiff_national_id || null,
-          plaintiff_power_of_attorney: session.plaintiff_power_of_attorney || null,
-          defendant: session.defendant || null,
-          defendant_role: session.defendant_role || null,
-          defendant_national_id: session.defendant_national_id || null,
-          circuit_number: session.circuit_number || null,
-          // ⚡ نفس إصلاح useClientLinking.ts — نقل الصفة ومكان الجلسة ودرجة
-          // التقاضي وبيانات السكرتير من الجلسة لملف القضية الجديد بدل ما
-          // يضيعوا. session_hall هو الحقل الموحّد (مش court_floor القديم).
-          session_hall: session.session_hall || null,
-          // ⚡ FIX: نفس إصلاح useClientLinking.ts — session_time كان بيضيع
-          // عند تحويل جلسة مستقلة لقضية.
-          session_time: session.session_time || null,
-          court_level: session.court_level || null,
-          secretary_hall: session.secretary_hall || null,
-          secretary_name: session.secretary_name || null,
-          secretary_mobile: session.secretary_mobile || null,
-          status: 'نشطة',
-          // ⚡ FIX: لو الموكل كان اتربط بالجلسة المستقلة قبل إنشاء القضية
-          // (عن طريق "إضافة الموكل لقائمة الموكلين فقط" أو "ربط بموكل
-          // موجود")، لازم القضية الجديدة تورّث نفس الربط تلقائيًا بدل ما
-          // نستنى المستخدم يدوّر تاني على نفس الموكل بالاسم.
-          client_id: session.client_id || null,
-          _offlineTempId: offlineTempId,
-        },
+        // ⚡ FIX (توحيد): buildCaseInsertData (caseSessionLinkingShared.ts)
+        // بدل نسخة يدوية هنا — نفس المنطق بالظبط المستخدم في
+        // useClientLinking.ts، مكان واحد بس للفيكسات المستقبلية.
+        // ⚡ FIX: لو الموكل كان اتربط بالجلسة المستقلة قبل إنشاء القضية
+        // (عن طريق "إضافة الموكل لقائمة الموكلين فقط" أو "ربط بموكل
+        // موجود")، لازم القضية الجديدة تورّث نفس الربط تلقائيًا بدل ما
+        // نستنى المستخدم يدوّر تاني على نفس الموكل بالاسم — من هنا
+        // existingClientId بتتبعت للدالة المشتركة (مش بتتبعتش من
+        // useClientLinking.ts، لأن مفيش مفهوم "موكل مربوط قبل كده" لجلسة
+        // لسه بيانات form ما اتحفظتش).
+        data: buildCaseInsertData({
+          court: session.court,
+          caseNumber: session.case_number,
+          caseType: session.case_type,
+          plaintiff: session.plaintiff,
+          plaintiffRole: session.plaintiff_role,
+          plaintiffNationalId: session.plaintiff_national_id,
+          plaintiffPoa: session.plaintiff_power_of_attorney,
+          defendant: session.defendant,
+          defendantRole: session.defendant_role,
+          defendantNationalId: session.defendant_national_id,
+          circuitNumber: session.circuit_number,
+          sessionHall: session.session_hall,
+          sessionTime: session.session_time,
+          courtLevel: session.court_level,
+          secretaryHall: session.secretary_hall,
+          secretaryName: session.secretary_name,
+          secretaryMobile: session.secretary_mobile,
+        }, caseTitle, offlineTempId, session.client_id),
         returning: true,
       });
       if (error) {
@@ -103,10 +108,7 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
         type: 'UPDATE',
         table: 'case_sessions',
         id: session.id,
-        data: {
-          case_id: realOrTempCaseId,
-          ...((offline && queued) ? { _offlineFkTempId: [{ field: 'case_id', tempId: offlineTempId, table: 'cases' as const, fallbackNameValue: caseTitle }] } : {}),
-        },
+        data: withFkOfflineSentinel(offline, queued, 'case_id', offlineTempId, 'cases', caseTitle, { case_id: realOrTempCaseId }),
       });
       if (sessionLinkErr) {
         showErrorToast('session_case_link', sessionLinkErr, 'تم إنشاء القضية لكن تعذّر ربط الجلسة بها. حاول تحديث الصفحة.', 'ربط الجلسة بالقضية');
@@ -124,9 +126,12 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
       if (session.client_id) { setClientStep('done'); return; }
       const plaintiffName = session.plaintiff?.trim();
       if (!plaintiffName) { setClientStep('notfound'); return; }
-      const { data: clients } = await db.from('clients').select('id,full_name').is('deleted_at', null).ilike('full_name', `%${plaintiffName}%`).limit(3);
-      if (clients && clients.length > 0) {
-        setFoundClient(clients[0]);
+      // ⚡ FIX (توحيد): findMatchingClientByName بدل استعلام + حساب matchType
+      // يدوي هنا — نفس المنطق بالظبط اللي في useClientLinking.ts.
+      const match = await findMatchingClientByName(db, plaintiffName);
+      if (match) {
+        setFoundClient(match.client);
+        setFoundClientMatchType(match.matchType);
         setClientStep('found');
       } else {
         setClientStep('notfound');
@@ -143,16 +148,13 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
       // ممكن يكون لسه تمبيد لو القضية اتقيدت أوفلاين في handleLinkCase فوق.
       // caseTitle هنا بنفس منطق حسابه في handleLinkCase (session.title ||
       // session.case_number) عشان يتستخدم كـ fallback بالاسم لو احتجنا.
-      const isTempCaseId = createdCaseId.startsWith('tmp-');
+      const isTempCaseId = isOfflineTempId(createdCaseId);
       const caseTitle = isTempCaseId ? (session.title || session.case_number || 'قضية من جلسة مستقلة') : undefined;
       const { error, offline, queued } = await window.__dbWrite({
         type: 'UPDATE',
         table: 'cases',
         id: createdCaseId,
-        data: {
-          client_id: foundClient.id,
-          ...(isTempCaseId ? { _offlineSelfTempId: createdCaseId, _offlineSelfFallbackName: caseTitle } : {}),
-        },
+        data: withCaseSelfOfflineSentinel(createdCaseId, { client_id: foundClient.id }, caseTitle),
       });
       if (error) {
         showErrorToast('session_client_link', error, 'تعذّر ربط الموكل بالقضية. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'ربط الموكل بالقضية');
@@ -182,14 +184,19 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
       // ⚡ NEW: بدل توست بس، بنستخدم نفس خطوة "found" الموجودة (بتربط
       // cases.client_id عبر createdCaseId، متسق مع باقي الدالة دي).
       if (dup.duplicate) {
-        if (dup.client) { setFoundClient(dup.client); setClientStep('found'); }
+        // ⚡ FIX: التطابق هنا جاي من checkClientDuplicate نفسها (اسم/رقم
+        // قومي/توكيل مؤكد) — لو سبنا matchType على حاله (ممكن يكون 'fuzzy'
+        // من البحث الأول)، الزرار هيفضل ظاهر والمستخدم هيدوس عليه تاني
+        // ويوصل لنفس النتيجة من غير أي تغيير ظاهر (حلقة صامتة). بنحددها
+        // 'exact' هنا عشان الواجهة تخفي الزرار فورًا.
+        if (dup.client) { setFoundClient(dup.client); setFoundClientMatchType('exact'); setClientStep('found'); }
         else toast(dup.message!, true);
         return;
       }
       // 🆕 المرحلة 3-2 (خطة توسيع الأوفلاين): نفس تحويل useClientLinking.ts
       // بالظبط — تمبيد بيتبعت دايمًا مع العميل الجديد بغض النظر عن حالة
       // الاتصال.
-      const clientTempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const clientTempId = makeOfflineTempId();
       const { data, error, offline: clientOffline, queued: clientQueued } = await window.__dbWrite({
         type: 'INSERT',
         table: 'clients',
@@ -212,22 +219,23 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
       if (!realOrTempClientId) { showErrorToast('client_create', new Error('no id returned'), 'تعذّر إضافة الموكل. حاول مرة أخرى.', 'إضافة موكل'); return; }
       // 🆕 المرحلة 3-2: نفس فحص isTempCaseId من handleLinkExistingClient
       // فوق (المرحلة 3-1) — createdCaseId ممكن يكون لسه تمبيد.
-      const isTempCaseId = createdCaseId.startsWith('tmp-');
+      const isTempCaseId = isOfflineTempId(createdCaseId);
       const caseTitle = isTempCaseId ? (session.title || session.case_number || 'قضية من جلسة مستقلة') : undefined;
       const isTempClientId = clientOffline && clientQueued;
       const { error: linkErr, offline, queued } = await window.__dbWrite({
         type: 'UPDATE',
         table: 'cases',
         id: createdCaseId,
-        data: {
-          client_id: realOrTempClientId,
-          // 🆕 المرحلة 3-2: نفس تعليق useClientLinking.ts — العملية دي ممكن
-          // تحمل تمبيد id السطر نفسه (القضية) وتمبيد حقل FK جوه data
-          // (العميل) مع بعض؛ resolveOfflineSelfId وresolveOfflineFkRefs
-          // بيشتغلوا بالتتابع من غير تعارض (شوف offlineQueue.ts).
-          ...(isTempCaseId ? { _offlineSelfTempId: createdCaseId, _offlineSelfFallbackName: caseTitle } : {}),
-          ...(isTempClientId ? { _offlineFkTempId: [{ field: 'client_id', tempId: clientTempId, table: 'clients' as const, fallbackNameValue: name }] } : {}),
-        },
+        // 🆕 المرحلة 3-2: العملية دي ممكن تحمل تمبيد id السطر نفسه (القضية)
+        // وتمبيد حقل FK جوه data (العميل) مع بعض؛ resolveOfflineSelfId
+        // وresolveOfflineFkRefs بيشتغلوا بالتتابع من غير تعارض (شوف
+        // offlineQueue.ts). withCaseSelfOfflineSentinel وwithFkOfflineSentinel
+        // بيتركّبوا هنا بدل الـ spread اليدوي المزدوج.
+        data: withCaseSelfOfflineSentinel(
+          createdCaseId,
+          withFkOfflineSentinel(isTempClientId, true, 'client_id', clientTempId, 'clients', name, { client_id: realOrTempClientId }),
+          caseTitle,
+        ),
       });
       if (linkErr) {
         showErrorToast('session_client_link', linkErr, 'تعذّر ربط الموكل بالقضية. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'ربط الموكل بالقضية');
@@ -273,7 +281,7 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
         } else toast(dup.message!, true);
         return;
       }
-      const clientTempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const clientTempId = makeOfflineTempId();
       const { data, error, offline: clientOffline, queued: clientQueued } = await window.__dbWrite({
         type: 'INSERT',
         table: 'clients',
@@ -297,10 +305,7 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
         type: 'UPDATE',
         table: 'case_sessions',
         id: session.id,
-        data: {
-          client_id: realOrTempClientId,
-          ...(isTempClientId ? { _offlineFkTempId: [{ field: 'client_id', tempId: clientTempId, table: 'clients' as const, fallbackNameValue: name }] } : {}),
-        },
+        data: withFkOfflineSentinel(isTempClientId, true, 'client_id', clientTempId, 'clients', name, { client_id: realOrTempClientId }),
       });
       if (linkErr) {
         showErrorToast('session_client_link', linkErr, 'تمت إضافة الموكل لكن تعذّر ربطه بالجلسة. حاول تحديث الصفحة.', 'ربط الموكل بالجلسة');
@@ -369,7 +374,7 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
 
   return {
     linkingCase, linkingClient, linkingToCase, linkingExisting,
-    createdCaseId, clientStep, setClientStep, foundClient,
+    createdCaseId, clientStep, setClientStep, foundClient, foundClientMatchType,
     clientSearch, searchResults, searching, selectedExistingClient, setSelectedExistingClient,
     handleLinkCase, handleLinkExistingClient, handleAddAndLinkClient, handleAddClientOnly,
     searchExistingClients, confirmLinkToExistingClient,
