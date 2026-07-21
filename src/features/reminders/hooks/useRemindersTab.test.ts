@@ -333,7 +333,7 @@ describe('useRemindersTab', () => {
       expect(safeUpdate).not.toHaveBeenCalled();
     });
 
-    it('تعارض (conflict:true) → وقف فوري من غير توست فشل أو نجاح', async () => {
+    it('تعارض (conflict:true) → وقف فوري من غير توست فشل أو نجاح، مع توست تعارض صريح', async () => {
       safeUpdate.mockResolvedValue({ success: false, conflict: true });
       const { result } = await renderReady();
       const target = makeReminder({ id: 'rem-edit-1', updated_at: '2026-07-01T00:00:00.000Z' });
@@ -346,6 +346,7 @@ describe('useRemindersTab', () => {
 
       expect(toast).not.toHaveBeenCalledWith('✅ تم تعديل المهمة');
       expect(toast).not.toHaveBeenCalledWith('❌ حدث خطأ، يرجى المحاولة مرة أخرى', true);
+      expect(toast).toHaveBeenCalledWith('⚠️ هذا التذكير عدّله شخص آخر بعد ما فتحته — أعد المحاولة', true);
     });
 
     it('فشل (success:false, conflict:false) → recordError، توست فشل', async () => {
