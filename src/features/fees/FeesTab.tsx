@@ -45,7 +45,7 @@ function FeesTab({cases, clients, showSummaryModal, setShowSummaryModal, country
     const {
       fees, payments, expandedPayments, setExpandedPayments,
       loading, showForm: showFormRaw, setShowForm: setShowFormRaw, form, setForm, saving, editId, setEditId,
-      addPaymentFor, setAddPaymentFor, payAmount, setPayAmount, payDate, setPayDate,
+      addPaymentFor, setAddPaymentFor, payingFeeId, payAmount, setPayAmount, payDate, setPayDate,
       payNote, setPayNote, confirmDeletePay: confirmDeletePayRaw, setConfirmDeletePay: setConfirmDeletePayRaw,
       confirmDeleteFee: confirmDeleteFeeRaw, setConfirmDeleteFee: setConfirmDeleteFeeRaw, invoiceModal: invoiceModalRaw, setInvoiceModal: setInvoiceModalRaw,
       payReceiver, setPayReceiver, payClientName, setPayClientName,
@@ -309,7 +309,7 @@ function FeesTab({cases, clients, showSummaryModal, setShowSummaryModal, country
                     expandedPayments, setExpandedPayments,
                     invoiceLoadingFor, setInvoiceLoadingFor, getOrCreateInvoice, setInvoiceModal, toast,
                     printAllPayments, setConfirmDeletePay,
-                    addPaymentFor, setAddPaymentFor,
+                    addPaymentFor, setAddPaymentFor, payingFeeId,
                     payClientName, setPayClientName, payClientNameText, setPayClientNameText,
                     payAmount, setPayAmount, payDate, setPayDate, payReceiver, setPayReceiver, payNote, setPayNote,
                     handleAddPayment, setEditId, setForm, setShowForm, setConfirmDeleteFee,
