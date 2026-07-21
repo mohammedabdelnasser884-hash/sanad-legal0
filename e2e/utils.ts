@@ -26,9 +26,11 @@ export async function login(page: Page): Promise<void> {
 // الأتعاب) من غير ما يكون لازم تتفتح فعليًا — فصلنا جزء الإنشاء لوحده
 // عن جزء الفتح، وخلّينا createAndOpenCase يستخدم النسخة دي بدل ما
 // يكرر نفس الأربع سطور.
-// ⚠️ لازم نملأ نفس الحقول الإلزامية الخمسة المستخدمة في cases.spec.ts
-// (العنوان + الموكل + صفته + الخصم + صفته) — NewCaseModal.tsx بيعتبرهم
-// required:true كلهم، فلو حقل ناقص الفورم بيرفض الحفظ ويفضل مفتوح،
+// ⚠️ لازم نملأ نفس الحقول الإلزامية المستخدمة في cases.spec.ts (العنوان +
+// الموكل + صفته + الخصم + صفته + الرقم القومي للموكل) — NewCaseModal.tsx
+// بيعتبرهم required:true، وبالذات الرقم القومي للموكل عنده تحقق فعلي
+// (لازم يكون 14 رقم بالظبط، شوف NewCaseModal.tsx) بيمنع الحفظ تمامًا لو
+// فاضي أو ناقص. لو أي حقل من دول ناقص الفورم بيرفض الحفظ ويفضل مفتوح،
 // والانتظار بعد كده لظهور الكارت بيعمل timeout بدل ما يفشل برسالة واضحة.
 export async function createCase(page: Page, title: string): Promise<void> {
   await page.getByTestId('nav-cases').click();
@@ -36,6 +38,7 @@ export async function createCase(page: Page, title: string): Promise<void> {
   await page.getByTestId('new-case-title').fill(title);
   await page.getByTestId('new-case-client-name').fill('موكل اختبار E2E');
   await page.getByTestId('new-case-client-capacity').fill('مدعي');
+  await page.getByTestId('new-case-plaintiff-national-id').fill('12345678901234');
   await page.getByTestId('new-case-opponent').fill('خصم اختبار E2E');
   await page.getByTestId('new-case-opponent-capacity').fill('مدعى عليه');
   await page.getByTestId('new-case-save').click();
