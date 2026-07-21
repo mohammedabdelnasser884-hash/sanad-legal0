@@ -294,11 +294,24 @@ ${PDF_FONT_LINK}
   const handleAddNote = async () => {
     if (!noteText.trim()) return;
     setSavingNote(true);
-    const { error } = await db.from('case_notes').insert([{
-      case_id: caseData.id,
-      content: noteText.trim(),
-    }]);
+    // 🆕 المرحلة 6 (توسيع الأوفلاين — H-3، تكملة ثانية): __dbWrite بدل
+    // db.from(...).insert() المباشر — نفس نمط useRemindersTab.ts بالظبط.
+    // case_notes مالهاش FK فعلي على case_id (مؤكَّد بالقسم 0.1 من التقرير)،
+    // ومفيش سيناريو عملي لملاحظة بتتضاف لقضية لسه تمبيد (الشاشة دي أصلاً
+    // مبتفتحش غير لقضية حقيقية متزامنة)، فمفيش داعي لـ _offlineFkTempId هنا.
+    const { error, offline, queued } = await window.__dbWrite({
+      type: 'INSERT', table: 'case_notes', data: {
+        case_id: caseData.id,
+        content: noteText.trim(),
+      }
+    });
     setSavingNote(false);
+    if (offline && queued) {
+      toast('📥 الملاحظة محفوظة محلياً — ستُزامن عند عودة الإنترنت');
+      setNoteText('');
+      setShowAddNote(false);
+      return;
+    }
     if (error) { toast('❌ فشل إضافة الملاحظة — تحقق من الاتصال وأعد المحاولة', true); return; }
     toast('✅ تمت إضافة الملاحظة');
     logActivity(db, 'إضافة ملاحظة', {
@@ -313,7 +326,12 @@ ${PDF_FONT_LINK}
   };
 
   const handleDeleteNote = async (noteId: string) => {
-    const { error } = await db.from('case_notes').delete().eq('id', noteId);
+    // 🆕 المرحلة 6 (تكملة ثانية): __dbWrite بدل db.from(...).delete() المباشر.
+    const { error, offline, queued } = await window.__dbWrite({ type: 'DELETE', table: 'case_notes', id: noteId });
+    if (offline && queued) {
+      toast('📥 الحذف محفوظ محلياً — سيُزامن عند عودة الإنترنت');
+      return;
+    }
     if (error) { toast('❌ فشل حذف الملاحظة، حاول مرة أخرى', true); return; }
     toast('🗑 تم حذف الملاحظة');
     logActivity(db, 'حذف ملاحظة', {
@@ -328,9 +346,18 @@ ${PDF_FONT_LINK}
   const handleUpdateNote = async (noteId: string, content: string) => {
     // نجيب updated_at الحالي من الـ notes المحفوظة في state
     const note = notes.find((n) => n.id === noteId);
-    const { success, conflict } = await safeUpdate(db, 'case_notes', noteId, { content }, note?.updated_at || null);
-    if (conflict) return; // safeUpdate بيعرض الـ toast تلقائياً
-    if (!success) { toast('❌ فشل تعديل الملاحظة — تحقق من الاتصال وأعد المحاولة', true); return; }
+    // 🆕 المرحلة 6 (تكملة ثانية): __dbWrite بدل safeUpdate — بيحافظ على نفس
+    // فحص التعارض (knownUpdatedAt) أونلاين، وكمان بيقيّد في طابور الأوفلاين
+    // لو النت مقطوع (بعكس safeUpdate اللي كانت بترجع فشل صريح بس).
+    const { error, offline, queued, conflict } = await window.__dbWrite({
+      type: 'UPDATE', table: 'case_notes', data: { content }, id: noteId, knownUpdatedAt: note?.updated_at || null
+    });
+    if (offline && queued) {
+      toast('📥 التعديل محفوظ محلياً — سيُزامن عند عودة الإنترنت');
+      return;
+    }
+    if (conflict) { toast('⚠️ هذه الملاحظة عدّلها شخص آخر بعد ما فتحتها — أعد المحاولة', true); return; }
+    if (error) { toast('❌ فشل تعديل الملاحظة — تحقق من الاتصال وأعد المحاولة', true); return; }
     toast('✅ تم تعديل الملاحظة');
     logActivity(db, 'تعديل ملاحظة', {
       entity_type: 'note', entity_id: noteId, details: caseData.title || null,
