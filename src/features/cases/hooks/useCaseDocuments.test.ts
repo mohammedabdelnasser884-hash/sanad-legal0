@@ -108,11 +108,18 @@ function renderDocsHook(caseData: MappedCase = makeCase()) {
   return { ...view, refetchAll };
 }
 
+// navigator.onLine — jsdom بيرجعها true افتراضيًا، بس بنتأكد ونتحكم فيها
+// صراحة في كل تست يحتاجها (نفس نمط useClientActions.test.ts بالظبط).
+function setOnline(value: boolean) {
+  Object.defineProperty(navigator, 'onLine', { value, configurable: true });
+}
+
 beforeEach(() => {
   mockDb = makeMockDb();
   vi.clearAllMocks();
   getCurrentTenantId.mockReturnValue('tenant-a');
   resolveStorageUrl.mockResolvedValue('https://signed-url.example/doc');
+  setOnline(true);
 });
 
 describe('useCaseDocuments — handleFileSelect', () => {
@@ -164,6 +171,16 @@ describe('useCaseDocuments — handleUploadDoc', () => {
     await act(async () => { await result.current.handleUploadDoc(); });
     expect(toast).toHaveBeenCalledWith(expect.stringContaining('تعذر تحديد المكتب الحالي'), true);
     expect(mockDb.uploadSpy).not.toHaveBeenCalled();
+  });
+
+  it('🆕 أوفلاين → توست صريح "يتطلب اتصالاً بالإنترنت"، من غير أي محاولة رفع خالص (المرحلة 6، تكملة ثانية)', async () => {
+    setOnline(false);
+    const { result } = renderDocsHook();
+    act(() => { result.current.handleFileSelect(fakeEvent(fakeFile('ملف.pdf', 1000))); });
+    await act(async () => { await result.current.handleUploadDoc(); });
+    expect(toast).toHaveBeenCalledWith('⚠️ رفع مستند يتطلب اتصالاً بالإنترنت — أعد المحاولة عند توفر الاتصال', true);
+    expect(mockDb.uploadSpy).not.toHaveBeenCalled();
+    expect(result.current.uploadingDoc).toBe(false);
   });
 
   it('🆕 فشل الرفع للتخزين → الرسالة الموحدة تتعرض، والخام يتسجل عبر recordError، من غير أي إدخال في case_documents', async () => {
@@ -235,6 +252,17 @@ describe('useCaseDocuments — handleUploadDoc', () => {
 
 describe('useCaseDocuments — handleDeleteDoc', () => {
   const doc = { id: 'doc-1', file_name: 'ملف قديم.pdf', storage_path: 'tenant-a/case_case-1_123.pdf' };
+
+  it('🆕 أوفلاين → توست صريح "يتطلب اتصالاً بالإنترنت"، من غير أي محاولة حذف خالص (المرحلة 6، تكملة ثانية)', async () => {
+    setOnline(false);
+    const { result, refetchAll } = renderDocsHook();
+    await act(async () => { await result.current.handleDeleteDoc(doc); });
+    expect(toast).toHaveBeenCalledWith('⚠️ حذف مستند يتطلب اتصالاً بالإنترنت — أعد المحاولة عند توفر الاتصال', true);
+    expect(mockDb.removeSpy).not.toHaveBeenCalled();
+    expect(mockDb.deleteSpy).not.toHaveBeenCalled();
+    expect(result.current.deletingDocId).toBeNull();
+    expect(refetchAll).not.toHaveBeenCalled();
+  });
 
   it('فشل حذف الملف من التخزين → توست فشل ثابت، من غير أي محاولة حذف من الجدول', async () => {
     mockDb.setResult('case-docs:remove', { error: { message: 'storage error' } });
