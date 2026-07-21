@@ -10,14 +10,22 @@ import type { Database } from '../../database.types';
 import { parsePoaString } from '../ui/PoaInput';
 
 /**
- * يتحقق إن الاسم "ثنائي" على الأقل (اسم أول + اسم تاني)، مش كلمة واحدة بس.
- * @returns null لو سليم، أو رسالة خطأ بالعربي لو الاسم كلمة واحدة بس
+ * يتحقق إن الاسم "ثلاثي" على الأقل (الاسم الأول، الأب، الجد)، مش كلمة أو
+ * كلمتين بس.
+ * ⚠️ FIX (تقرير الموثوقية — مراجعة 21 يوليو 2026): الشرط كان لسه
+ * `parts.length < 2` (يقبل اسم ثنائي)، بينما كل نقاط النداء (اسم الموكل
+ * في NewClientModal/EditClientModal، واسم الخصم في NewCaseModal/
+ * EditCaseModal/NewStandaloneSessionModal/StandaloneSessionDetailModal)
+ * كانت بتعرض رسالة "لازم يكون ثلاثي على الأقل" — يعني اسم من كلمتين كان
+ * بيعدي الفحص فعليًا رغم إن الرسالة بتوعد المستخدم بخلاف كده. اتصحح
+ * الشرط لـ`< 3` عشان يتطابق مع الرسائل الفعلية في كل الأماكن.
+ * @returns null لو سليم، أو رسالة خطأ بالعربي لو الاسم أقل من ثلاث كلمات
  */
 export function validateFullNameParts(name: string): string | null {
     const trimmed = (name || '').trim();
     if (!trimmed) return null; // فحص "الحقل فاضي" مسؤولية الفورم نفسه، مش هنا
     const parts = trimmed.split(/\s+/).filter(Boolean);
-    if (parts.length < 2) return '⚠️ الاسم لازم يكون ثنائي على الأقل (اسم أول واسم تاني)';
+    if (parts.length < 3) return '⚠️ الاسم لازم يكون ثلاثي على الأقل (الاسم الأول، الأب، الجد)';
     return null;
 }
 
@@ -75,7 +83,12 @@ export async function checkClientDuplicate(
 
     const orParts: string[] = [];
     if (nationalId) orParts.push(`national_id.eq.${nationalId}`); // أرقام فقط بالفعل (onlyDigits) — آمن من غير هروب
-    if (name) orParts.push(exactIlikeClause('full_name', name));
+    // ⚡ FIX: full_name كان بيتكتب في مسار واحد بس من كل مسارات إضافة/تعديل
+    // الموكل (راجع migration 02-clients-full-name-sync.sql)، فكان فحص
+    // التكرار عمليًا مش بيلاقي حاجة لمعظم الموكلين. client_name هو العمود
+    // المضمون امتلاؤه دايمًا من كل المسارات — بندوّر على الاتنين مع بعض
+    // (full_name لسه مفيد كطبقة حماية إضافية بعد ما بقى متزامن تلقائيًا).
+    if (name) { orParts.push(exactIlikeClause('full_name', name)); orParts.push(exactIlikeClause('client_name', name)); }
     if (poaHasStructured) orParts.push(poaPrefixClause('cr_number', poaParts!.number, poaParts!.letters, poaParts!.year));
     if (orParts.length === 0) return { duplicate: false };
 
@@ -83,7 +96,7 @@ export async function checkClientDuplicate(
     // فحص التكرار زي أي موكل نشط — يرفض إضافة موكل جديد بالغلط، والأخطر:
     // زرار "ربط الآن" كان ممكن يربط قضية حية بموكل مؤرشف من غير تنبيه.
     // نفس الفلتر المستخدم في useSessionLinking.ts (سطر 117، 322).
-    let query = db.from('clients').select('id,full_name,national_id,cr_number').is('deleted_at', null).or(orParts.join(','));
+    let query = db.from('clients').select('id,full_name,client_name,national_id,cr_number').is('deleted_at', null).or(orParts.join(','));
     if (excludeClientId) query = query.neq('id', excludeClientId);
     const { data } = await query;
     if (!data || data.length === 0) return { duplicate: false };
@@ -91,8 +104,8 @@ export async function checkClientDuplicate(
     // ⚡ NEW: بدل ما نحسب nameMatch/idMatch/poaMatch كـ boolean عام بس
     // (data.some)، بنحسبهم *لكل سطر* عشان نقدر نحدد بالظبط مين هو الموكل
     // المطابق نفسه (مش بس "فيه تطابق")، ونرجّعه في الناتج.
-    const rowMatch = (c: { full_name: string | null; national_id: string | null; cr_number: string | null }) => {
-        const rowNameMatch = !!name && (c.full_name || '').trim().toLowerCase() === name.toLowerCase();
+    const rowMatch = (c: { full_name: string | null; client_name: string | null; national_id: string | null; cr_number: string | null }) => {
+        const rowNameMatch = !!name && ((c.full_name || '').trim().toLowerCase() === name.toLowerCase() || (c.client_name || '').trim().toLowerCase() === name.toLowerCase());
         const rowIdMatch = !!nationalId && (c.national_id || '').trim() === nationalId;
         // مقارنة نهائية في الكود نفسه (مش SQL بس) — رقم + حرف + سنة بالظبط،
         // مكتب التوثيق مستبعد تمامًا من المقارنة.
@@ -118,7 +131,7 @@ export async function checkClientDuplicate(
         const m = rowMatch(c);
         return m.rowNameMatch || m.rowIdMatch || m.rowPoaMatch;
     });
-    const client = matchedRow ? { id: matchedRow.id, full_name: matchedRow.full_name } : undefined;
+    const client = matchedRow ? { id: matchedRow.id, full_name: matchedRow.full_name || matchedRow.client_name } : undefined;
 
     if (matchedLabels.length === 1) {
         return { duplicate: true, message: `⚠️ ${matchedLabels[0]} موجود بالفعل لموكل مسجل من قبل`, client };
