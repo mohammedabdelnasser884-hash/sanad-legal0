@@ -225,7 +225,7 @@ describe('useFeesActions', () => {
       expect(mockDb.insertSpy).not.toHaveBeenCalled();
     });
 
-    it('تعارض (conflict:true) → بيوقف من غير toast نجاح ومن غير استكمال باقي الخطوات', async () => {
+    it('تعارض (conflict:true) → بيوقف من غير toast نجاح ومن غير استكمال باقي الخطوات، مع توست تعارض صريح', async () => {
       safeUpdate.mockResolvedValue({ success: false, conflict: true, error: null });
       const { result } = await renderFeesHook();
 
@@ -239,6 +239,7 @@ describe('useFeesActions', () => {
 
       expect(toast).not.toHaveBeenCalledWith('✅ تم تحديث الأتعاب');
       expect(logActivity).not.toHaveBeenCalled();
+      expect(toast).toHaveBeenCalledWith('⚠️ سجل الأتعاب ده عدّله شخص آخر بعد ما فتحته — أعد المحاولة', true);
     });
   });
 
