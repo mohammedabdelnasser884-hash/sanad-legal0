@@ -222,7 +222,8 @@ export function useRemindersTab(initialFilter?: string | null, profile: ProfileR
             notes: editForm.notes||null,
         }, editTarget!.updated_at || null);
         setEditSaving(false);
-        if(conflict) return;
+        // 🔒 FIX (تقرير الموثوقية — القسم 12، Concurrent Editing): توست بدل السكوت التام.
+        if(conflict) { toast('⚠️ هذا التذكير عدّله شخص آخر بعد ما فتحته — أعد المحاولة', true); return; }
         if(!success){
             recordError('reminder_save', '', {label:'حفظ التذكيرات', message:'تعذّر تعديل المهمة. تحقق من الاتصال بالإنترنت.'});
             toast('❌ حدث خطأ، يرجى المحاولة مرة أخرى', true);
