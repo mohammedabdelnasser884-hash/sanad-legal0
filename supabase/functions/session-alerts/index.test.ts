@@ -293,6 +293,12 @@ describe('session-alerts — مسار "morning"', () => {
       data: [{ title: 'مهمة الغد', notes: 'ملاحظة مهمة', due_date: TMRW_STR, done: false, tenant_id: 't1' }],
       error: null,
     });
+    // ⚡ NEW (خطة تعدد الأطراف، مرحلة 11): sendSessionAlert بينادي
+    // fetchPartiesByCaseId مرة لكل مجموعة جلسات (غد + بعد غد) — هنا
+    // مجموعتين منفصلتين (tmrwSess بـ case_id='c1'، day2Sess بـ case_id='c2')
+    // فمحتاجين رد case_parties لكل نداء لوحده.
+    supabaseMock.queueTable('case_parties', { data: [], error: null }); // fetchPartiesByCaseId لجلسات الغد
+    supabaseMock.queueTable('case_parties', { data: [], error: null }); // fetchPartiesByCaseId لجلسات بعد غد
 
     const res = await handler(correctReq({ type: 'morning' }));
     expect(res.status).toBe(200);
@@ -385,6 +391,9 @@ describe('session-alerts — مسار "evening"', () => {
       }],
       error: null,
     });
+    // ⚡ NEW (خطة تعدد الأطراف، مرحلة 11): fetchPartiesByCaseId لقضايا
+    // الجلسات الفائتة (overdueCaseIds = ['case-1'])
+    supabaseMock.queueTable('case_parties', { data: [], error: null });
     supabaseMock.queueTable('reminders', { data: [], error: null }); // overdueReminders
 
     const res = await handler(correctReq({ type: 'evening' }));
