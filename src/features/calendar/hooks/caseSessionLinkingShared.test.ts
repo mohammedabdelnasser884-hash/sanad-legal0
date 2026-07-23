@@ -377,4 +377,64 @@ describe('linkClientToParty', () => {
     const result = await linkClientToParty('party-1', 'client-1', true, 'case-1', undefined);
     expect(result).toEqual({ ok: false });
   });
+
+  // ══════════════════════════════════════════════════════════════
+  //  clientOfflineInfo (7.2 جزء 2) — الموكل الجديد نفسه لسه تمبيد أوفلاين
+  //  وقت الربط. لازم UPDATE:case_parties يحمل _offlineFkTempId بدل ما
+  //  يبعت التمبيد حرفيًا كـ client_id من غير sentinel.
+  // ══════════════════════════════════════════════════════════════
+
+  it('clientOfflineInfo.isTempClientId=true → UPDATE:case_parties بيحمل _offlineFkTempId بدل client_id تمبيد صريح', async () => {
+    const { fn, calls } = mockDbWrite();
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const tempClientId = makeOfflineTempId();
+    const result = await linkClientToParty(
+      'party-2', tempClientId, false, 'case-1', undefined,
+      { isTempClientId: true, tempClientId, fallbackNameValue: 'أحمد محمد' },
+    );
+    expect(result).toEqual({ ok: true });
+    expect(calls).toEqual([{
+      type: 'UPDATE',
+      table: 'case_parties',
+      id: 'party-2',
+      data: {
+        client_id: tempClientId,
+        _offlineFkTempId: [{ field: 'client_id', tempId: tempClientId, table: 'clients', fallbackNameValue: 'أحمد محمد' }],
+      },
+    }]);
+  });
+
+  it('clientOfflineInfo مع طرف أساسي → sentinel على case_parties وcases.client_id بالـ id العادي مع بعض', async () => {
+    const { fn, calls } = mockDbWrite();
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const tempClientId = makeOfflineTempId();
+    const result = await linkClientToParty(
+      'party-1', tempClientId, true, 'case-1', undefined,
+      { isTempClientId: true, tempClientId, fallbackNameValue: 'موكل جديد' },
+    );
+    expect(result).toEqual({ ok: true });
+    expect(calls).toEqual([
+      {
+        type: 'UPDATE',
+        table: 'case_parties',
+        id: 'party-1',
+        data: {
+          client_id: tempClientId,
+          _offlineFkTempId: [{ field: 'client_id', tempId: tempClientId, table: 'clients', fallbackNameValue: 'موكل جديد' }],
+        },
+      },
+      { type: 'UPDATE', table: 'cases', id: 'case-1', data: { client_id: tempClientId } },
+    ]);
+  });
+
+  it('clientOfflineInfo.isTempClientId=false (الموكل اتقيّد أونلاين فعلًا) → مفيش sentinel، client_id عادي بس', async () => {
+    const { fn, calls } = mockDbWrite();
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const result = await linkClientToParty(
+      'party-2', 'client-real-1', false, 'case-1', undefined,
+      { isTempClientId: false, tempClientId: 'tmp-unused', fallbackNameValue: 'سارة علي' },
+    );
+    expect(result).toEqual({ ok: true });
+    expect(calls).toEqual([{ type: 'UPDATE', table: 'case_parties', id: 'party-2', data: { client_id: 'client-real-1' } }]);
+  });
 });
