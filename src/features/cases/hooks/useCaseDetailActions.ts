@@ -103,11 +103,11 @@ export function useCaseDetailActions(
       file_url: await resolveStorageUrl('case-docs', d.storage_path || d.file_url),
     })));
     setDocs(ddWithUrls);
-    // ⚡ NEW (مرحلة 8): نفس نمط EditCaseModal.tsx بالظبط (كاست 'cases' لأن
-    // case_parties لسه مش موجودة في database.types.ts). فشل الاستعلام
-    // (مشكلة اتصال) بيرجّع array فاضية بدل ما يمنع تحميل باقي التاب —
-    // InfoSection.tsx هيرجع لعرض الأعمدة القديمة تلقائيًا في الحالة دي.
-    const { data: pd, error: partiesErr } = await db.from('case_parties' as 'cases')
+    // ⚡ NEW (مرحلة 8): case_parties بقت مضافة في database.types.ts (خطة
+    // تعدد الأطراف، مرحلة 1) — مفيش داعي لكاست 'as cases' تاني هنا. فشل
+    // الاستعلام (مشكلة اتصال) بيرجّع array فاضية بدل ما يمنع تحميل باقي
+    // التاب — InfoSection.tsx هيرجع لعرض الأعمدة القديمة تلقائيًا في الحالة دي.
+    const { data: pd, error: partiesErr } = await db.from('case_parties')
       .select('*')
       .eq('case_id', caseData.id)
       .order('sort_order', { ascending: true });
