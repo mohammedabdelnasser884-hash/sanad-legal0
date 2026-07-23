@@ -215,7 +215,16 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
             }],
         };
     });
-    const partyFields = usePartyFields({ initialPlaintiffs: initialParties.plaintiffs, initialDefendants: initialParties.defendants });
+    const partyFields = usePartyFields({
+        initialPlaintiffs: initialParties.plaintiffs,
+        initialDefendants: initialParties.defendants,
+        // 🆕 (خطة "المسمى القانوني" — مرحلة 3): تحميل القيمة الحالية من
+        // session (لو موجودة) — نفس نمط EditCaseModal.tsx.
+        initialLegalTitles: {
+            plaintiff: session.plaintiff_legal_title || '',
+            defendant: session.defendant_legal_title || '',
+        },
+    });
 
     // الطرف اللي لازم يتقفل (readOnly) — الطرف المربوط فعليًا بموكل حي من
     // clients، بمطابقة client_id (بيتحسب مرة واحدة وقت الـ mount زي
@@ -237,7 +246,12 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
     type SyncPartiesResult = { ok: true } | { ok: false; reason: 'validation'; message: string } | { ok: false; reason: 'write' };
     const syncSessionParties = async (targetSessionId: string): Promise<SyncPartiesResult> => {
         const parties = partyFields.parties;
-        const serverCheck = validateParties(parties);
+        // 🆕 (خطة "المسمى القانوني" — مرحلة 3): نفس منطق useCaseActions.ts/
+        // NewStandaloneSessionModal.tsx — خط دفاع تاني لقاعدة 6.
+        const serverCheck = validateParties(parties, {
+            plaintiff: partyFields.legalTitles.plaintiff || '',
+            defendant: partyFields.legalTitles.defendant || '',
+        });
         if (!serverCheck.valid) {
             return { ok: false, reason: 'validation', message: serverCheck.message || '⚠️ بيانات أطراف الدعوى غير مكتملة أو غير صحيحة' };
         }
@@ -312,6 +326,9 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
             defendant: primaryDefendant?.name || null,
             defendant_role: primaryDefendant?.capacity || null,
             defendant_national_id: primaryDefendant?.national_id || null,
+            // 🆕 (خطة "المسمى القانوني" — مرحلة 3): نفس منطق EditCaseModal.tsx.
+            plaintiff_legal_title: partyFields.legalTitles.plaintiff || null,
+            defendant_legal_title: partyFields.legalTitles.defendant || null,
             next_action: form.next_action || null,
         }, session.updated_at || null);
         // 🔒 FIX (تقرير الموثوقية — القسم 12، Concurrent Editing): توست بدل السكوت التام.
