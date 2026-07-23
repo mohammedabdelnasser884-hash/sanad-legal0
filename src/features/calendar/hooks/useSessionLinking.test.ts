@@ -88,6 +88,24 @@ function makeMockDb(clientsSelectResult: { data?: unknown; error?: unknown } = {
           })),
         };
       }
+      if (table === 'case_parties') {
+        // ⚡ NEW (خطة تعدد الأطراف، 7.1/7.2): fetchSessionClientParties
+        // بتستخدم .select().eq().eq().order(...)، وmovePartiesFromSessionToCase
+        // بتستخدم .select().eq(...) بس (awaited مباشرة) — نفس شكل object
+        // بيغطي السلسلتين، افتراضيًا [] فاضية (مفيش أطراف إضافية) عشان
+        // مسار الاسم الواحد القديم يفضل شغال زي ما هو في التستات اللي
+        // مش بتغطي تعدد الأطراف.
+        const chain = {
+          eq: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              order: vi.fn(() => Promise.resolve({ data: [], error: null })),
+            })),
+            then: (resolve: (v: { data: unknown; error: unknown }) => void, reject?: (e: unknown) => void) =>
+              Promise.resolve({ data: [], error: null }).then(resolve, reject),
+          })),
+        };
+        return { select: vi.fn(() => chain) };
+      }
       return {};
     }),
     ilikeSpy,
