@@ -12,7 +12,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { createEmptyParty, type PartyFieldValue, type PartySide } from './partyTypes';
-import { validateParties, type PartiesValidationResult } from '../lib/casePartiesValidation';
+import { validateParties, type PartiesValidationResult, type PartyLegalTitles } from '../lib/casePartiesValidation';
 
 // id محلي للفورم بس — نفس نمط توليد offlineTempId الفعلي في
 // useCaseActions.ts (`tmp-${Date.now()}-${random}`)، بادئة مختلفة
@@ -25,6 +25,11 @@ export interface UsePartyFieldsOptions {
     // مربع الفورم في قسم 4 — "مدعي ١" و"مدعى عليه ١" ظاهرين من البداية).
     initialPlaintiffs?: PartyFieldValue[];
     initialDefendants?: PartyFieldValue[];
+    // 🆕 (خطة "المسمى القانوني" — مرحلة 3): قيمة ابتدائية للمسمى القانوني
+    // الجامع لكل جهة، بتتقرا من الأعمدة plaintiff_legal_title/
+    // defendant_legal_title (قضية/جلسة قائمة بالفعل). لو مش متبعتة: تبدأ
+    // فاضية زي أي قضية/جلسة جديدة.
+    initialLegalTitles?: PartyLegalTitles;
 }
 
 export interface UsePartyFieldsReturn {
@@ -37,6 +42,11 @@ export interface UsePartyFieldsReturn {
     canRemove: (id: string) => boolean;
     updateParty: <K extends keyof PartyFieldValue>(id: string, field: K, value: PartyFieldValue[K]) => void;
     toggleIsClient: (id: string) => void;
+    // 🆕 (خطة "المسمى القانوني" — مرحلة 3): المسمى القانوني الجامع الحالي
+    // لكل جهة + setter بتاعه — مخزّن على مستوى القضية/الجلسة نفسها (مش
+    // جوه array الأطراف)، زي ما اتفق في casePartiesValidation.ts.
+    legalTitles: PartyLegalTitles;
+    setLegalTitle: (side: PartySide, value: string) => void;
     validation: PartiesValidationResult;
 }
 
@@ -50,6 +60,15 @@ export function usePartyFields(options: UsePartyFieldsOptions = {}): UsePartyFie
             : [createEmptyParty('defendant', genId())];
         return [...plaintiffs, ...defendants];
     });
+
+    const [legalTitles, setLegalTitles] = useState<PartyLegalTitles>(() => ({
+        plaintiff: options.initialLegalTitles?.plaintiff ?? '',
+        defendant: options.initialLegalTitles?.defendant ?? '',
+    }));
+
+    const setLegalTitle = useCallback((side: PartySide, value: string) => {
+        setLegalTitles((prev) => ({ ...prev, [side]: value }));
+    }, []);
 
     const plaintiffs = useMemo(() => parties.filter((p) => p.side === 'plaintiff'), [parties]);
     const defendants = useMemo(() => parties.filter((p) => p.side === 'defendant'), [parties]);
@@ -88,7 +107,7 @@ export function usePartyFields(options: UsePartyFieldsOptions = {}): UsePartyFie
         setParties((prev) => prev.map((p) => (p.id === id ? { ...p, is_client: !p.is_client } : p)));
     }, []);
 
-    const validation = useMemo(() => validateParties(parties), [parties]);
+    const validation = useMemo(() => validateParties(parties, legalTitles), [parties, legalTitles]);
 
-    return { parties, plaintiffs, defendants, addParty, removeParty, canRemove, updateParty, toggleIsClient, validation };
+    return { parties, plaintiffs, defendants, addParty, removeParty, canRemove, updateParty, toggleIsClient, legalTitles, setLegalTitle, validation };
 }
