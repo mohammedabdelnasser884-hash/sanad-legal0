@@ -80,6 +80,56 @@ const sendTgChunked = async (token: string, chat: string, header: string, items:
 
 const SESSION_COLS = "session_date, description, result, title, case_number, court, plaintiff, defendant, case_id, tenant_id";
 
+// ⚡ NEW (خطة تعدد الأطراف، مرحلة 11 — 23 يوليو 2026): جلب كل أطراف الدعوى
+// (مش بس الطرف الأساسي المخزّن كـ cache في عمودي plaintiff/defendant) لقايمة
+// معرّفات قضايا معينة دفعة واحدة، ثم تجميعهم حسب case_id وجهة كل طرف
+// (مدعي/مدعى عليه) — case_parties (side, name, is_client) مؤكَّدة فعليًا من
+// مراحل سابقة من نفس الخطة (migration مرحلة 1). لو `caseIds` فاضية (كل
+// الجلسات جلسات مستقلة من غير قضية)، بنرجع object فاضي من غير أي نداء DB.
+const fetchPartiesByCaseId = async (
+  caseIds: any[]
+): Promise<Record<string, { plaintiffs: string[]; defendants: string[] }>> => {
+  const result: Record<string, { plaintiffs: string[]; defendants: string[] }> = {};
+  if (caseIds.length === 0) return result;
+  const { data: parties } = await supabase
+    .from("case_parties")
+    .select("case_id, side, name, is_client")
+    .in("case_id", caseIds)
+    .order("sort_order", { ascending: true });
+  (parties || []).forEach((p: any) => {
+    if (!p.case_id || !p.name) return;
+    if (!result[p.case_id]) result[p.case_id] = { plaintiffs: [], defendants: [] };
+    const label = p.is_client ? `${p.name} (موكل)` : p.name;
+    if (p.side === "plaintiff") result[p.case_id].plaintiffs.push(label);
+    else if (p.side === "defendant") result[p.case_id].defendants.push(label);
+  });
+  return result;
+};
+
+// ⚡ NEW (مرحلة 11): بناء سطري "🟢 المدعي"/"🔴 المدعى عليه" في رسالة تيليجرام.
+// لو فيه أطراف متعددة مسجّلة فعليًا في case_parties لنفس القضية (partiesByCaseId)،
+// بنعرضهم كلهم مفصولين بفاصلة عربي ("، ") بدل طرف واحد بس. لو مفيش (قضية قديمة
+// قبل مرحلة 4/6، أو جلسة مستقلة معندهاش case_id بعد)، بنرجع لعرض الطرف الأساسي
+// المفرد (fallbackPlaintiff/fallbackDefendant) بالظبط زي ما كان — صفر تغيير
+// سلوك في المسار القديم.
+const buildPartyLines = (
+  caseId: string | null | undefined,
+  partiesByCaseId: Record<string, { plaintiffs: string[]; defendants: string[] }>,
+  fallbackPlaintiff: string | null | undefined,
+  fallbackDefendant: string | null | undefined
+): string => {
+  const parties = caseId ? partiesByCaseId[caseId] : undefined;
+  let out = "";
+  if (parties && (parties.plaintiffs.length > 0 || parties.defendants.length > 0)) {
+    if (parties.plaintiffs.length > 0) out += `   🟢 المدعي: ${parties.plaintiffs.join("، ")}\n`;
+    if (parties.defendants.length > 0) out += `   🔴 المدعى عليه: ${parties.defendants.join("، ")}\n`;
+  } else {
+    if (fallbackPlaintiff) out += `   🟢 المدعي: ${fallbackPlaintiff}\n`;
+    if (fallbackDefendant) out += `   🔴 المدعى عليه: ${fallbackDefendant}\n`;
+  }
+  return out;
+};
+
 // البيانات المفروض تكون موجودة جوا case_sessions نفسها (title, court, plaintiff, defendant)
 // لو جلسة قديمة من قبل التحديث وأعمدتها الجديدة فاضية، بنجيب بياناتها fallback من جدول cases
 const sendSessionAlert = async (token: string, chat: string, sessions: any[], label: string, emoji: string, tenantId: string | null) => {
@@ -98,6 +148,10 @@ const sendSessionAlert = async (token: string, chat: string, sessions: any[], la
     (fallbackCases || []).forEach((c: any) => { fallbackById[c.id] = c; });
   }
 
+  // ⚡ NEW (مرحلة 11): جلب كل أطراف الدعوى دفعة واحدة لكل القضايا في الدفعة دي
+  const sessionCaseIds = [...new Set(sessions.filter((s: any) => s.case_id).map((s: any) => s.case_id))];
+  const partiesByCaseId = await fetchPartiesByCaseId(sessionCaseIds);
+
   const items = sessions.map((s: any, i: number) => {
     const fb = fallbackById[s.case_id] || {};
     const title      = s.title || fb.title;
@@ -110,8 +164,7 @@ const sendSessionAlert = async (token: string, chat: string, sessions: any[], la
     item += `   📋 رقم القيد: ${caseNumber || "—"}\n`;
     item += `   🏛 المحكمة: ${court || "—"}\n`;
     item += `   📆 تاريخ الجلسة: ${s.session_date}\n`;
-    if (plaintiff)      item += `   🟢 المدعي: ${plaintiff}\n`;
-    if (defendant)      item += `   🔴 المدعى عليه: ${defendant}\n`;
+    item += buildPartyLines(s.case_id, partiesByCaseId, plaintiff, defendant);
     if (s.description)  item += `   📝 ${s.description}\n`;
     item += "\n";
     return item;
@@ -314,6 +367,11 @@ const runForTenant = async (office: any, type: string) => {
       (fallbackCases || []).forEach((c: any) => { fallbackById[c.id] = c; });
     }
 
+    // ⚡ NEW (مرحلة 11): نفس المبدأ بالحرف — جلب كل أطراف الدعوى دفعة واحدة
+    // لقضايا الجلسات الفائتة قبل بناء عناصر الرسالة.
+    const overdueCaseIds = [...new Set(overdueSessions.filter((s: any) => s.case_id).map((s: any) => s.case_id))];
+    const overduePartiesByCaseId = await fetchPartiesByCaseId(overdueCaseIds);
+
     if (overdueSessions.length > 0) {
       const items = overdueSessions.map((s: any, i: number) => {
         const fb = fallbackById[s.case_id] || {};
@@ -326,8 +384,7 @@ const runForTenant = async (office: any, type: string) => {
         let item = `${i + 1}. ⚖️ <b>${title || "—"}</b>\n`;
         item += `   📋 رقم القيد: ${caseNumber || "—"}\n`;
         item += `   🏛 المحكمة: ${court || "—"}\n`;
-        if (plaintiff)      item += `   🟢 المدعي: ${plaintiff}\n`;
-        if (defendant)      item += `   🔴 المدعى عليه: ${defendant}\n`;
+        item += buildPartyLines(s.case_id, overduePartiesByCaseId, plaintiff, defendant);
         if (s.description)  item += `   📝 ${s.description}\n`;
         item += `   📆 تاريخ الجلسة: ${s.session_date}\n\n`;
         return item;
