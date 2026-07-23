@@ -94,10 +94,9 @@ function EditCaseModal(props: EditCaseModalProps) {
         let cancelled = false;
         setPartiesState({ loaded: false, rows: [] });
         (async () => {
-            // الكاست لـ 'cases' هنا نفس نمط dbFrom() الموجود فعلاً في
-            // offlineQueue.ts — بيأثر بس على شكل الـ query builder وقت
-            // الـ type-check، مش على اسم الجدول الفعلي وقت التشغيل.
-            const { data, error } = await db.from('case_parties' as 'cases')
+            // ⚠️ case_parties بقت مضافة في database.types.ts (خطة تعدد
+            // الأطراف، مرحلة 1) — مفيش داعي لكاست 'as cases' تاني هنا.
+            const { data, error } = await db.from('case_parties')
                 .select('*')
                 .eq('case_id', caseData.id)
                 .order('sort_order', { ascending: true });
