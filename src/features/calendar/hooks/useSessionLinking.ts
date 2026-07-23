@@ -7,12 +7,17 @@ import { ilikeOrClause } from '../../../shared/lib/sanitize';
 import { recalcNextHearing } from '../../../shared/lib/dataAccess';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '../../../database.types';
-import type { CaseSessionRow } from '../../../types';
+import type { CaseSessionRow, ClientRow } from '../../../types';
 import {
   makeOfflineTempId, isOfflineTempId, withFkOfflineSentinel, withCaseSelfOfflineSentinel, findMatchingClientByName, buildCaseInsertData,
+  movePartiesFromSessionToCase, fetchSessionClientParties, matchClientsForParties, linkClientToParty,
 } from './caseSessionLinkingShared';
+import type { SessionClientParty, PartyClientMatch } from './caseSessionLinkingShared';
 
-export type ClientSearchResult = { id: string; full_name: string | null; client_name: string | null; national_id: string | null };
+// ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 6): أضيف cr_number (رقم
+// التوكيل) — لازم لكشف التعارض قبل الربط في confirmLinkToExistingClient.
+// case_sessions مفيهاش عمود عنوان أصلاً (فاز 3)، فمفيش داعي لـ address هنا.
+export type ClientSearchResult = { id: string; full_name: string | null; client_name: string | null; national_id: string | null; cr_number: string | null };
 
 /**
  * منطق ربط جلسة مستقلة *محفوظة بالفعل* (session already في الـ DB، مش
@@ -24,7 +29,18 @@ export type ClientSearchResult = { id: string; full_name: string | null; client_
  *  3) [جديد] بحث يدوي في الموكلين الموجودين بالفعل وربط الجلسة مباشرة
  *     بـ client_id بتاعه (case_sessions.client_id) من غير إنشاء قضية.
  */
-export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Database>, onDone: () => void, onClientAdded?: () => void) {
+export function useSessionLinking(
+  session: CaseSessionRow,
+  db: SupabaseClient<Database>,
+  onDone: () => void,
+  onClientAdded?: () => void,
+  // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 5): الموكل الحي المرتبط
+  // بالجلسة (session.client_id) لو موجود — بيتاخد منه الاسم/الرقم
+  // القومي/التوكيل/العنوان عند تحويل الجلسة لقضية في handleLinkCase، بدل
+  // نسخة الجلسة اللي ممكن تكون قديمة لو الموكل تعدّل بعد آخر مرة الجلسة
+  // اتفتحت (نفس فيكس SessionUpdateModal.tsx).
+  linkedClient?: ClientRow | null,
+) {
   const [linkingCase, setLinkingCase] = useState(false);
   const [linkingClient, setLinkingClient] = useState(false);
   const [linkingToCase, setLinkingToCase] = useState(false);
@@ -39,6 +55,39 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
   // للمستخدم (زرار بيدوس عليه ومفيش أي رد فعل). نفس فكرة foundClientMatchType
   // الموجودة في useClientLinking.ts (مسار إنشاء الجلسة).
   const [foundClientMatchType, setFoundClientMatchType] = useState<'exact' | 'fuzzy' | null>(null);
+
+  // ⚡ NEW (خطة تعدد الأطراف، 7.2 جزء 2 — 23 يوليو 2026): wizard لكل أطراف
+  // الجلسة is_client=true بدل فرض "طرف واحد بس" (كان مبني على session.plaintiff
+  // كنص). partyList فاضية = جلسة قديمة قبل مرحلة 6 (مفيش case_parties خاصة
+  // بيها أصلاً) → fallback تلقائي لمسار الاسم الواحد القديم زي ما هو بالظبط
+  // (findMatchingClientByName على session.plaintiff، صفر تغيير سلوك). partyList
+  // فيها عنصر واحد أو أكتر → foundClient/foundClientMatchType/clientStep
+  // ('found'/'notfound') بيتحدّثوا "للطرف الحالي" (partyIndex) بدل الموكل
+  // الواحد، ونفس زرارين handleLinkExistingClient/handleAddAndLinkClient
+  // بيتفرّعوا داخليًا حسب partyList.length بدل ما نضيف زرارين جداد.
+  const [partyList, setPartyList] = useState<SessionClientParty[]>([]);
+  const [partyMatches, setPartyMatches] = useState<PartyClientMatch[]>([]);
+  const [partyIndex, setPartyIndex] = useState(0);
+
+  /** بتتنقل للطرف الجاي في partyList (أو 'done' لو ده آخر واحد) — وبتحدّث
+   * foundClient/foundClientMatchType/clientStep بناءً على مطابقة الطرف الجاي
+   * (partyMatches) لو موجودة. */
+  const goToNextPartyOrDone = (currentIndex: number, parties: SessionClientParty[], matches: PartyClientMatch[]) => {
+    const nextIndex = currentIndex + 1;
+    if (nextIndex >= parties.length) { setClientStep('done'); return; }
+    setPartyIndex(nextIndex);
+    const nextParty = parties[nextIndex];
+    const match = matches.find((m) => m.party.id === nextParty.id);
+    if (match) {
+      setFoundClient(match.client);
+      setFoundClientMatchType(match.matchType);
+      setClientStep('found');
+    } else {
+      setFoundClient(null);
+      setFoundClientMatchType(null);
+      setClientStep('notfound');
+    }
+  };
 
   const [clientSearch, setClientSearch] = useState('');
   const [searchResults, setSearchResults] = useState<ClientSearchResult[]>([]);
@@ -70,10 +119,15 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
           court: session.court,
           caseNumber: session.case_number,
           caseType: session.case_type,
-          plaintiff: session.plaintiff,
+          // ⚡ FIX (خطة توحيد مصدر بيانات الموكل، مرحلة 5): لو الجلسة مربوطة
+          // بموكل حي، الاسم/الرقم القومي/التوكيل/العنوان بياخدوا من ملف
+          // الموكل نفسه — مش من نسخة الجلسة اللي ممكن تكون بقت قديمة.
+          // plaintiffRole فضل من الجلسة عمدًا (خاصية الجلسة مش الموكل).
+          plaintiff: (linkedClient ? linkedClient.full_name : session.plaintiff) || null,
           plaintiffRole: session.plaintiff_role,
-          plaintiffNationalId: session.plaintiff_national_id,
-          plaintiffPoa: session.plaintiff_power_of_attorney,
+          plaintiffNationalId: (linkedClient ? linkedClient.national_id : session.plaintiff_national_id) || null,
+          plaintiffPoa: (linkedClient ? linkedClient.cr_number : session.plaintiff_power_of_attorney) || null,
+          plaintiffAddress: linkedClient ? linkedClient.address : null,
           defendant: session.defendant,
           defendantRole: session.defendant_role,
           defendantNationalId: session.defendant_national_id,
@@ -101,6 +155,11 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
         toast('✅ تم إنشاء ملف القضية');
       }
       setCreatedCaseId(realOrTempCaseId);
+      // ⚡ NEW (7.2 جزء 2): لازم تتقرا هنا *قبل* movePartiesFromSessionToCase
+      // تحت — الدالة دي بتحدّث الصفوف نفسها (session_id → null، case_id →
+      // القضية الجديدة)، فلو استنينا وقريناها بعدين بـ session_id مش هنلاقي
+      // حاجة. session.id حقيقي دايمًا هنا (نفس افتراض movePartiesFromSessionToCase).
+      const clientPartiesBeforeMove = await fetchSessionClientParties(db, session.id);
       // ⚠️ session.id هنا حقيقي دايمًا (الجلسة already موجودة فعليًا في
       // القاعدة، بعكس useClientLinking.ts اللي ممكن تكون لسه بيانات form) —
       // فمحتاجش أي تمبيد لـ id الجلسة نفسها، بس case_id ممكن يكون تمبيد.
@@ -112,11 +171,25 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
       });
       if (sessionLinkErr) {
         showErrorToast('session_case_link', sessionLinkErr, 'تم إنشاء القضية لكن تعذّر ربط الجلسة بها. حاول تحديث الصفحة.', 'ربط الجلسة بالقضية');
-      } else if (!(offline && queued)) {
-        // ⚡ FIX: نفس إصلاح useClientLinking.ts — next_hearing كان بيفضل فاضي.
-        // 🆕 المرحلة 2: أونلاين بس — أوفلاين هتتحسب تلقائيًا بعد المزامنة
-        // (المرحلة 4 القادمة، لسه ما اتنفذتش).
-        await recalcNextHearing(db, realOrTempCaseId);
+      } else {
+        // ⚡ NEW (مرحلة 7.1 — خطة تعدد الأطراف، 23 يوليو 2026): نقل كل
+        // صفوف case_parties بتاعة الجلسة (مش بس الطرف الأساسي اللي
+        // buildCaseInsertData كتبه فوق للأعمدة القديمة) للقضية الجديدة.
+        // session.id هنا حقيقي دايمًا (الجلسة already موجودة)، فمفيش داعي
+        // لأي تمبيد على جنب المصدر — بس realOrTempCaseId (الوجهة) ممكن
+        // يكون لسه تمبيد لو أوفلاين.
+        const moveResult = await movePartiesFromSessionToCase(
+          db, session.id, realOrTempCaseId, offline, queued, offlineTempId, caseTitle,
+        );
+        if (!moveResult.ok) {
+          toast('⚠️ تم إنشاء القضية وربط الجلسة، لكن حصل خطأ في نقل بعض أطراف الدعوى الإضافية — راجعها يدويًا', true);
+        }
+        if (!(offline && queued)) {
+          // ⚡ FIX: نفس إصلاح useClientLinking.ts — next_hearing كان بيفضل فاضي.
+          // 🆕 المرحلة 2: أونلاين بس — أوفلاين هتتحسب تلقائيًا بعد المزامنة
+          // (المرحلة 4 القادمة، لسه ما اتنفذتش).
+          await recalcNextHearing(db, realOrTempCaseId);
+        }
       }
       onDone();
       // ⚡ FIX: لو session.client_id موجود بالفعل، القضية الجديدة اتربطت
@@ -124,6 +197,28 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
       // ونعرض خطوة "لقينا موكل مطابق"، ده هيكرر نفس الربط أو يلخبط
       // المستخدم من غير فايدة.
       if (session.client_id) { setClientStep('done'); return; }
+      // ⚡ NEW (7.2 جزء 2): لو الجلسة فيها أطراف is_client=true فعلية
+      // (clientPartiesBeforeMove اللي اتقرت فوق قبل النقل)، بندخل wizard
+      // "طرف واحد في المرة" بدل مسار الاسم الواحد القديم — كل طرف بياخد
+      // قرار مستقل (ربط بموجود / إضافة جديد / تخطي)، والطرف الأساسي بس
+      // (partyIndex === 0) بيحدّث cases.client_id القديم كمان (linkClientToParty).
+      if (clientPartiesBeforeMove.length > 0) {
+        const matches = await matchClientsForParties(db, clientPartiesBeforeMove);
+        setPartyList(clientPartiesBeforeMove);
+        setPartyMatches(matches);
+        setPartyIndex(0);
+        const firstParty = clientPartiesBeforeMove[0];
+        const firstMatch = matches.find((m) => m.party.id === firstParty.id);
+        if (firstMatch) {
+          setFoundClient(firstMatch.client);
+          setFoundClientMatchType(firstMatch.matchType);
+          setClientStep('found');
+        } else {
+          setClientStep('notfound');
+        }
+        return;
+      }
+      // ── fallback: جلسة قديمة قبل مرحلة 6 (مفيش case_parties خاصة بيها) ──
       const plaintiffName = session.plaintiff?.trim();
       if (!plaintiffName) { setClientStep('notfound'); return; }
       // ⚡ FIX (توحيد): findMatchingClientByName بدل استعلام + حساب matchType
@@ -142,6 +237,30 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
 
   const handleLinkExistingClient = async () => {
     if (!createdCaseId || !foundClient) return;
+    // ⚡ NEW (7.2 جزء 2): wizard الأطراف المتعددة — الطرف الحالي (partyIndex)
+    // بس بياخد الربط عبر linkClientToParty (case_parties.client_id + طرف
+    // أساسي بس بيحدّث cases.client_id القديم كمان)، وبعدين بننتقل للطرف
+    // الجاي أو 'done'. مفيش لمسة لمسار الاسم الواحد القديم تحت.
+    if (partyList.length > 0) {
+      const currentParty = partyList[partyIndex];
+      if (!currentParty) return;
+      setLinkingToCase(true);
+      try {
+        const isTempCaseId = isOfflineTempId(createdCaseId);
+        const caseTitle = isTempCaseId ? (session.title || session.case_number || 'قضية من جلسة مستقلة') : undefined;
+        const isPrimary = partyIndex === 0;
+        const result = await linkClientToParty(currentParty.id, foundClient.id, isPrimary, createdCaseId, caseTitle);
+        if (!result.ok) {
+          showErrorToast('party_client_link', new Error('link failed'), `تعذّر ربط "${currentParty.name}" بالموكل. حاول مرة أخرى.`, 'ربط طرف بموكل');
+        } else {
+          toast(`✅ تم ربط "${currentParty.name}" بـ"${foundClient.full_name}"`);
+        }
+        goToNextPartyOrDone(partyIndex, partyList, partyMatches);
+      } catch { toast('❌ خطأ غير متوقع', true); }
+      finally { setLinkingToCase(false); }
+      return;
+    }
+    // ── fallback: جلسة قديمة (مسار الاسم الواحد القديم، صفر تغيير سلوك) ──
     setLinkingToCase(true);
     try {
       // 🆕 المرحلة 3-1: نفس تحويل useClientLinking.ts بالظبط — createdCaseId
@@ -168,6 +287,70 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
 
   const handleAddAndLinkClient = async () => {
     if (!createdCaseId) return;
+    // ⚡ NEW (7.2 جزء 2): wizard الأطراف المتعددة — بيعمل موكل جديد ببيانات
+    // الطرف الحالي (name/national_id/power_of_attorney بتاعته هو، مش
+    // session.plaintiff) وبيربطه بـ case_parties.client_id بتاع الطرف ده بس
+    // (+ cases.client_id لو ده الطرف الأساسي)، عبر linkClientToParty —
+    // clientOfflineInfo بيتبعت لو الموكل الجديد نفسه اتقيّد أوفلاين، عشان
+    // دورة المزامنة تقدر تحل client_id الحقيقي بعدين (فجوة كانت في نسخة
+    // linkClientToParty الأصلية بتاعة جزء 1، اتصلحت في caseSessionLinkingShared.ts
+    // كجزء من التوصيل ده — راجع تعليق الدالة هناك).
+    if (partyList.length > 0) {
+      const currentParty = partyList[partyIndex];
+      if (!currentParty) return;
+      setLinkingToCase(true);
+      try {
+        const name = currentParty.name?.trim();
+        if (!name) { toast('❌ اسم الطرف غير موجود', true); return; }
+        const nameErr = validateFullNameParts(name);
+        if (nameErr) { toast(nameErr, true); return; }
+        const tenantId = getCurrentTenantId();
+        if (!tenantId) { toast('❌ تعذر تحديد المكتب الحالي، أعد تحميل الصفحة وحاول مرة أخرى', true); return; }
+        const dup = await checkClientDuplicate(db, { full_name: name, national_id: currentParty.national_id, cr_number: currentParty.power_of_attorney });
+        if (dup.duplicate) {
+          if (dup.client) { setFoundClient(dup.client); setFoundClientMatchType('exact'); setClientStep('found'); }
+          else toast(dup.message!, true);
+          return;
+        }
+        const clientTempId = makeOfflineTempId();
+        const { data, error, offline: clientOffline, queued: clientQueued } = await window.__dbWrite({
+          type: 'INSERT',
+          table: 'clients',
+          data: {
+            client_name: name,
+            full_name: name,
+            tenant_id: tenantId,
+            national_id: currentParty.national_id || null,
+            _offlineTempId: clientTempId,
+          },
+          returning: true,
+        });
+        if (error) {
+          showErrorToast('client_create', error, 'تعذّر إضافة الموكل. تحقق من صحة البيانات. لو المشكلة استمرت، تواصل مع الدعم.', 'إضافة موكل');
+          return;
+        }
+        const realOrTempClientId = (clientOffline && clientQueued) ? clientTempId : (data as { id: string } | null)?.id;
+        if (!realOrTempClientId) { showErrorToast('client_create', new Error('no id returned'), 'تعذّر إضافة الموكل. حاول مرة أخرى.', 'إضافة موكل'); return; }
+        const isTempClientId = !!(clientOffline && clientQueued);
+        const isTempCaseId = isOfflineTempId(createdCaseId);
+        const caseTitle = isTempCaseId ? (session.title || session.case_number || 'قضية من جلسة مستقلة') : undefined;
+        const isPrimary = partyIndex === 0;
+        const result = await linkClientToParty(
+          currentParty.id, realOrTempClientId, isPrimary, createdCaseId, caseTitle,
+          { isTempClientId, tempClientId: clientTempId, fallbackNameValue: name },
+        );
+        if (!result.ok) {
+          showErrorToast('party_client_link', new Error('link failed'), `تمت إضافة الموكل لكن تعذّر ربطه بـ"${currentParty.name}".`, 'ربط طرف بموكل');
+        } else {
+          toast(`✅ تمت إضافة "${name}" وربطه بـ"${currentParty.name}"`);
+          onClientAdded?.();
+        }
+        goToNextPartyOrDone(partyIndex, partyList, partyMatches);
+      } catch { toast('❌ خطأ غير متوقع', true); }
+      finally { setLinkingToCase(false); }
+      return;
+    }
+    // ── fallback: جلسة قديمة (مسار الاسم الواحد القديم، صفر تغيير سلوك) ──
     setLinkingToCase(true);
     try {
       const name = session.plaintiff?.trim();
@@ -333,7 +516,7 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
     setSearching(true);
     try {
       const { data, error } = await db.from('clients')
-        .select('id,full_name,client_name,national_id')
+        .select('id,full_name,client_name,national_id,cr_number')
         .is('deleted_at', null)
         .or([ilikeOrClause('client_name', q), ilikeOrClause('full_name', q), ilikeOrClause('national_id', q), ilikeOrClause('phone', q)].join(','))
         .limit(15);
@@ -354,8 +537,23 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
       // __dbWrite. عملية UPDATE مستقلة بمعرّفين حقيقيين بالفعل (session.id
       // جلسة موجودة فعلاً، selectedExistingClient.id موكل موجود فعلاً) —
       // مفيش أي سلسلة تعتمد على id لسه في الطابور، فآمنة تتحول فورًا.
+      // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 6): زي فيكس
+      // useCaseActions.handleLinkClient بالظبط — قبل كده كنا بنحدّث
+      // client_id بس ونسيب plaintiff/plaintiff_national_id/
+      // plaintiff_power_of_attorney زي ما هما (بيانات حرة ممكن تكون
+      // قديمة/مختلفة عن ملف الموكل). الواجهة (StandaloneSessionDetailModal)
+      // هي اللي بتعرض تنبيه التعارض قبل ما تنده الدالة دي لو فيه قيم
+      // حرة مختلفة عن الموكل المختار.
       const { error, offline, queued } = await window.__dbWrite({
-        type: 'UPDATE', table: 'case_sessions', data: { client_id: selectedExistingClient.id }, id: session.id,
+        type: 'UPDATE',
+        table: 'case_sessions',
+        data: {
+          client_id: selectedExistingClient.id,
+          plaintiff: selectedExistingClient.full_name || selectedExistingClient.client_name || null,
+          plaintiff_national_id: selectedExistingClient.national_id || null,
+          plaintiff_power_of_attorney: selectedExistingClient.cr_number || null,
+        },
+        id: session.id,
       });
       if (error) {
         showErrorToast('session_client_link', error, 'تعذّر ربط الموكل بالجلسة. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'ربط الموكل بالجلسة');
@@ -372,10 +570,23 @@ export function useSessionLinking(session: CaseSessionRow, db: SupabaseClient<Da
     finally { setLinkingExisting(false); }
   };
 
+  // ⚡ NEW (7.2 جزء 2): تخطي الطرف الحالي بس (مش إغلاق الموديل كله زي
+  // onFullClose) — بينتقل للطرف الجاي في partyList أو 'done'. بيتفعّل بس
+  // لما partyList فيها أطراف؛ الواجهة (زرار "تخطي" الحالي) لازم تفرّق بين
+  // الحالتين: partyList.length > 0 → نده الدالة دي، غير كده (جلسة قديمة) →
+  // فضل نفس السلوك القديم (onFullClose من الأب مباشرة، بدون تغيير).
+  const handleSkipParty = () => {
+    if (partyList.length === 0) return;
+    goToNextPartyOrDone(partyIndex, partyList, partyMatches);
+  };
+
   return {
     linkingCase, linkingClient, linkingToCase, linkingExisting,
     createdCaseId, clientStep, setClientStep, foundClient, foundClientMatchType,
     clientSearch, searchResults, searching, selectedExistingClient, setSelectedExistingClient,
+    // ⚡ NEW (7.2 جزء 2): partyList/partyIndex لعرض "طرف X من Y" وتحديد
+    // الطرف الحالي في الواجهة، وhandleSkipParty لتخطي الطرف ده بس.
+    partyList, partyIndex, handleSkipParty,
     handleLinkCase, handleLinkExistingClient, handleAddAndLinkClient, handleAddClientOnly,
     searchExistingClients, confirmLinkToExistingClient,
   };
