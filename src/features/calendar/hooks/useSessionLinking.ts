@@ -131,6 +131,10 @@ export function useSessionLinking(
           defendant: session.defendant,
           defendantRole: session.defendant_role,
           defendantNationalId: session.defendant_national_id,
+          // 🆕 (خطة "المسمى القانوني" — بند مؤجل من التقرير): موجودان
+          // بالفعل كأعمدة حقيقية في صف الجلسة المجلوب، صفر جلب إضافي مطلوب.
+          plaintiffLegalTitle: session.plaintiff_legal_title,
+          defendantLegalTitle: session.defendant_legal_title,
           circuitNumber: session.circuit_number,
           sessionHall: session.session_hall,
           sessionTime: session.session_time,
