@@ -21,6 +21,13 @@ import type { CaseDocWithUrl, CasePartyRow } from './hooks/useCaseDetailActions'
 import type { MappedCase } from '../../hooks/useAppData';
 import type { ClientRow, ProfileRow } from '../../types';
 import type { CaseFormSubmitData } from './hooks/useCaseActions';
+import type { ClientModalContext } from '../clients/hooks/useClientActions';
+// 🆕 (خطة "المسمى القانوني" — مرحلة 5): نفس منطق العرض المستخدم في
+// InfoSection.tsx — يوحّد الهيدر العلوي وتاب البيانات على نفس المصدر
+// ونفس التنسيق (case_parties + المسمى القانوني)، بدل الأعمدة القديمة
+// المنفصلة (plaintiff/defendant) المستخدمة سابقًا في الهيدر بس (بند 4 من
+// قسم 5 في الخطة).
+import { summarizePartySide } from '../../shared/parties/partyDisplay';
 
 // شكل عنصر حالة القضية (نفس الحقول المستخدمة فعليًا في مصفوفة statuses تحت)
 interface CaseStatusOption {
@@ -80,9 +87,13 @@ interface CaseDetailViewProps {
     // ملف الموكل" جوه EditCaseModal بيستخدم الكولباك ده لفتح تفاصيل
     // الموكل الحقيقي (نفس آلية فتح تفاصيل الموكل الموجودة بالفعل).
     onOpenClientProfile?: (client: ClientRow) => void;
+    // ⚡ NEW (خطة تطوير أطراف الدعوى — مرحلة 4 خطوة 2، 23 يوليو 2026): بتوصل
+    // لـ EditCaseModal عشان زرار "إنشاء موكل جديد" جوه كارت أي طرف لسه مش
+    // مربوط بموكل — راجع App.tsx (openNewClientModal) وAppModals.tsx.
+    openNewClientModal?: (ctx: ClientModalContext) => void;
 }
 
-function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDelete, onEdit, onLinkClient, onUnlinkClient, onCreateAndLinkClient, onCreateAndLinkClientForParty, onNotify, initialTab='timeline', profile=null, country=null, savingCase=false, onOpenClientProfile}: CaseDetailViewProps){
+function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDelete, onEdit, onLinkClient, onUnlinkClient, onCreateAndLinkClient, onCreateAndLinkClientForParty, onNotify, initialTab='timeline', profile=null, country=null, savingCase=false, onOpenClientProfile, openNewClientModal}: CaseDetailViewProps){
     const [activeSection, setActiveSection] = useState(initialTab);
     const [showEditCase, setShowEditCase] = useState(false);
     const [linkingClient, setLinkingClient] = useState(false);
@@ -207,6 +218,10 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
                 countryCaseTypes: COUNTRY_CONFIGS[country as string]?.caseTypes,
                 linkedClient: client,
                 onOpenClientProfile: client ? () => { setShowEditCase(false); onOpenClientProfile?.(client); } : undefined,
+                // ⚡ NEW (مرحلة 4 خطوة 2): لربط/إنشاء موكل لأي طرف جديد يتضاف
+                // أثناء التعديل (بخلاف linkedClient الأصلي المقفول بالفعل).
+                clients,
+                openNewClientModal,
             })
         ),
 
@@ -381,10 +396,35 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
 
                 // أسماء الخصوم
                 (()=>{
-                    // ⚡ FIX: كان بيتم استخراج الصفة بـ regex من نص plaintiff/defendant
-                    // (نمط "الاسم (الصفة)")، رغم إن عمود plaintiff_role/defendant_role
-                    // موجود ومتعبي فعليًا في جدول cases. دلوقتي بنعرض من العمود المخصص
-                    // مباشرة — الـ fallback على الـ regex بس لصفوف قديمة لسه معندهاش
+                    // 🆕 (خطة "المسمى القانوني" — مرحلة 5، بند 4): مصدر البيانات
+                    // الموحّد الجديد — لو caseParties فيها صفوف (القضية دخل عليها
+                    // بيانات فعليًا من الفورم الجديد)، الهيدر بيعرض من هنا بالظبط
+                    // زي InfoSection.tsx (نفس summarizePartySide)، بدل الأعمدة
+                    // القديمة (plaintiff/defendant) اللي كان بيقرا منها بس قبل كده
+                    // — تفاديًا لظهور بيانات مختلفة بين الهيدر وتاب "بيانات
+                    // القضية" لنفس القضية (المشكلة الموثّقة في قسم 5-4 من الخطة).
+                    // لو الجهة فيها أكتر من شخص ومسمى قانوني مكتوب: بيتعرض المسمى
+                    // بدل اسم أول شخص، والـ "+N آخرين" مكان الصفة.
+                    const fromParties = (side: 'plaintiff' | 'defendant') => {
+                        const list = caseParties.filter((row) => row.side === side);
+                        const summary = summarizePartySide(list);
+                        if (!summary) return null;
+                        const legalTitle = (side === 'plaintiff' ? caseData.plaintiff_legal_title : caseData.defendant_legal_title) || '';
+                        if (summary.othersCount > 0) {
+                            return {
+                                name: legalTitle.trim() || summary.primaryName,
+                                capacity: `+${summary.othersCount} ${summary.othersCount === 1 ? 'آخر' : 'آخرين'}`,
+                            };
+                        }
+                        return { name: summary.primaryName, capacity: summary.primaryCapacity };
+                    };
+
+                    // ⚡ فولباك للقضايا القديمة (لسه معندهاش أي صف في case_parties):
+                    // نفس منطق الاستخراج القديم بالحرف — كان بيتم استخراج الصفة
+                    // بـ regex من نص plaintiff/defendant (نمط "الاسم (الصفة)")،
+                    // رغم إن عمود plaintiff_role/defendant_role موجود ومتعبي
+                    // فعليًا في جدول cases. دلوقتي بنعرض من العمود المخصص مباشرة —
+                    // الـ fallback على الـ regex بس لصفوف قديمة لسه معندهاش
                     // plaintiff_role (قبل تشغيل migration الـ backfill).
                     // ⚠️ وبيتقسم بس لو اللي جوه القوسين كلمة صفة قانونية معروفة، عشان
                     // مايتقطعش جزء من اسم شركة زي "(ش.م.م)".
@@ -395,13 +435,21 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
                         if(m && knownCapacityPattern.test(m[2])) return {name:m[1].trim(), capacity:m[2].trim()};
                         return {name:val, capacity:''};
                     };
-                    const p = caseData.plaintiff_role
+                    const legacyP = caseData.plaintiff_role
                         ? {name: caseData.plaintiff || '—', capacity: caseData.plaintiff_role}
                         : splitParty(caseData.plaintiff);
-                    const d = caseData.defendant_role
+                    const legacyD = caseData.defendant_role
                         ? {name: caseData.defendant || '—', capacity: caseData.defendant_role}
                         : splitParty(caseData.defendant);
-                    return (caseData.plaintiff || caseData.defendant) && React.createElement('div',{className:"flex items-center gap-2 mb-3 flex-wrap"},
+
+                    const hasPartyRows = caseParties.length > 0;
+                    // ⚠️ fromParties بترجع null لو الجهة فاضية بالكامل (لسه حصل
+                    // نادرًا — case_parties موجودة للقضية لكن جهة فيها صفر صفوف
+                    // مسمّاة) — بنرجع لنفس شكل '—' الفارغ الافتراضي القديم.
+                    const p = (hasPartyRows ? fromParties('plaintiff') : legacyP) || {name:'—', capacity:''};
+                    const d = (hasPartyRows ? fromParties('defendant') : legacyD) || {name:'—', capacity:''};
+                    const shouldRender = hasPartyRows ? (fromParties('plaintiff') || fromParties('defendant')) : (caseData.plaintiff || caseData.defendant);
+                    return shouldRender && React.createElement('div',{className:"flex items-center gap-2 mb-3 flex-wrap"},
                         React.createElement('div',{className:"flex flex-col"},
                             React.createElement('span',{className:"text-[11px] font-black text-emerald-400 leading-tight"},p.name),
                             p.capacity && React.createElement('span',{className:"text-[9px] font-bold text-emerald-400/60 leading-tight"},p.capacity)
