@@ -5,7 +5,7 @@ import type { TabName } from '../useNavigation';
 import type { NavigationState } from '../useNavigation';
 import type { DeleteConfirmState, CaseFormSubmitData } from '@/features/cases/hooks/useCaseActions';
 import type { ClientFormData, ClientModalContext } from '@/features/clients/hooks/useClientActions';
-import type { OpenCreateClientForSession, OpenCreateClientForCase } from '@/features/calendar/hooks/useClientLinking';
+import type { OpenCreateClientForSession, OpenCreateClientForCase, OpenCreateClientForParty, OpenCreateClientForSessionParty } from '@/features/calendar/hooks/useClientLinking';
 import type { MappedCase, MappedClient } from '../hooks/useAppData';
 import type { ProfileRow } from '../types';
 import NewCaseModal from '../features/cases/NewCaseModal';
@@ -77,9 +77,11 @@ interface AppModalsProps {
     handleDeleteCase: (caseId: string) => void | Promise<void>;
     handleUpdateCase: (caseId: string, form: CaseFormSubmitData) => void | Promise<void>;
     handleLinkClient: (caseId: string, clientId: string) => void | Promise<void>;
+    // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 4): عكس handleLinkClient.
+    handleUnlinkClient: (caseId: string) => void | Promise<void>;
     // ⚡ CHANGED (خطة توحيد إنشاء الموكل، Phase 1): بقت مجرد فتح لموديل
     // "إنشاء موكل جديد" الموحّد — شوف App.tsx (handleOpenCreateClientForCase).
-    handleCreateAndLinkClient: (caseId: string, plaintiffName: string, plaintiffNationalId?: string | null, plaintiffPoa?: string | null) => void;
+    handleCreateAndLinkClient: (caseId: string, plaintiffName: string, plaintiffNationalId?: string | null, plaintiffPoa?: string | null, plaintiffAddress?: string | null) => void;
     // ⚡ NEW (خطة توحيد إنشاء الموكل، Phase 3): نفس فكرة handleCreateAndLinkClient
     // بس لـ "إضافة الموكل لقائمة الموكلين فقط" من جلسة مستقلة — شوف App.tsx.
     handleOpenCreateClientForSession: OpenCreateClientForSession;
@@ -87,6 +89,23 @@ interface AppModalsProps {
     // (Phase 1) بس ممرّرة لـ NewStandaloneSessionModal — "إنشاء موكل جديد
     // وربطه" بعد تحويل جلسة مستقلة لقضية — شوف App.tsx.
     handleOpenCreateClientForSessionCase: OpenCreateClientForCase;
+    // ⚡ NEW (خطة تعدد الأطراف، 7.2 جزء 2 بند 2.3 — 23 يوليو 2026): نفس
+    // فكرة handleOpenCreateClientForSessionCase بس لطرف بعينه وسط wizard
+    // "طرف واحد في المرة" — شوف App.tsx (handleOpenCreateClientForParty)
+    // وuseClientLinking.ts (OpenCreateClientForParty).
+    handleOpenCreateClientForSessionParty: OpenCreateClientForParty;
+    // ⚡ NEW (خطة تعدد الأطراف، مرحلة 13 جزء 2 — 23 يوليو 2026): مرآة لـ
+    // handleOpenCreateClientForSessionParty فوق، بس لخطوة "idle" (زرار
+    // "إضافة الموكل لقائمة الموكلين فقط" — قبل حتى ما نعرف الجلسة هتتحول
+    // لقضية ولا لأ، فمفيش caseId خالص) — شوف App.tsx
+    // (handleOpenCreateClientForSessionPartyOnly) وuseClientLinking.ts
+    // (OpenCreateClientForSessionParty).
+    handleOpenCreateClientForSessionPartyOnly: OpenCreateClientForSessionParty;
+    // ⚡ NEW (خطة تعدد الأطراف، مرحلة 13.1 — 23 يوليو 2026): نفس الدالة
+    // بالظبط (handleOpenCreateClientForParty في App.tsx) بس ممرّرة كمان
+    // لـ CaseDetailView — زرار "إنشاء موكل" لكل طرف عليه ⭐ ومش مربوط في
+    // تفاصيل القضية (InfoSection.tsx)، مش بس وسط wizard الجلسة المستقلة.
+    handleOpenCreateClientForCaseParty: OpenCreateClientForParty;
     handleSaveClient: (form: ClientFormData, idFile: File | null, poaFile: File | null) => void | Promise<void>;
     handleDeleteClient: (clientId: string) => void | Promise<void>;
     handleUpdateClient: (clientId: string, form: ClientFormData, idFile?: File | null, poaFile?: File | null) => void | Promise<void>;
@@ -115,8 +134,10 @@ function AppModals({
     setCases, setCasesFilter, setCasesPage,
     fetchCases, fetchTodaySessions, fetchUpcomingSessions,
     fetchClients, clientSearch,
-    handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleCreateAndLinkClient,
+    handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleUnlinkClient, handleCreateAndLinkClient,
     handleOpenCreateClientForSession, handleOpenCreateClientForSessionCase,
+    handleOpenCreateClientForSessionParty, handleOpenCreateClientForCaseParty,
+    handleOpenCreateClientForSessionPartyOnly,
     handleSaveClient, handleDeleteClient, handleUpdateClient, handleSaveLawyer,
     sendTelegram,
 }: AppModalsProps) {
@@ -168,6 +189,8 @@ function AppModals({
             cases,
             onOpenCreateClient: handleOpenCreateClientForSession,
             onOpenCreateClientForCase: handleOpenCreateClientForSessionCase,
+            onOpenCreateClientForParty: handleOpenCreateClientForSessionParty,
+            onOpenCreateClientForSessionParty: handleOpenCreateClientForSessionPartyOnly,
         }),
         showLawyerModal && React.createElement(UserFormModal, { onClose: () => setShowLawyerModal(false), onSave: handleSaveLawyer, loading: savingLawyer }),
         showClientModal && React.createElement(NewClientModal, {
@@ -198,10 +221,17 @@ function AppModals({
                 setCases((prev) => prev.map((c) => c.id === selectedCase?.id ? { ...c, status: newStatus } : c));
                 setCasesFilter(newStatus); setCasesPage(0); fetchCases(0, newStatus);
             },
-            onDelete: handleDeleteCase, onEdit: handleUpdateCase, onLinkClient: handleLinkClient, onCreateAndLinkClient: handleCreateAndLinkClient, onNotify: sendTelegram, profile, country,
+            onDelete: handleDeleteCase, onEdit: handleUpdateCase, onLinkClient: handleLinkClient, onUnlinkClient: handleUnlinkClient, onCreateAndLinkClient: handleCreateAndLinkClient,
+            // ⚡ NEW (مرحلة 13.1): زرار "إنشاء موكل" لكل طرف عليه ⭐ في تفاصيل القضية.
+            onCreateAndLinkClientForParty: handleOpenCreateClientForCaseParty,
+            onNotify: sendTelegram, profile, country,
             // 🔒 FIX (تقرير الموثوقية — نتيجة 1): EditCaseModal ما كانش عنده
             // أي حماية دبل كليك خالص.
             savingCase,
+            // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 2): نفس آلية
+            // onOpenClient المستخدمة فوق في UniversalSearchModal — بنقفل
+            // تفاصيل القضية الحالية ونفتح تفاصيل الموكل.
+            onOpenClientProfile: (c) => { nav.closeModal('caseDetail'); setSelectedClient(c as MappedClient); setTab('clients'); },
         }),
     );
 }
