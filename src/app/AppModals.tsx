@@ -223,7 +223,16 @@ function AppModals({
             },
             onDelete: handleDeleteCase, onEdit: handleUpdateCase, onLinkClient: handleLinkClient, onUnlinkClient: handleUnlinkClient, onCreateAndLinkClient: handleCreateAndLinkClient,
             // ⚡ NEW (مرحلة 13.1): زرار "إنشاء موكل" لكل طرف عليه ⭐ في تفاصيل القضية.
-            onCreateAndLinkClientForParty: handleOpenCreateClientForCaseParty,
+            // 🔧 FIX (بناء فشل — عدم تطابق تواقيع): CaseDetailView بيستخدم
+            // امضاء مبسّط (caseId, party, isPrimaryParty, onAfterLink) بينما
+            // handleOpenCreateClientForCaseParty من نوع OpenCreateClientForParty
+            // (9 باراميترات مفصّلة) — بنلف هنا بدالة موائمة (adapter) بتفكّك
+            // حقول party (CasePartyRow) لنفس ترتيب باراميترات OpenCreateClientForParty.
+            onCreateAndLinkClientForParty: (caseId, party, isPrimaryParty, onAfterLink) =>
+                handleOpenCreateClientForCaseParty(
+                    party.id, caseId, isPrimaryParty, party.name, party.national_id,
+                    party.power_of_attorney, party.address, undefined, onAfterLink,
+                ),
             onNotify: sendTelegram, profile, country,
             // 🔒 FIX (تقرير الموثوقية — نتيجة 1): EditCaseModal ما كانش عنده
             // أي حماية دبل كليك خالص.
