@@ -179,10 +179,10 @@ export async function movePartiesFromSessionToCase(
   caseTempId: string,
   caseFallbackTitle: string | undefined,
 ): Promise<MovePartiesResult> {
-  // الكاست لـ 'cases' هنا نفس نمط dbFrom() في offlineQueue.ts ونفس
-  // الكاست المستخدم في EditCaseModal.tsx/StandaloneSessionDetailModal.tsx —
-  // case_parties لسه مش موجودة في database.types.ts المولّد.
-  const { data, error } = await db.from('case_parties' as 'cases')
+  // ⚠️ case_parties بقت مضافة في database.types.ts (خطة تعدد الأطراف،
+  // مرحلة 1) — مفيش داعي لكاست 'as cases' هنا تاني (كان قبل كده بديل
+  // مؤقت لحد إضافة الجدول للـ types المولّدة).
+  const { data, error } = await db.from('case_parties')
     .select('id')
     .eq('session_id', sessionId);
   if (error || !data || data.length === 0) return { ok: true };
@@ -285,9 +285,9 @@ export async function fetchSessionClientParties(
   db: SupabaseClient<Database>,
   sessionId: string,
 ): Promise<SessionClientParty[]> {
-  // نفس كاست 'cases' المستخدم في movePartiesFromSessionToCase فوق —
-  // case_parties لسه مش موجودة في database.types.ts المولّد.
-  const { data, error } = await db.from('case_parties' as 'cases')
+  // ⚠️ case_parties بقت مضافة في database.types.ts (خطة تعدد الأطراف،
+  // مرحلة 1) — مفيش داعي لكاست 'as cases' تاني هنا.
+  const { data, error } = await db.from('case_parties')
     .select('id,side,name,national_id,power_of_attorney,address,sort_order')
     .eq('session_id', sessionId)
     .eq('is_client', true)
