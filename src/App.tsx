@@ -32,6 +32,7 @@ import { useTelegramAlerts } from './hooks/useTelegramAlerts';
 import { useCaseActions } from '@/features/cases/hooks/useCaseActions';
 import { useClientActions } from '@/features/clients/hooks/useClientActions';
 import type { ClientModalContext } from '@/features/clients/hooks/useClientActions';
+import type { OpenCreateClientForParty, OpenCreateClientForSessionParty } from '@/features/calendar/hooks/useClientLinking';
 import { useAutoLogout } from './hooks/useAutoLogout';
 import { useAuthProfile } from './hooks/useAuthProfile';
 import { useThemeMode } from './hooks/useThemeMode';
@@ -151,7 +152,7 @@ function App() {
         else   { _setDeleteConfirm(null); }
     }, [nav]);
 
-    const { handleLogout, handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient } = useCaseActions({
+    const { handleLogout, handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleUnlinkClient } = useCaseActions({
         sendTelegram, fetchCases, cases, lawyers, clients, selectedCase,
         setCases, setLawyers, setClients, setProfile, setAuthUser,
         setSelectedCase, setDeleteConfirm, setSavingCase, setShowCaseModal,
@@ -171,6 +172,10 @@ function App() {
     // يعمل INSERT مباشر بحقول ناقصة (اسم + رقم قومي بس).
     const handleOpenCreateClientForCase = useCallback((
         caseId: string, plaintiffName: string, plaintiffNationalId?: string | null, plaintiffPoa?: string | null,
+        // ⚡ NEW (21 يوليو 2026): عنوان الموكل — لو القضية عندها عنوان مسجل
+        // بالفعل (plaintiff_address)، بيتملى تلقائيًا هنا بدل ما يتكتب من
+        // تاني، عشان عنوان الموكل الجديد ميختلفش عن اللي مسجل في القضية.
+        plaintiffAddress?: string | null,
         // ⚡ NEW (Phase 2): لو القضية المستهدفة نفسها لسه معرّف مؤقت أوفلاين
         // (تم إنشاؤها من جلسة مستقلة ولسه ما اتزامنتش) — شوف
         // handleAddAndLinkClient في useClientLinking.ts. فاضي دايمًا لمسار
@@ -182,6 +187,7 @@ function App() {
                 full_name: plaintiffName || '',
                 national_id: plaintiffNationalId || '',
                 cr_number: plaintiffPoa || '',
+                address: plaintiffAddress || '',
             },
             linkTarget: {
                 type: 'case', caseId,
@@ -199,7 +205,50 @@ function App() {
         });
     }, [openNewClientModal, fetchCases, casesPage, casesFilter, fetchClients, clientSearch, setSelectedCase, setCases]);
 
-    // ⚡ NEW (خطة توحيد إنشاء الموكل، Phase 3): زرار "إضافة الموكل لقائمة
+    // ⚡ NEW (خطة تعدد الأطراف، 7.2 جزء 2 بند 2.3 — 23 يوليو 2026): نفس
+    // فكرة handleOpenCreateClientForCase فوق بالظبط، بس لطرف بعينه وسط
+    // wizard "طرف واحد في المرة" (useClientLinking.ts) بدل "الموكل
+    // الأساسي" بس — linkTarget نوعه 'party' (partyId+caseId+isPrimaryParty)
+    // بدل 'case' مباشرة، عشان useClientActions.ts يربط case_parties.client_id
+    // بتاع الطرف ده بس (+ cases.client_id لو الطرف أساسي، عبر linkClientToParty
+    // المشتركة). onAfterLink بتتنادى هنا (جوه onLinked، بعد نجاح الربط
+    // الفعلي) عشان الـ wizard في useClientLinking.ts ينتقل للطرف الجاي —
+    // شوف تعليق OpenCreateClientForParty في useClientLinking.ts لتفاصيل
+    // السبب المعماري.
+    const handleOpenCreateClientForParty: OpenCreateClientForParty = useCallback((
+        partyId, caseId, isPrimaryParty, partyName, partyNationalId, partyPoa, partyAddress,
+        caseOfflineInfo, onAfterLink,
+    ) => {
+        openNewClientModal({
+            initialData: {
+                full_name: partyName || '',
+                national_id: partyNationalId || '',
+                cr_number: partyPoa || '',
+                address: partyAddress || '',
+            },
+            linkTarget: {
+                type: 'party', partyId, caseId, isPrimaryParty,
+                caseIsOfflineTemp: caseOfflineInfo?.isOfflineTemp,
+                caseFallbackTitle: caseOfflineInfo?.fallbackTitle,
+            },
+            contextLabel: 'هيتربط الموكل تلقائيًا بهذا الطرف بعد الحفظ',
+            onLinked: (target, clientId) => {
+                if (target.type !== 'party') return;
+                // ⚡ cases.client_id مبيتحدّثش هنا مباشرة إلا لو الطرف أساسي —
+                // linkClientToParty (المستخدمة جوه handleSaveClient) هي اللي
+                // بتقرر ده فعليًا؛ هنا بس بنعكس نفس القرار في الـ state
+                // المحلي (setCases/setSelectedCase) عشان الواجهة تتحدّث فورًا
+                // من غير استنى fetchCases.
+                if (target.isPrimaryParty) {
+                    setCases((prev) => prev.map((c) => (c.id === target.caseId ? { ...c, client_id: clientId } : c)));
+                    setSelectedCase((prev) => (prev && prev.id === target.caseId ? { ...prev, client_id: clientId } : prev));
+                }
+                fetchCases(casesPage, casesFilter);
+                fetchClients(0, clientSearch);
+                onAfterLink();
+            },
+        });
+    }, [openNewClientModal, fetchCases, casesPage, casesFilter, fetchClients, clientSearch, setSelectedCase, setCases]);
     // الموكلين فقط" (جلسة مستقلة بعد حفظها) بقى بيفتح NewClientModal
     // الكامل — بدل INSERT مباشر بحقلين بس (اسم + رقم قومي)، مليان ببيانات
     // المدعي من الجلسة. لو sessionId فاضي (الجلسة لسه ما اتحفظتش أونلاين)
@@ -220,6 +269,37 @@ function App() {
                 fetchTodaySessions();
                 fetchUpcomingSessions();
                 fetchClients(0, clientSearch);
+            },
+        });
+    }, [openNewClientModal, fetchTodaySessions, fetchUpcomingSessions, fetchClients, clientSearch]);
+
+    // ⚡ NEW (خطة تعدد الأطراف، مرحلة 13 جزء 2 — 23 يوليو 2026): مرآة لـ
+    // handleOpenCreateClientForParty فوق، بس لطرف تابع لجلسة مستقلة لسه
+    // ما اتحوّلتش لقضية (خطوة "idle" في NewStandaloneSessionModal — زرار
+    // "إضافة الموكل لقائمة الموكلين فقط"). linkTarget نوعه 'sessionParty'
+    // (partyId+sessionId+isPrimaryParty) بدل 'party' — عشان useClientActions.ts
+    // يستخدم linkClientToSessionParty (case_parties.client_id + مزامنة
+    // case_sessions.client_id لو الطرف أساسي، مفيش cases.client_id هنا
+    // أصلًا). onAfterLink بتتنادى من useClientLinking.ts (مش wizard — كل
+    // زرار مستقل، بيتشال من idlePartyList لوحده بعد نجاح الربط).
+    const handleOpenCreateClientForSessionPartyOnly: OpenCreateClientForSessionParty = useCallback((
+        partyId, sessionId, isPrimaryParty, partyName, partyNationalId, partyPoa, partyAddress, onAfterLink,
+    ) => {
+        openNewClientModal({
+            initialData: {
+                full_name: partyName || '',
+                national_id: partyNationalId || '',
+                cr_number: partyPoa || '',
+                address: partyAddress || '',
+            },
+            linkTarget: { type: 'sessionParty', partyId, sessionId, isPrimaryParty },
+            contextLabel: 'هيتربط الموكل تلقائيًا بهذا الطرف بعد الحفظ',
+            onLinked: (target) => {
+                if (target.type !== 'sessionParty') return;
+                fetchTodaySessions();
+                fetchUpcomingSessions();
+                fetchClients(0, clientSearch);
+                onAfterLink();
             },
         });
     }, [openNewClientModal, fetchTodaySessions, fetchUpcomingSessions, fetchClients, clientSearch]);
@@ -260,6 +340,9 @@ function App() {
         setTab, setRemindersInitialFilter, setSessionsInitialTab,
         dbOnline, healthErrors, setHealthErrors,
         fetchTodaySessions, fetchUpcomingSessions, fetchMissedSessions,
+        // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 3): زرار "عدّل من ملف
+        // الموكل" جوه EditStandaloneModal — نفس آلية فتح تفاصيل الموكل.
+        onOpenClientProfile: (c) => setSelectedClient(c as MappedClient),
     });
     const CasesTabContent   = React.createElement(CasesTab, {
         cases, casesFilter, setCasesFilter, casesPage, setCasesPage,
@@ -309,6 +392,7 @@ function App() {
                     onClientAdded: () => { fetchClients(0, clientSearch); },
                     initialTab: sessionsInitialTab ?? undefined,
                     nav,
+                    onOpenClientProfile: (c) => setSelectedClient(c as MappedClient),
                 })
             ),
             tab === 'fees' && React.createElement(FeesTab, { cases, clients, showSummaryModal: showFeesSummary, setShowSummaryModal: setShowFeesSummary, country, profile, nav }),
@@ -351,8 +435,15 @@ function App() {
             setCases, setCasesFilter, setCasesPage,
             fetchCases, fetchTodaySessions, fetchUpcomingSessions,
             fetchClients, clientSearch,
-            handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleCreateAndLinkClient: handleOpenCreateClientForCase,
+            handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleUnlinkClient, handleCreateAndLinkClient: handleOpenCreateClientForCase,
             handleOpenCreateClientForSession, handleOpenCreateClientForSessionCase: handleOpenCreateClientForCase,
+            handleOpenCreateClientForSessionParty: handleOpenCreateClientForParty,
+            handleOpenCreateClientForSessionPartyOnly,
+            // ⚡ NEW (خطة تعدد الأطراف، مرحلة 13.1 — 23 يوليو 2026): نفس دالة
+            // handleOpenCreateClientForParty بالظبط، ممرّرة كمان لـ CaseDetailView
+            // (زرار "إنشاء موكل" لكل طرف في تفاصيل القضية، مش بس وسط wizard
+            // الجلسة المستقلة) — شوف AppModals.tsx/InfoSection.tsx.
+            handleOpenCreateClientForCaseParty: handleOpenCreateClientForParty,
             handleSaveClient, handleDeleteClient, handleUpdateClient, handleSaveLawyer,
             sendTelegram,
         }),
