@@ -48,6 +48,9 @@ interface DashboardTabProps {
   fetchTodaySessions: () => void | Promise<void>;
   fetchUpcomingSessions: () => void | Promise<void>;
   fetchMissedSessions: () => void | Promise<void>;
+  // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 3): زرار "✏️ عدّل من
+  // ملف الموكل" جوه EditStandaloneModal (عبر StandaloneSessionDetailModal).
+  onOpenClientProfile?: (client: MappedClient) => void;
 }
 
 function DashboardTab({
@@ -61,6 +64,7 @@ function DashboardTab({
   setTab, setRemindersInitialFilter, setSessionsInitialTab,
   dbOnline, healthErrors, setHealthErrors,
   fetchTodaySessions, fetchUpcomingSessions, fetchMissedSessions,
+  onOpenClientProfile,
 }: DashboardTabProps) {
 
     // ── جلسة مستقلة مفتوحة حالياً (لعرض المودال) ──
@@ -487,6 +491,8 @@ function DashboardTab({
             db,
             onClose: () => setStandaloneTarget(null),
             onDone: () => { refreshAllSessionLists(); },
+            clients,
+            onOpenClientProfile,
         }),
         Dashboard
   );
