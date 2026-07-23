@@ -54,6 +54,11 @@ export interface MappedCase {
     // ⚡ NEW (21 يوليو 2026): عنوان الموكل — نفس نمط plaintiff_national_id
     // فوق، حقل رسمي إضافي بيتسجل من NewCaseModal/EditCaseModal.
     plaintiff_address: string | null;
+    // 🆕 (خطة "المسمى القانوني" — مرحلة 3، 23 يوليو 2026): المسمى الجامع
+    // لكل جهة، بيظهر بس لو الجهة دي فيها شخصان فأكثر (case_parties) —
+    // مخزّن على مستوى القضية نفسها، مش جوه صف طرف بعينه.
+    plaintiff_legal_title: string | null;
+    defendant_legal_title: string | null;
 }
 
 // شكل عنصر الموكل بعد التطبيع في fetchClients — كل حقول ClientRow
@@ -181,6 +186,8 @@ export function useAppData(profile: ProfileRow | null) {
             plaintiff_power_of_attorney: r.plaintiff_power_of_attorney || null,
             defendant_national_id: r.defendant_national_id || null,
             plaintiff_address: r.plaintiff_address || null,
+            plaintiff_legal_title: r.plaintiff_legal_title || null,
+            defendant_legal_title: r.defendant_legal_title || null,
         }));
 
         if (page === 0) setCases(mapped);
@@ -266,6 +273,8 @@ export function useAppData(profile: ProfileRow | null) {
             plaintiff_power_of_attorney: r.plaintiff_power_of_attorney || null,
             defendant_national_id: r.defendant_national_id || null,
             plaintiff_address: r.plaintiff_address || null,
+            plaintiff_legal_title: r.plaintiff_legal_title || null,
+            defendant_legal_title: r.defendant_legal_title || null,
         }));
 
         setCases(mapped);
