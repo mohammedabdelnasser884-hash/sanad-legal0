@@ -6,6 +6,7 @@ import { safeUpdate, logActivity } from '../../../shared/lib/dataAccess';
 import { callAdminAction, db } from '../../../supabaseClient';
 import { getCurrentTenantId } from '../../../constants';
 import { showErrorToast } from '../../../shared/lib/errorReporting';
+import { linkClientToParty, linkClientToSessionParty } from '../../calendar/hooks/caseSessionLinkingShared';
 import type { Dispatch, SetStateAction } from 'react';
 import type { ClientRow, ProfileRow } from '../../../types';
 import type { NavigationState } from '../../../useNavigation';
@@ -43,9 +44,26 @@ export interface ClientFormData {
 // _offlineSelfFallbackName المستخدم في handleLinkExistingClient/
 // handleAddAndLinkClient الأصليين (useClientLinking.ts). مش لازمين لمسار
 // Phase 1 (قضية محفوظة بالفعل ليها id حقيقي دايمًا).
+// ⚡ NEW (خطة تعدد الأطراف، 7.2 جزء 2 — 23 يوليو 2026): هدف ربط جديد
+// 'party' — لما NewClientModal بيتفتح لطرف بعينه (is_client=true) في
+// wizard useClientLinking.ts/useSessionLinking.ts، بدل ما نربط
+// cases.client_id مباشرة زي هدف 'case' العادي. partyId هو صف case_parties
+// المستهدف (id حقيقي دايمًا — الطرف أصلاً موجود في القاعدة قبل فتح
+// الموديل)، وisPrimaryParty بتحدد هل نحدّث cases.client_id القديم كمان
+// (نفس منطق linkClientToParty في caseSessionLinkingShared.ts). caseId/
+// caseIsOfflineTemp/caseFallbackTitle بنفس معنى هدف 'case' (القضية اللي
+// الطرف تابع لها ممكن لسه تكون تمبيد أوفلاين).
+// ⚡ NEW (خطة تعدد الأطراف، مرحلة 13 جزء 2 — 23 يوليو 2026): هدف ربط
+// جديد 'sessionParty' — مرآة لهدف 'party' فوق، بس لطرف تابع لجلسة
+// مستقلة *لسه ما اتحوّلتش لقضية* (زرار "إضافة الموكل لقائمة الموكلين
+// فقط" في NewStandaloneSessionModal.tsx). sessionId بدل caseId — لا يوجد
+// cases.client_id يتحدّث هنا، المزامنة القديمة (لو الطرف أساسي) بتروح
+// لـ case_sessions.client_id بدل كده (شوف linkClientToSessionParty).
 export type ClientLinkTarget =
     | { type: 'case'; caseId: string; caseIsOfflineTemp?: boolean; caseFallbackTitle?: string }
-    | { type: 'session'; sessionId: string };
+    | { type: 'session'; sessionId: string }
+    | { type: 'party'; partyId: string; caseId: string; isPrimaryParty: boolean; caseIsOfflineTemp?: boolean; caseFallbackTitle?: string }
+    | { type: 'sessionParty'; partyId: string; sessionId: string; isPrimaryParty: boolean };
 
 // ⚡ NEW: كل حاجة محتاجها فتح NewClientModal بسياق (بيانات مبدئية + هدف
 // الربط + تسمية توضيحية + كول-باك تحديث بعد نجاح الربط) — بتتخزن كـ state
@@ -225,7 +243,51 @@ export function useClientActions(params: {
         if (clientLinkTarget) {
             const isOfflineTemp = offline && queued;
             const linkedClientId = isOfflineTemp ? offlineTempId : (insertedClient as { id: string } | null)?.id;
-            if (linkedClientId) {
+            // ⚡ NEW (7.2 جزء 2): هدف 'party' — بيستخدم linkClientToParty
+            // المشتركة (case_parties.client_id + cases.client_id لو الطرف
+            // أساسي) بدل مسار table/targetId العادي تحت (اللي معملوش لـ
+            // case_parties أصلاً). فرع مستقل عشان مفيش داعي نلوي منطق
+            // 'case'/'session' الموجود من أجل حالة تالتة مختلفة معماريًا.
+            if (linkedClientId && clientLinkTarget.type === 'party') {
+                const caseTitleForSentinel = clientLinkTarget.caseIsOfflineTemp ? clientLinkTarget.caseFallbackTitle : undefined;
+                const result = await linkClientToParty(
+                    clientLinkTarget.partyId, linkedClientId, clientLinkTarget.isPrimaryParty,
+                    clientLinkTarget.caseId, caseTitleForSentinel,
+                    isOfflineTemp ? { isTempClientId: true, tempClientId: offlineTempId, fallbackNameValue: form.full_name } : undefined,
+                );
+                if (!result.ok) {
+                    showErrorToast('client_auto_link', new Error('party link failed'), 'تم حفظ الموكل لكن تعذّر ربطه بالطرف تلقائيًا — استخدم زرار "🔗 ربط" لربطه يدويًا.', 'ربط الموكل تلقائيًا');
+                } else {
+                    logActivity(db, 'ربط طرف بموكل', {
+                        userName: _userName,
+                        entity_type: 'case',
+                        entity_id: clientLinkTarget.caseId,
+                        client_name: form.full_name || null,
+                    });
+                    onClientLinked?.(clientLinkTarget, linkedClientId);
+                }
+            } else if (linkedClientId && clientLinkTarget.type === 'sessionParty') {
+                // ⚡ NEW (خطة تعدد الأطراف، مرحلة 13 جزء 2 — 23 يوليو 2026):
+                // نفس فرع 'party' فوق بالظبط بس بـ linkClientToSessionParty
+                // (case_parties.client_id + case_sessions.client_id لو الطرف
+                // أساسي بس، مفيش cases.client_id هنا أصلًا — مفيش قضية لسه).
+                const result = await linkClientToSessionParty(
+                    clientLinkTarget.partyId, linkedClientId, clientLinkTarget.isPrimaryParty,
+                    clientLinkTarget.sessionId,
+                    isOfflineTemp ? { isTempClientId: true, tempClientId: offlineTempId, fallbackNameValue: form.full_name } : undefined,
+                );
+                if (!result.ok) {
+                    showErrorToast('client_auto_link', new Error('session party link failed'), 'تم حفظ الموكل لكن تعذّر ربطه بالطرف تلقائيًا — استخدم زرار "🔗 ربط" لربطه يدويًا.', 'ربط الموكل تلقائيًا');
+                } else {
+                    logActivity(db, 'ربط طرف بموكل', {
+                        userName: _userName,
+                        entity_type: 'session',
+                        entity_id: clientLinkTarget.sessionId,
+                        client_name: form.full_name || null,
+                    });
+                    onClientLinked?.(clientLinkTarget, linkedClientId);
+                }
+            } else if (linkedClientId && clientLinkTarget.type !== 'party' && clientLinkTarget.type !== 'sessionParty') {
                 const table = clientLinkTarget.type === 'case' ? 'cases' : 'case_sessions';
                 const targetId = clientLinkTarget.type === 'case' ? clientLinkTarget.caseId : clientLinkTarget.sessionId;
                 // ⚡ NEW (Phase 2): لو القضية المستهدفة نفسها لسه تمبيد أوفلاين
