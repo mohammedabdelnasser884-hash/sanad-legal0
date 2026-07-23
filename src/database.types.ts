@@ -414,6 +414,8 @@ export interface Database {
           circuit_number: string | null
           plaintiff_role: string | null
           defendant_role: string | null
+          plaintiff_legal_title: string | null
+          defendant_legal_title: string | null
           court_level: string | null
           secretary_hall: string | null
           secretary_name: string | null
@@ -445,6 +447,8 @@ export interface Database {
           circuit_number?: string | null
           plaintiff_role?: string | null
           defendant_role?: string | null
+          plaintiff_legal_title?: string | null
+          defendant_legal_title?: string | null
           court_level?: string | null
           secretary_hall?: string | null
           secretary_name?: string | null
@@ -476,6 +480,8 @@ export interface Database {
           circuit_number?: string | null
           plaintiff_role?: string | null
           defendant_role?: string | null
+          plaintiff_legal_title?: string | null
+          defendant_legal_title?: string | null
           court_level?: string | null
           secretary_hall?: string | null
           secretary_name?: string | null
@@ -514,6 +520,8 @@ export interface Database {
           plaintiff_role: string | null
           defendant: string | null
           defendant_role: string | null
+          plaintiff_legal_title: string | null
+          defendant_legal_title: string | null
           next_hearing: string | null
           court_floor: string | null
           court_hall: string | null
@@ -550,6 +558,8 @@ export interface Database {
           plaintiff_role?: string | null
           defendant?: string | null
           defendant_role?: string | null
+          plaintiff_legal_title?: string | null
+          defendant_legal_title?: string | null
           next_hearing?: string | null
           court_floor?: string | null
           court_hall?: string | null
@@ -586,6 +596,8 @@ export interface Database {
           plaintiff_role?: string | null
           defendant?: string | null
           defendant_role?: string | null
+          plaintiff_legal_title?: string | null
+          defendant_legal_title?: string | null
           next_hearing?: string | null
           court_floor?: string | null
           court_hall?: string | null
