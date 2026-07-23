@@ -51,6 +51,9 @@ export interface MappedCase {
     plaintiff_national_id: string | null;
     plaintiff_power_of_attorney: string | null;
     defendant_national_id: string | null;
+    // ⚡ NEW (21 يوليو 2026): عنوان الموكل — نفس نمط plaintiff_national_id
+    // فوق، حقل رسمي إضافي بيتسجل من NewCaseModal/EditCaseModal.
+    plaintiff_address: string | null;
 }
 
 // شكل عنصر الموكل بعد التطبيع في fetchClients — كل حقول ClientRow
@@ -177,6 +180,7 @@ export function useAppData(profile: ProfileRow | null) {
             plaintiff_national_id: r.plaintiff_national_id || null,
             plaintiff_power_of_attorney: r.plaintiff_power_of_attorney || null,
             defendant_national_id: r.defendant_national_id || null,
+            plaintiff_address: r.plaintiff_address || null,
         }));
 
         if (page === 0) setCases(mapped);
@@ -261,6 +265,7 @@ export function useAppData(profile: ProfileRow | null) {
             plaintiff_national_id: r.plaintiff_national_id || null,
             plaintiff_power_of_attorney: r.plaintiff_power_of_attorney || null,
             defendant_national_id: r.defendant_national_id || null,
+            plaintiff_address: r.plaintiff_address || null,
         }));
 
         setCases(mapped);
