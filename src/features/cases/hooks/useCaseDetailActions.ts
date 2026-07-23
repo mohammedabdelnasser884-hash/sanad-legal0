@@ -9,6 +9,7 @@ import { loadOfficeSetting } from '../../../constants';
 import { formatArDate } from '../../../shared/ui/arabicLocale';
 import type { ClientRow, ProfileRow, CaseNoteRow } from '../../../types';
 import type { MappedCase } from '../../../hooks/useAppData';
+import type { PartySide } from '@/shared/parties/partyTypes';
 import { useCaseSessions } from './useCaseSessions';
 import { useCaseDocuments } from './useCaseDocuments';
 import type { CaseDocWithUrl } from './useCaseDocuments';
@@ -17,6 +18,25 @@ import type { CaseDocWithUrl } from './useCaseDocuments';
 // './hooks/useCaseDetailActions' (زي DocsSection.tsx وInfoSection.tsx)
 // يفضل شغال من غير أي تعديل في مسار الاستيراد.
 export type { CaseDocWithUrl };
+
+// ⚡ NEW (خطة تعدد الأطراف، مرحلة 8 — 23 يوليو 2026): شكل صف case_parties
+// كما بيرجع من الداتابيز — نفس تعريف CasePartyRow الموجود بالفعل (منسوخ)
+// في EditCaseModal.tsx وStandaloneSessionDetailModal.tsx (case_parties لسه
+// مش موجودة في database.types.ts، فمفيش طريقة نولّد بيها الأنواع من هنا).
+// مُصدّرة من هنا عشان InfoSection.tsx يستخدمها للعرض بدل ما تتكرر نسخة
+// تالتة من نفس التعريف.
+export interface CasePartyRow {
+    id: string;
+    side: PartySide;
+    is_client: boolean;
+    name: string;
+    capacity: string;
+    national_id: string | null;
+    address: string | null;
+    power_of_attorney: string | null;
+    client_id: string | null;
+    sort_order: number;
+}
 
 export function useCaseDetailActions(
   caseData: MappedCase,
@@ -37,6 +57,13 @@ export function useCaseDetailActions(
 
   const [notes, setNotes] = useState<CaseNoteRow[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(true);
+  // ⚡ NEW (خطة تعدد الأطراف، مرحلة 8): كل صفوف case_parties الخاصة
+  // بالقضية دي (case_id = caseData.id)، مرتبة بـ sort_order — بتتعرض في
+  // InfoSection.tsx بدل عمودي plaintiff/defendant القديمين لو موجودة.
+  // القضايا القديمة (قبل مرحلة 4، أو لسه معملهاش تعديل بالفورم الجديد)
+  // هترجع array فاضية، وInfoSection بيرجع لعرض الأعمدة القديمة (fallback
+  // كامل، صفر تغيير سلوك).
+  const [caseParties, setCaseParties] = useState<CasePartyRow[]>([]);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingNoteText, setEditingNoteText] = useState('');
   const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
@@ -76,6 +103,15 @@ export function useCaseDetailActions(
       file_url: await resolveStorageUrl('case-docs', d.storage_path || d.file_url),
     })));
     setDocs(ddWithUrls);
+    // ⚡ NEW (مرحلة 8): نفس نمط EditCaseModal.tsx بالظبط (كاست 'cases' لأن
+    // case_parties لسه مش موجودة في database.types.ts). فشل الاستعلام
+    // (مشكلة اتصال) بيرجّع array فاضية بدل ما يمنع تحميل باقي التاب —
+    // InfoSection.tsx هيرجع لعرض الأعمدة القديمة تلقائيًا في الحالة دي.
+    const { data: pd, error: partiesErr } = await db.from('case_parties' as 'cases')
+      .select('*')
+      .eq('case_id', caseData.id)
+      .order('sort_order', { ascending: true });
+    setCaseParties(partiesErr ? [] : ((pd as unknown as CasePartyRow[]) || []));
     setLoadingSessions(false);
   }, [caseData.id, setSessions, setDocs]);
 
@@ -154,6 +190,25 @@ export function useCaseDetailActions(
     const safeDefendantName = escapeHtml(defendantParty?.name || '');
     const safeDefendantLabel = escapeHtml(defendantParty?.capacity || 'المدعى عليه / المطعون ضده');
 
+    // ⚡ NEW (خطة تعدد الأطراف، مرحلة 10 — 23 يوليو 2026): لو القضية عندها
+    // صفوف case_parties (جاية بالفعل من fetchSessions فوق، مرحلة 8)، بنعرض
+    // كل الأطراف (كل مدعي/مدعى عليه بصفته وعلامة "— موكل" لو is_client) في
+    // قسم مستقل بدل حقلي plaintiffParty/defendantParty المفردين في الهيدر —
+    // نفس منطق التبويب/التصفية المستخدم في InfoSection.tsx (مرحلة 8) بالحرف.
+    // لو caseParties فاضية (قضية قديمة قبل مرحلة 4، أو لسه معملهاش تعديل
+    // بالفورم الجديد)، hasCaseParties بتبقى false وهنرجع بالكامل لعرض
+    // plaintiffParty/defendantParty القديم في header-fields — صفر تغيير
+    // سلوك في المسار القديم.
+    const safeCaseParties = caseParties.map((p) => ({
+        side: p.side,
+        isClient: !!p.is_client,
+        name: escapeHtml(p.name || ''),
+        capacity: escapeHtml(p.capacity || (p.side === 'plaintiff' ? 'المدعي / الطاعن' : 'المدعى عليه / المطعون ضده')),
+    }));
+    const partyPlaintiffs = safeCaseParties.filter((p) => p.side === 'plaintiff');
+    const partyDefendants = safeCaseParties.filter((p) => p.side === 'defendant');
+    const hasCaseParties = safeCaseParties.length > 0;
+
     // ⚡ FIX (19 يوليو 2026): بيانات الجلسة/السكرتير كانت بتتحفظ في القضية
     // بس مكانتش بتظهر في تقرير PDF خالص — بنضيفها كقسم مستقل تحت الهيدر.
     const safeSessionTimeLabel = caseData.session_time === 'صباحي' ? '🌅 صباحي' : caseData.session_time === 'مسائي' ? '🌆 مسائي' : '';
@@ -231,11 +286,20 @@ ${PDF_FONT_LINK}
       <div class="header-field"><label>نوع القضية</label><span>${safeCaseType}</span></div>
       <div class="header-field"><label>المحكمة</label><span>${safeCaseCourt}</span></div>
       <div class="header-field"><label>الموكل</label><span>${safeClientName}</span></div>
-      ${plaintiffParty ? `<div class="header-field"><label>${safePlaintiffLabel}</label><span>${safePlaintiffName}</span></div>` : ''}
-      ${defendantParty ? `<div class="header-field"><label>${safeDefendantLabel}</label><span>${safeDefendantName}</span></div>` : ''}
+      ${!hasCaseParties && plaintiffParty ? `<div class="header-field"><label>${safePlaintiffLabel}</label><span>${safePlaintiffName}</span></div>` : ''}
+      ${!hasCaseParties && defendantParty ? `<div class="header-field"><label>${safeDefendantLabel}</label><span>${safeDefendantName}</span></div>` : ''}
     </div>
   </div>
   <div class="gold-bar"></div>
+
+  ${hasCaseParties ? `
+  <div class="section">
+    <h2>⚖️ أطراف الدعوى</h2>
+    <div class="grid2">
+      ${partyPlaintiffs.map((p) => `<div class="field"><label>${p.capacity}${p.isClient ? ' — موكل' : ''}</label><span>${p.name}</span></div>`).join('')}
+      ${partyDefendants.map((p) => `<div class="field"><label>${p.capacity}${p.isClient ? ' — موكل' : ''}</label><span>${p.name}</span></div>`).join('')}
+    </div>
+  </div>` : ''}
 
   ${hasExtraInfo ? `
   <div class="section">
@@ -418,6 +482,8 @@ ${PDF_FONT_LINK}
     // ملاحظات + حالة القضية + عام (زي ما هو في الملف ده)
     notes, setNotes,
     loadingSessions,
+    // ⚡ NEW (مرحلة 8): أطراف القضية الكاملة من case_parties.
+    caseParties,
     editingNoteId, setEditingNoteId, editingNoteText, setEditingNoteText,
     deletingNoteId, setDeletingNoteId,
     showAddNote, setShowAddNote,
