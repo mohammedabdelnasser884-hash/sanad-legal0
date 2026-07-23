@@ -45,6 +45,11 @@ export interface CaseFormSubmitData {
     defendant_national_id?: string;
     // ⚡ NEW (21 يوليو 2026): عنوان الموكل — راجع NewCaseModal/EditCaseModal.
     plaintiff_address?: string;
+    // 🆕 (خطة "المسمى القانوني" — مرحلة 3، 23 يوليو 2026): المسمى الجامع
+    // لكل جهة (usePartyFields().legalTitles) — بيوصل فاضي ('') من الفورم
+    // لو الجهة فيها شخص واحد بس (نفس افتراضي validateParties).
+    plaintiff_legal_title?: string;
+    defendant_legal_title?: string;
     // ⚡ NEW (مرحلة 4.2 — خطة تعدد الأطراف، 22 يوليو 2026): array أطراف
     // الدعوى الكامل (usePartyFields().parties) — لو موجودة، handleSaveCase
     // بيكتب صف في case_parties لكل طرف (بالإضافة لمزامنة الأعمدة القديمة
@@ -182,6 +187,8 @@ export function useCaseActions(params: {
             plaintiff_power_of_attorney: form.plaintiff_power_of_attorney || null,
             defendant_national_id: form.defendant_national_id || null,
             plaintiff_address: form.plaintiff_address || null,
+            plaintiff_legal_title: form.plaintiff_legal_title || null,
+            defendant_legal_title: form.defendant_legal_title || null,
             // 🔒 FIX (تقرير الموثوقية — نتيجة 3، ٦.٢): تحسين احتياطي —
             // التريجر trg_tenant_id_cases (set_tenant_id_from_profile) بيملّ
             // tenant_id تلقائيًا من current_tenant_id() لو الحقل جاي فاضي،
@@ -216,7 +223,14 @@ export function useCaseActions(params: {
             // مستقبلًا (أو state الفورم اتلاعب فيه برمجيًا قبل onSave)، بنرفض
             // كتابة أي صف بدل ما نسيب بيانات غير صالحة توصل case_parties —
             // ومفيش أي INSERT بيتبعت خالص لو الفحص فشل (رفض كامل قبل أول نداء).
-            const serverCheck = validateParties(parties);
+            // 🆕 (خطة "المسمى القانوني" — مرحلة 3): بنبعت legalTitles من
+            // form هنا كمان، وإلا الفحص السيرفري مش هيطبّق قاعدة 6 (إلزامية
+            // المسمى القانوني عند ≥٢ أشخاص) خالص، حتى لو فورم الحفظ نفسه
+            // بيطبّقها (فاليديشن الفورم بس مش كافي — نفس فلسفة باقي القواعد).
+            const serverCheck = validateParties(parties, {
+                plaintiff: form.plaintiff_legal_title || '',
+                defendant: form.defendant_legal_title || '',
+            });
             if (!serverCheck.valid) {
                 return { ok: false, reason: 'validation', message: serverCheck.message || '⚠️ بيانات أطراف الدعوى غير مكتملة أو غير صحيحة' };
             }
@@ -514,7 +528,11 @@ export function useCaseActions(params: {
             const syncCaseParties = async (targetCaseId: string): Promise<SyncPartiesResult> => {
                 const parties = form.parties;
                 if (!parties) return { ok: true };
-                const serverCheck = validateParties(parties);
+                // 🆕 (خطة "المسمى القانوني" — مرحلة 3): نفس منطق insertCaseParties فوق.
+                const serverCheck = validateParties(parties, {
+                    plaintiff: form.plaintiff_legal_title || '',
+                    defendant: form.defendant_legal_title || '',
+                });
                 if (!serverCheck.valid) {
                     return { ok: false, reason: 'validation', message: serverCheck.message || '⚠️ بيانات أطراف الدعوى غير مكتملة أو غير صحيحة' };
                 }
@@ -575,6 +593,8 @@ export function useCaseActions(params: {
                 plaintiff_power_of_attorney: form.plaintiff_power_of_attorney || null,
                 defendant_national_id: form.defendant_national_id || null,
                 plaintiff_address: form.plaintiff_address || null,
+                plaintiff_legal_title: form.plaintiff_legal_title || null,
+                defendant_legal_title: form.defendant_legal_title || null,
             };
             // FIX: Optimistic Locking لتعديل القضايا — كان `updated_at` بيتجاب
             // ويتخزّن في الـ state (شوف useAppData.ts) خصيصًا للاستخدام هنا، بس
