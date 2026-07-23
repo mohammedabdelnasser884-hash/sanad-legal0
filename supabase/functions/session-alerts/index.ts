@@ -78,7 +78,16 @@ const sendTgChunked = async (token: string, chat: string, header: string, items:
   }
 };
 
-const SESSION_COLS = "session_date, description, result, title, case_number, court, plaintiff, defendant, case_id, tenant_id";
+const SESSION_COLS = "session_date, description, result, title, case_number, court, plaintiff, defendant, plaintiff_role, defendant_role, case_id, tenant_id";
+
+// ⚡ NEW (مرحلة 8 من خطة تطوير أطراف الدعوى — 24 يوليو 2026): شكل بيانات
+// شخص واحد داخل جهة (مدعي/مدعى عليه)، بما فيها صفته الفعلية الفردية —
+// مستخدمة في derivePartyHeaderLabel/buildPartyLines تحت.
+interface PartyLabel {
+  name: string;
+  capacity: string;
+  isClient: boolean;
+}
 
 // ⚡ NEW (خطة تعدد الأطراف، مرحلة 11 — 23 يوليو 2026): جلب كل أطراف الدعوى
 // (مش بس الطرف الأساسي المخزّن كـ cache في عمودي plaintiff/defendant) لقايمة
@@ -86,46 +95,92 @@ const SESSION_COLS = "session_date, description, result, title, case_number, cou
 // (مدعي/مدعى عليه) — case_parties (side, name, is_client) مؤكَّدة فعليًا من
 // مراحل سابقة من نفس الخطة (migration مرحلة 1). لو `caseIds` فاضية (كل
 // الجلسات جلسات مستقلة من غير قضية)، بنرجع object فاضي من غير أي نداء DB.
+//
+// ⚡ NEW (خطة تطوير أطراف الدعوى، مرحلة 8 — 24 يوليو 2026): إضافة `capacity`
+// (الصفة الفعلية لكل شخص — مدعٍ/مستأنف/طاعن/متهم...) للـselect، عشان
+// buildPartyLines يقدر يعرض الصفة الحقيقية لكل طرف بدل عنواني "المدعي/
+// المدعى عليه" الثابتين اللي كانا بيتعرضوا حتى في دعاوى الاستئناف/الطعن.
 const fetchPartiesByCaseId = async (
   caseIds: any[]
-): Promise<Record<string, { plaintiffs: string[]; defendants: string[] }>> => {
-  const result: Record<string, { plaintiffs: string[]; defendants: string[] }> = {};
+): Promise<Record<string, { plaintiffs: PartyLabel[]; defendants: PartyLabel[] }>> => {
+  const result: Record<string, { plaintiffs: PartyLabel[]; defendants: PartyLabel[] }> = {};
   if (caseIds.length === 0) return result;
   const { data: parties } = await supabase
     .from("case_parties")
-    .select("case_id, side, name, is_client")
+    .select("case_id, side, name, capacity, is_client")
     .in("case_id", caseIds)
     .order("sort_order", { ascending: true });
   (parties || []).forEach((p: any) => {
     if (!p.case_id || !p.name) return;
     if (!result[p.case_id]) result[p.case_id] = { plaintiffs: [], defendants: [] };
-    const label = p.is_client ? `${p.name} (موكل)` : p.name;
-    if (p.side === "plaintiff") result[p.case_id].plaintiffs.push(label);
-    else if (p.side === "defendant") result[p.case_id].defendants.push(label);
+    const entry: PartyLabel = { name: p.name, capacity: (p.capacity || "").trim(), isClient: !!p.is_client };
+    if (p.side === "plaintiff") result[p.case_id].plaintiffs.push(entry);
+    else if (p.side === "defendant") result[p.case_id].defendants.push(entry);
   });
   return result;
 };
 
-// ⚡ NEW (مرحلة 11): بناء سطري "🟢 المدعي"/"🔴 المدعى عليه" في رسالة تيليجرام.
+// ⚡ NEW (مرحلة 8 من خطة تطوير أطراف الدعوى): بناء عنوان الجهة (بدل "المدعي"/
+// "المدعى عليه" الثابتين) من الصفات الفعلية المسجّلة لأشخاص هذه الجهة:
+//   - لو كل الأشخاص المسمّاة صفتهم متطابقة (الحالة الغالبة)، بتُستخدم هي
+//     نفسها كعنوان (مثلاً "المستأنف" بدل "المدعي" في دعوى استئناف).
+//   - لو الصفات مختلفة فعليًا بين أشخاص نفس الجهة (حالة نادرة، زي قاصر وسط
+//     ورثة)، بيُستخدم العنوان الافتراضي (`defaultLabel`) كعنوان عام للجهة،
+//     وتفضل صفة كل شخص معروضة بجانب اسمه في القائمة (فرع buildPartyLines).
+//   - لو مفيش أي صفة مسجّلة خالص، يُستخدم العنوان الافتراضي.
+const derivePartyHeaderLabel = (persons: PartyLabel[], defaultLabel: string): string => {
+  const capacities = [...new Set(persons.map((p) => p.capacity).filter(Boolean))];
+  return capacities.length === 1 ? capacities[0] : defaultLabel;
+};
+
+// ⚡ NEW (مرحلة 11): بناء سطري عرض الأطراف في رسالة تيليجرام.
 // لو فيه أطراف متعددة مسجّلة فعليًا في case_parties لنفس القضية (partiesByCaseId)،
 // بنعرضهم كلهم مفصولين بفاصلة عربي ("، ") بدل طرف واحد بس. لو مفيش (قضية قديمة
 // قبل مرحلة 4/6، أو جلسة مستقلة معندهاش case_id بعد)، بنرجع لعرض الطرف الأساسي
-// المفرد (fallbackPlaintiff/fallbackDefendant) بالظبط زي ما كان — صفر تغيير
-// سلوك في المسار القديم.
+// المفرد (fallbackPlaintiff/fallbackDefendant).
+//
+// ⚡ FIX (خطة تطوير أطراف الدعوى، مرحلة 8 — 24 يوليو 2026): كان عنوان كل جهة
+// ثابت حرفيًا ("🟢 المدعي:"/"🔴 المدعى عليه:") مهما كانت صفة الطرف الفعلية —
+// فكانت الرسالة بتفضل تقول "المدعي/المدعى عليه" حتى في دعاوى الاستئناف أو
+// الطعن. دلوقتي: العنوان بيُشتق من الصفة الفعلية (`derivePartyHeaderLabel`
+// لصفوف case_parties، أو `fallbackPlaintiffRole`/`fallbackDefendantRole` —
+// عمودا plaintiff_role/defendant_role الموجودان فعلًا في cases/case_sessions
+// — للمسار القديم)، مع رجوع للعنوان الافتراضي "مدعي"/"مدعى عليه" بس لو مفيش
+// أي صفة مسجّلة خالص (زي ما كان بالظبط قبل هذا التعديل).
 const buildPartyLines = (
   caseId: string | null | undefined,
-  partiesByCaseId: Record<string, { plaintiffs: string[]; defendants: string[] }>,
+  partiesByCaseId: Record<string, { plaintiffs: PartyLabel[]; defendants: PartyLabel[] }>,
   fallbackPlaintiff: string | null | undefined,
-  fallbackDefendant: string | null | undefined
+  fallbackDefendant: string | null | undefined,
+  fallbackPlaintiffRole: string | null | undefined,
+  fallbackDefendantRole: string | null | undefined
 ): string => {
   const parties = caseId ? partiesByCaseId[caseId] : undefined;
   let out = "";
   if (parties && (parties.plaintiffs.length > 0 || parties.defendants.length > 0)) {
-    if (parties.plaintiffs.length > 0) out += `   🟢 المدعي: ${parties.plaintiffs.join("، ")}\n`;
-    if (parties.defendants.length > 0) out += `   🔴 المدعى عليه: ${parties.defendants.join("، ")}\n`;
+    const buildSide = (persons: PartyLabel[], defaultLabel: string): string => {
+      if (persons.length === 0) return "";
+      const headerLabel = derivePartyHeaderLabel(persons, defaultLabel);
+      // لو الصفات مختلفة فعليًا بين الأشخاص، نوضّح صفة كل شخص جنب اسمه
+      // (بدل ما تختفي المعلومة بسبب استخدام العنوان الافتراضي العام).
+      const showPerPersonCapacity = new Set(persons.map((p) => p.capacity).filter(Boolean)).size > 1;
+      const names = persons.map((p) => {
+        let label = p.name;
+        if (showPerPersonCapacity && p.capacity) label += ` (${p.capacity})`;
+        if (p.isClient) label += " (موكل)";
+        return label;
+      });
+      return `${headerLabel}: ${names.join("، ")}\n`;
+    };
+    const plaintiffLine = buildSide(parties.plaintiffs, "المدعي");
+    const defendantLine = buildSide(parties.defendants, "المدعى عليه");
+    if (plaintiffLine) out += `   🟢 ${plaintiffLine}`;
+    if (defendantLine) out += `   🔴 ${defendantLine}`;
   } else {
-    if (fallbackPlaintiff) out += `   🟢 المدعي: ${fallbackPlaintiff}\n`;
-    if (fallbackDefendant) out += `   🔴 المدعى عليه: ${fallbackDefendant}\n`;
+    const plaintiffLabel = (fallbackPlaintiffRole || "").trim() || "المدعي";
+    const defendantLabel = (fallbackDefendantRole || "").trim() || "المدعى عليه";
+    if (fallbackPlaintiff) out += `   🟢 ${plaintiffLabel}: ${fallbackPlaintiff}\n`;
+    if (fallbackDefendant) out += `   🔴 ${defendantLabel}: ${fallbackDefendant}\n`;
   }
   return out;
 };
@@ -143,7 +198,7 @@ const sendSessionAlert = async (token: string, chat: string, sessions: any[], la
   if (missingCaseIds.length > 0) {
     const { data: fallbackCases } = await supabase
       .from("cases")
-      .select("id, title, case_number_official, court_name, plaintiff, defendant")
+      .select("id, title, case_number_official, court_name, plaintiff, defendant, plaintiff_role, defendant_role")
       .in("id", missingCaseIds);
     (fallbackCases || []).forEach((c: any) => { fallbackById[c.id] = c; });
   }
@@ -159,12 +214,14 @@ const sendSessionAlert = async (token: string, chat: string, sessions: any[], la
     const court      = s.court || fb.court_name;
     const plaintiff  = s.plaintiff || fb.plaintiff;
     const defendant  = s.defendant || fb.defendant;
+    const plaintiffRole = s.plaintiff_role || fb.plaintiff_role;
+    const defendantRole = s.defendant_role || fb.defendant_role;
 
     let item = `${i + 1}. ⚖️ <b>${title || "—"}</b>\n`;
     item += `   📋 رقم القيد: ${caseNumber || "—"}\n`;
     item += `   🏛 المحكمة: ${court || "—"}\n`;
     item += `   📆 تاريخ الجلسة: ${s.session_date}\n`;
-    item += buildPartyLines(s.case_id, partiesByCaseId, plaintiff, defendant);
+    item += buildPartyLines(s.case_id, partiesByCaseId, plaintiff, defendant, plaintiffRole, defendantRole);
     if (s.description)  item += `   📝 ${s.description}\n`;
     item += "\n";
     return item;
@@ -362,7 +419,7 @@ const runForTenant = async (office: any, type: string) => {
     if (missingCaseIds.length > 0) {
       const { data: fallbackCases } = await supabase
         .from("cases")
-        .select("id, title, case_number_official, court_name, plaintiff, defendant")
+        .select("id, title, case_number_official, court_name, plaintiff, defendant, plaintiff_role, defendant_role")
         .in("id", missingCaseIds);
       (fallbackCases || []).forEach((c: any) => { fallbackById[c.id] = c; });
     }
@@ -380,11 +437,13 @@ const runForTenant = async (office: any, type: string) => {
         const court       = s.court || fb.court_name;
         const plaintiff   = s.plaintiff || fb.plaintiff;
         const defendant   = s.defendant || fb.defendant;
+        const plaintiffRole = s.plaintiff_role || fb.plaintiff_role;
+        const defendantRole = s.defendant_role || fb.defendant_role;
 
         let item = `${i + 1}. ⚖️ <b>${title || "—"}</b>\n`;
         item += `   📋 رقم القيد: ${caseNumber || "—"}\n`;
         item += `   🏛 المحكمة: ${court || "—"}\n`;
-        item += buildPartyLines(s.case_id, overduePartiesByCaseId, plaintiff, defendant);
+        item += buildPartyLines(s.case_id, overduePartiesByCaseId, plaintiff, defendant, plaintiffRole, defendantRole);
         if (s.description)  item += `   📝 ${s.description}\n`;
         item += `   📆 تاريخ الجلسة: ${s.session_date}\n\n`;
         return item;
