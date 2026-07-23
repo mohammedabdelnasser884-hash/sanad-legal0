@@ -99,6 +99,13 @@ export interface CaseInsertSourceFields {
   secretaryHall?: string | null;
   secretaryName?: string | null;
   secretaryMobile?: string | null;
+  // 🆕 (خطة "المسمى القانوني" — بند مؤجل، راجع "بنود مؤجلة للمراجعة" في
+  // التقرير): المسمى الجامع للطرف (لو أكتر من شخص) — كان مفقود هنا قبل
+  // كده، فمكنش بيتنقل للقضية الجديدة وقت تحويل جلسة مستقلة رغم إن كل
+  // الأشخاص أنفسهم (case_parties) كانوا بينتقلوا صح عبر
+  // movePartiesFromSessionToCase تحت.
+  plaintiffLegalTitle?: string | null;
+  defendantLegalTitle?: string | null;
 }
 
 /** بناء بيانات INSERT لجدول cases عند تحويل جلسة مستقلة لملف قضية —
@@ -129,6 +136,11 @@ export function buildCaseInsertData(
     defendant: fields.defendant || null,
     defendant_role: fields.defendantRole || null,
     defendant_national_id: fields.defendantNationalId || null,
+    // 🆕 (خطة "المسمى القانوني" — بند مؤجل من التقرير): إضافي بالكامل —
+    // القضايا اللي مالهاش مسمى قانوني أصلاً (الحالة الغالبة، طرف واحد)
+    // بتفضل زي ما هي بالظبط (null)، صفر تغيير سلوك.
+    plaintiff_legal_title: fields.plaintiffLegalTitle || null,
+    defendant_legal_title: fields.defendantLegalTitle || null,
     circuit_number: fields.circuitNumber || null,
     session_hall: fields.sessionHall || null,
     session_time: fields.sessionTime || null,
@@ -201,6 +213,63 @@ export async function movePartiesFromSessionToCase(
     if (result.error) allOk = false;
   }
   return allOk ? { ok: true } : { ok: false };
+}
+
+// ══════════════════════════════════════════════════════════════
+//  خطة "المسمى القانوني" — بند مؤجل ثانٍ (استمرارية بيانات الجلسة القادمة،
+//  24 يوليو 2026): لما جلسة مستقلة فيها أكتر من شخص تحت أي طرف (ورثة/
+//  شركاء) بتتحدّث نتيجتها (SessionUpdateModal.tsx)، الجلسة الجديدة كانت
+//  بتاخد نسخة من الأعمدة القديمة بس (plaintiff/defendant/...)، من غير
+//  المسمى القانوني ولا صفوف case_parties الكاملة — فترجع "شخص واحد بس".
+//  الدالة دي بتقفل نص المشكلة (نسخ الأطراف)، والنص التاني (المسمى
+//  القانوني) بيتصلح مباشرة في SessionUpdateModal.tsx نفسها (عمودين على
+//  صف الجلسة، مفيش داعي لدالة منفصلة).
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * بتنسخ (INSERT صفوف جديدة، مش UPDATE في مكانها زي movePartiesFromSessionToCase
+ * فوق) كل صفوف case_parties بتاعة جلسة مستقلة (oldSessionId) لجلسة جديدة
+ * (newSessionId) اتولدت منها تلقائيًا — الجلسة القديمة لازم تفضل محتفظة
+ * بصفوفها الأصلية كسجل تاريخي لما حصل فيها، فده نسخ لا نقل.
+ *
+ * idx_case_parties_no_dup_national_id (UNIQUE على COALESCE(case_id,
+ * session_id) + national_id) مش بيتعارض هنا: session_id الجديد مختلف عن
+ * القديم، فنفس الرقم القومي مسموح يتكرر عبر جلستين مختلفتين بلا مشكلة.
+ *
+ * بترجع {ok:true} كمان لو مفيش صفوف أصلاً (جلسة قديمة معندهاش case_parties
+ * بعد، أو طرف واحد بس اتسجل بالأعمدة القديمة فقط) — مش خطأ حقيقي.
+ */
+export async function copySessionPartiesToNewSession(
+  db: SupabaseClient<Database>,
+  oldSessionId: string,
+  newSessionId: string,
+): Promise<{ ok: boolean }> {
+  const { data, error } = await db.from('case_parties')
+    .select('side,is_client,name,capacity,national_id,address,power_of_attorney,client_id,sort_order')
+    .eq('session_id', oldSessionId);
+  if (error) return { ok: false };
+  if (!data || data.length === 0) return { ok: true };
+
+  const rows = (data as unknown as {
+    side: string; is_client: boolean; name: string; capacity: string;
+    national_id: string | null; address: string | null; power_of_attorney: string | null;
+    client_id: string | null; sort_order: number;
+  }[]).map((p) => ({
+    case_id: null,
+    session_id: newSessionId,
+    side: p.side,
+    is_client: p.is_client,
+    name: p.name,
+    capacity: p.capacity,
+    national_id: p.national_id,
+    address: p.address,
+    power_of_attorney: p.power_of_attorney,
+    client_id: p.client_id,
+    sort_order: p.sort_order,
+  }));
+
+  const { error: insertErr } = await db.from('case_parties').insert(rows);
+  return { ok: !insertErr };
 }
 
 export interface MatchedClient {
