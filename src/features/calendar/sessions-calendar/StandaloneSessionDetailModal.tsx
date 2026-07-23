@@ -103,10 +103,9 @@ function EditStandaloneModal(props: EditStandaloneModalProps) {
         let cancelled = false;
         setPartiesState({ loaded: false, rows: [] });
         (async () => {
-            // الكاست لـ 'cases' هنا نفس نمط dbFrom() الموجود فعلاً في
-            // offlineQueue.ts ونفس الكاست المستخدم في EditCaseModal.tsx —
-            // بيأثر بس على شكل الـ query builder وقت الـ type-check.
-            const { data, error } = await db.from('case_parties' as 'cases')
+            // ⚠️ case_parties بقت مضافة في database.types.ts (خطة تعدد
+            // الأطراف، مرحلة 1) — مفيش داعي لكاست 'as cases' تاني هنا.
+            const { data, error } = await db.from('case_parties')
                 .select('*')
                 .eq('session_id', session.id)
                 .order('sort_order', { ascending: true });
