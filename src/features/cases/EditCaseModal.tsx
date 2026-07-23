@@ -11,6 +11,7 @@ import type { PartyFieldValue, PartySide } from '@/shared/parties/partyTypes';
 import type { MappedCase } from '../../hooks/useAppData';
 import type { CaseFormSubmitData } from './hooks/useCaseActions';
 import type { ClientRow } from '../../types';
+import type { ClientModalContext } from '../clients/hooks/useClientActions';
 
 interface EditCaseModalProps {
     caseData: MappedCase;
@@ -33,6 +34,12 @@ interface EditCaseModalProps {
     linkedClient?: ClientRow | null;
     // زرار "✏️ عدّل من ملف الموكل" — بيفتح تفاصيل الموكل نفسه بدل تصميم جديد.
     onOpenClientProfile?: () => void;
+    // ⚡ NEW (خطة تطوير أطراف الدعوى — مرحلة 4 خطوة 2، 23 يوليو 2026): قائمة
+    // الموكلين + فتح موديل "إنشاء موكل جديد" الموحّد — لأي طرف *غير* الموكل
+    // الأصلي المقفول (linkedClient فوق)، زي أي طرف جديد يتضاف أثناء
+    // التعديل، أو الطرف التاني (الخصم) لو اتحول لموكلنا لاحقًا.
+    clients?: ClientRow[];
+    openNewClientModal?: (ctx: ClientModalContext) => void;
 }
 
 interface EditCaseForm {
@@ -122,7 +129,7 @@ interface EditCaseModalFormProps extends EditCaseModalProps {
     existingPartyRows: CasePartyRow[];
 }
 
-function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCaseTypes, saving = false, linkedClient = null, onOpenClientProfile, existingPartyRows}: EditCaseModalFormProps){
+function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCaseTypes, saving = false, linkedClient = null, onOpenClientProfile, existingPartyRows, clients = [], openNewClientModal}: EditCaseModalFormProps){
     // ⚡ NEW: القضية مربوطة فعليًا بموكل حي لو client_id موجود واتلقّى
     // فعلاً صف الموكل من الأب (مش soft-deleted ولا orphaned).
     const isLinked = !!linkedClient;
@@ -266,7 +273,17 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
             }],
         };
     });
-    const partyFields = usePartyFields({ initialPlaintiffs: initialParties.plaintiffs, initialDefendants: initialParties.defendants });
+    const partyFields = usePartyFields({
+        initialPlaintiffs: initialParties.plaintiffs,
+        initialDefendants: initialParties.defendants,
+        // 🆕 (خطة "المسمى القانوني" — مرحلة 3): تحميل القيمة الحالية (لو
+        // موجودة) من الأعمدة اللي اتضافت في المرحلة 1 — نفس نمط تحميل
+        // initialParties فوق، بيتقرا مرة واحدة بس وقت الـ mount.
+        initialLegalTitles: {
+            plaintiff: caseData.plaintiff_legal_title || '',
+            defendant: caseData.defendant_legal_title || '',
+        },
+    });
 
     // الطرف اللي لازم يتقفل (readOnly) — الطرف المربوط فعليًا بموكل حي من
     // clients (نفس فكرة قفل حقول "الموكل" القديمة). بيتحدد بمطابقة client_id
@@ -279,6 +296,62 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
         return all.find((p) => p.client_id === caseData.client_id)?.id ?? null;
     });
     const renderPartyReadOnly = (party: PartyFieldValue) => party.id === linkedPartyId;
+
+    // ⚡ NEW (خطة تطوير أطراف الدعوى — مرحلة 4 خطوة 2، 23 يوليو 2026): نفس
+    // فكرة linkClientToParty في NewCaseModal.tsx بالحرف — بس هنا لأي طرف
+    // *غير* الموكل الأصلي المقفول (اللي عليه readOnly بالفعل من فوق). بتملى
+    // الاسم/الرقم القومي/التوكيل/العنوان من بيانات موكل حقيقي مختار من
+    // القائمة.
+    const linkClientToParty = (partyId: string, clientId: string) => {
+        if(!clientId){ partyFields.updateParty(partyId,'client_id',null); return; }
+        const picked = clients.find((c: ClientRow) => c.id===clientId);
+        if(!picked) return;
+        partyFields.updateParty(partyId,'client_id',clientId);
+        partyFields.updateParty(partyId,'name',picked.full_name || '');
+        partyFields.updateParty(partyId,'national_id',picked.national_id || '');
+        partyFields.updateParty(partyId,'power_of_attorney',picked.cr_number || '');
+        partyFields.updateParty(partyId,'address',picked.address || '');
+    };
+
+    // ⚡ NEW (مرحلة 4 خطوة 2): بعد حفظ موكل جديد عبر الموديل الموحّد (هدف
+    // 'localParty' — الطرف هنا لسه صف محلي في partyFields، حتى لو كانت
+    // القضية نفسها محفوظة بالفعل)، بنطبّق بياناته فورًا من onLinked (نفس
+    // منطق NewCaseModal.tsx بالحرف).
+    const applyCreatedClientToParty = (partyId: string, clientId: string, form?: {full_name:string; national_id:string; cr_number:string; address:string}) => {
+        partyFields.updateParty(partyId,'client_id',clientId);
+        if(form){
+            partyFields.updateParty(partyId,'name',form.full_name || '');
+            partyFields.updateParty(partyId,'national_id',form.national_id || '');
+            partyFields.updateParty(partyId,'power_of_attorney',form.cr_number || '');
+            partyFields.updateParty(partyId,'address',form.address || '');
+        }
+    };
+
+    // سلوت "ربط بموكل من النظام" + "إنشاء موكل جديد" فوق اسم أي طرف عليه ⭐
+    // *وغير* الموكل الأصلي المقفول (ده بيتقفل بالكامل من renderPartyReadOnly
+    // فوق، مفيش داعي يتعرض له سلوت الربط أصلاً).
+    const renderPartyExtra = (party: PartyFieldValue) => {
+        if(!party.is_client || party.id === linkedPartyId) return null;
+        return React.createElement('div',{className:'space-y-2'},
+            clients.length>0 && React.createElement(Sel,{
+                label:"ربط بموكل من النظام (اختياري)",
+                value:party.client_id || '',
+                onChange:(e: React.ChangeEvent<HTMLSelectElement>) =>linkClientToParty(party.id,e.target.value),
+                options:[{value:'',label:'— بدون ربط (بيانات يدوية) —'},...clients.map((c: ClientRow) =>({value:c.id,label:c.full_name}))]
+            }),
+            !party.client_id && openNewClientModal && React.createElement('button',{
+                type:'button',
+                onClick:()=>openNewClientModal({
+                    initialData:{full_name:party.name || '', national_id:party.national_id || '', cr_number:party.power_of_attorney || '', address:party.address || ''},
+                    linkTarget:{type:'localParty'},
+                    contextLabel:'سيتم ربطه بهذا الطرف تلقائيًا بعد الحفظ',
+                    onLinked:(_target,clientId,form)=>applyCreatedClientToParty(party.id,clientId,form),
+                }),
+                className:'text-[10px] font-bold text-emerald-400 mt-1',
+                'data-testid':'edit-case-create-client-'+party.id,
+            },'➕ إنشاء موكل جديد من هذه البيانات')
+        );
+    };
 
     const inputCls = "w-full p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600 transition-colors";
     const inpStyle = {fontFamily:'Cairo,sans-serif'};
@@ -442,7 +515,7 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
                     "⚠️ الموكل محذوف — البيانات دي آخر ما هو معروف عن الموكل، وبقت قابلة للتعديل الحر. تقدر تربط القضية بموكل تاني من تاب البيانات."
                 )
             ),
-            React.createElement(PartyFieldsGroup, {controller:partyFields, testIdPrefix:'edit-case', renderPartyReadOnly}),
+            React.createElement(PartyFieldsGroup, {controller:partyFields, testIdPrefix:'edit-case', renderPartyReadOnly, renderPartyExtra}),
 
             // ══════════════ بيانات إضافية ══════════════
             React.createElement('div', {className:"border-t border-white/10 pt-4 mt-2"},
@@ -508,6 +581,10 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
                         defendant: primaryDefendant?.name || undefined,
                         defendant_role: primaryDefendant?.capacity || undefined,
                         defendant_national_id: primaryDefendant?.national_id || undefined,
+                        // 🆕 (خطة "المسمى القانوني" — مرحلة 3): نفس منطق
+                        // NewCaseModal.tsx.
+                        plaintiff_legal_title: partyFields.legalTitles.plaintiff || undefined,
+                        defendant_legal_title: partyFields.legalTitles.defendant || undefined,
                         parties: partyFields.parties,
                         // ⚡ NEW (مرحلة 5.2): ids صفوف case_parties الحقيقية
                         // اللي كانت موجودة وقت فتح الفورم (existingPartyRows
