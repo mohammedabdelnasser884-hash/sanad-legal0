@@ -180,6 +180,7 @@ function AppModals({
             lawyers, isAdmin, clients,
             countryCourts: COUNTRY_CONFIGS[country]?.courts,
             countryCaseTypes: COUNTRY_CONFIGS[country]?.caseTypes,
+            openNewClientModal,
         }),
         showNewSessionModal && React.createElement(NewStandaloneSessionModal, {
             onClose: () => setShowNewSessionModal(false),
@@ -237,6 +238,9 @@ function AppModals({
             // 🔒 FIX (تقرير الموثوقية — نتيجة 1): EditCaseModal ما كانش عنده
             // أي حماية دبل كليك خالص.
             savingCase,
+            // ⚡ NEW (خطة تطوير أطراف الدعوى — مرحلة 4 خطوة 2): بتوصل لـ
+            // EditCaseModal عشان زرار "إنشاء موكل جديد" جوه كارت أي طرف.
+            openNewClientModal,
             // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 2): نفس آلية
             // onOpenClient المستخدمة فوق في UniversalSearchModal — بنقفل
             // تفاصيل القضية الحالية ونفتح تفاصيل الموكل.
