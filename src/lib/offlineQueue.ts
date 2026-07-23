@@ -52,7 +52,14 @@ import { logActivity, recalcNextHearing } from '../shared/lib/dataAccess';
 // جديد `_offlineSessionCaseId` (INSERT: case_id نفسه موجود أصلاً كعمود
 // حقيقي فمش محتاج سنتينل؛ UPDATE/DELETE: محتاجين السنتينل لأن case_id مش
 // جزء من بيانات العملية أصلاً) — شوف caseSessionCaseIdsToRecalc تحت.
-export type DbWriteTable = 'clients' | 'cases' | 'case_sessions' | 'reminders' | 'case_fees' | 'fee_payments' | 'case_notes';
+//
+// 🆕 المرحلة 2 (خطة تعدد الأطراف، 22 يوليو): 'case_parties' اتضافت هنا
+// كتجهيز مبكر بس (الجدول نفسه اتعمل في المرحلة 1، فاضي لسه). لا يوجد أي
+// نداء فعلي لـ __dbWrite بـ 'case_parties' في الكود لحد المرحلة دي —
+// هيتضاف فعليًا وقت تعديل الفورمات (مراحل 4-6). الإضافة هنا دلوقتي بس
+// عشان التوقيع يبقى جاهز، وده مطابق تمامًا لبند "توسيع DbWriteTable"
+// في جدول تتبع المراحل (قسم 11، مرحلة 2).
+export type DbWriteTable = 'clients' | 'cases' | 'case_sessions' | 'reminders' | 'case_fees' | 'fee_payments' | 'case_notes' | 'case_parties';
 
 // ⚠️ قيد معروف في supabase-js + TypeScript: تسلسل .insert()/.update()/.delete()
 // ثم .select()/.eq() على db.from(table) لما `table` يكون Generic (T extends
