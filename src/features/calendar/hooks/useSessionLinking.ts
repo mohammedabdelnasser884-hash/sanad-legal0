@@ -459,7 +459,7 @@ export function useSessionLinking(
       // طول، فبيبان زرار "ربط" الجاهز من غير ما المستخدم يدوّر عليه.
       if (dup.duplicate) {
         if (dup.client) {
-          setSelectedExistingClient({ id: dup.client.id, full_name: dup.client.full_name, client_name: dup.client.full_name, national_id: null });
+          setSelectedExistingClient({ id: dup.client.id, full_name: dup.client.full_name, client_name: dup.client.full_name, national_id: null, cr_number: null });
           setClientStep('searching');
         } else toast(dup.message!, true);
         return;
