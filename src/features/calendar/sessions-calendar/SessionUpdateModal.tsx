@@ -5,7 +5,7 @@ import { safeUpdate } from '../../../shared/lib/dataAccess';
 import { escapeTelegramHtml } from '../../../shared/lib/sanitize';
 import DatePicker from '@/shared/ui/DatePicker';
 import { I } from '../../../constants';
-import type { CaseSessionRow } from '../../../types';
+import type { CaseSessionRow, ClientRow } from '../../../types';
 import type { MappedCase } from '../../../hooks/useAppData';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '../../../database.types';
@@ -17,6 +17,11 @@ interface SessionUpdateModalProps {
     onClose: () => void;
     onDone?: () => void;
     onNotify?: (msg: string) => void;
+    // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 5): الموكل الحي المرتبط
+    // بالجلسة المستقلة (session.client_id) — لو موجود، بيتاخد منه
+    // الاسم/الرقم القومي/رقم التوكيل عند بناء الجلسة القادمة، بدل نسخ
+    // نسخة الجلسة الحالية اللي ممكن تكون قديمة لو الموكل تعدّل بعدها.
+    linkedClient?: ClientRow | null;
 }
 
 /**
@@ -29,7 +34,7 @@ interface SessionUpdateModalProps {
  * 2. يُنشئ جلسة جديدة بالتاريخ والمطلوب الجديد
  * 3. الجلسة القديمة تفضل موجودة بدون زر تحديث (عشان مش آخر جلسة دلوقتي)
  */
-function SessionUpdateModal({ session, caseData, db, onClose, onDone, onNotify }: SessionUpdateModalProps) {
+function SessionUpdateModal({ session, caseData, db, onClose, onDone, onNotify, linkedClient }: SessionUpdateModalProps) {
     const [whatHappened, setWhatHappened] = useState(session.result || '');
     const [nextDate, setNextDate] = useState('');
     const [nextRequired, setNextRequired] = useState(session.next_action || '');
@@ -70,13 +75,22 @@ function SessionUpdateModal({ session, caseData, db, onClose, onDone, onNotify }
                 court: session.court || null,
                 case_type: session.case_type || null,
                 circuit_number: session.circuit_number || null,
-                plaintiff: session.plaintiff || null,
+                // ⚡ FIX (خطة توحيد مصدر بيانات الموكل، مرحلة 5): لو الجلسة
+                // مربوطة بموكل حي، الاسم/الرقم القومي/التوكيل بيتاخدوا من
+                // ملف الموكل نفسه وقت إنشاء الجلسة القادمة — مش من نسخة
+                // الجلسة الحالية اللي ممكن تكون بقت قديمة. plaintiff_role
+                // فضل من الجلسة عمدًا (خاصية الجلسة مش الموكل).
+                plaintiff: (linkedClient ? linkedClient.full_name : session.plaintiff) || null,
                 plaintiff_role: session.plaintiff_role || null,
-                plaintiff_national_id: session.plaintiff_national_id || null,
-                plaintiff_power_of_attorney: session.plaintiff_power_of_attorney || null,
+                plaintiff_national_id: (linkedClient ? linkedClient.national_id : session.plaintiff_national_id) || null,
+                plaintiff_power_of_attorney: (linkedClient ? linkedClient.cr_number : session.plaintiff_power_of_attorney) || null,
                 defendant: session.defendant || null,
                 defendant_role: session.defendant_role || null,
                 defendant_national_id: session.defendant_national_id || null,
+                // ⚡ FIX: كان client_id مش بيتبعت خالص هنا — الجلسة القادمة
+                // كانت بتتولد "مش مربوطة" بالموكل حتى لو الجلسة الحالية
+                // كانت مربوطة، وده باج فقدان ربط كامل مش بس بيانات قديمة.
+                client_id: session.client_id || null,
             } : {}),
         }]);
 
