@@ -27,20 +27,22 @@ export async function login(page: Page): Promise<void> {
 // عن جزء الفتح، وخلّينا createAndOpenCase يستخدم النسخة دي بدل ما
 // يكرر نفس الأربع سطور.
 // ⚠️ لازم نملأ نفس الحقول الإلزامية المستخدمة في cases.spec.ts (العنوان +
-// الموكل + صفته + الخصم + صفته + الرقم القومي للموكل) — NewCaseModal.tsx
-// بيعتبرهم required:true، وبالذات الرقم القومي للموكل عنده تحقق فعلي
-// (لازم يكون 14 رقم بالظبط، شوف NewCaseModal.tsx) بيمنع الحفظ تمامًا لو
-// فاضي أو ناقص. لو أي حقل من دول ناقص الفورم بيرفض الحفظ ويفضل مفتوح،
-// والانتظار بعد كده لظهور الكارت بيعمل timeout بدل ما يفشل برسالة واضحة.
+// طرف مدعي واحد عليه ⭐ "موكلنا" بيانات كاملة + طرف مدعى عليه واحد) —
+// راجع خطة تعدد الأطراف (مرحلة 4، 22 يوليو 2026): NewCaseModal.tsx بقى
+// يستخدم PartyFieldsGroup بدل حقلي "الموكل"/"الخصم" المفردين. البطاقة
+// الأولى في كل جهة عندها data-testid بالشكل new-case-<side>-0-<field>
+// (star/name/capacity/national-id)، ولازم تفعيل ⭐ الأول عشان الرقم
+// القومي يبقى مطلوب/يتفحص، ومطابق لفاليديشن casePartiesValidation.ts.
 export async function createCase(page: Page, title: string): Promise<void> {
   await page.getByTestId('nav-cases').click();
   await page.getByTestId('new-case-button').click();
   await page.getByTestId('new-case-title').fill(title);
-  await page.getByTestId('new-case-client-name').fill('موكل اختبار E2E');
-  await page.getByTestId('new-case-client-capacity').fill('مدعي');
-  await page.getByTestId('new-case-plaintiff-national-id').fill('12345678901234');
-  await page.getByTestId('new-case-opponent').fill('خصم اختبار E2E');
-  await page.getByTestId('new-case-opponent-capacity').fill('مدعى عليه');
+  await page.getByTestId('new-case-plaintiff-0-star').click();
+  await page.getByTestId('new-case-plaintiff-0-name').fill('موكل اختبار E2E');
+  await page.getByTestId('new-case-plaintiff-0-capacity').fill('مدعي');
+  await page.getByTestId('new-case-plaintiff-0-national-id').fill('12345678901234');
+  await page.getByTestId('new-case-defendant-0-name').fill('خصم اختبار E2E');
+  await page.getByTestId('new-case-defendant-0-capacity').fill('مدعى عليه');
   await page.getByTestId('new-case-save').click();
 
   const card = page.getByTestId('case-card').filter({ hasText: title });
