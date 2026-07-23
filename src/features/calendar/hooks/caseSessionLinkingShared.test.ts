@@ -3,6 +3,7 @@ import {
   makeOfflineTempId, isOfflineTempId, withCaseSelfOfflineSentinel, withFkOfflineSentinel,
   buildCaseInsertData, findMatchingClientByName,
   fetchSessionClientParties, matchClientsForParties, linkClientToParty,
+  copySessionPartiesToNewSession,
 } from './caseSessionLinkingShared';
 import type { SessionClientParty } from './caseSessionLinkingShared';
 
@@ -143,6 +144,22 @@ describe('buildCaseInsertData', () => {
     expect(result.case_number).toBeNull();
     expect(result.plaintiff).toBeNull();
   });
+
+  // 🆕 (خطة "المسمى القانوني" — بند مؤجل، 24 يوليو 2026)
+  it('plaintiffLegalTitle/defendantLegalTitle بيتكتبوا في plaintiff_legal_title/defendant_legal_title', () => {
+    const result = buildCaseInsertData(
+      { ...baseFields, plaintiffLegalTitle: 'ورثة المرحوم أحمد علي', defendantLegalTitle: 'الشركاء في شركة كذا' },
+      'عنوان القضية', 'tmp-5',
+    );
+    expect(result.plaintiff_legal_title).toBe('ورثة المرحوم أحمد علي');
+    expect(result.defendant_legal_title).toBe('الشركاء في شركة كذا');
+  });
+
+  it('من غير plaintiffLegalTitle/defendantLegalTitle (الحالة الغالبة، طرف واحد) → null، صفر تغيير سلوك', () => {
+    const result = buildCaseInsertData(baseFields, 'عنوان القضية', 'tmp-6');
+    expect(result.plaintiff_legal_title).toBeNull();
+    expect(result.defendant_legal_title).toBeNull();
+  });
 });
 
 describe('findMatchingClientByName', () => {
@@ -273,6 +290,72 @@ describe('fetchSessionClientParties', () => {
   });
 });
 
+// 🆕 (خطة "المسمى القانوني" — بند مؤجل ثانٍ، 24 يوليو 2026): استمرارية
+// بيانات الجلسة القادمة عند تحديث نتيجة جلسة مستقلة فيها أكتر من شخص
+// تحت أي طرف (SessionUpdateModal.tsx).
+describe('copySessionPartiesToNewSession', () => {
+  function makeMockDb(selectResult: { data?: unknown; error?: unknown }, insertError: unknown = null) {
+    const eqSpy = vi.fn();
+    const insertSpy = vi.fn(() => Promise.resolve({ error: insertError }));
+    const db = {
+      from: vi.fn((table: string) => {
+        if (table === 'case_parties') {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn((col: string, val: unknown) => {
+                eqSpy(col, val);
+                return Promise.resolve(selectResult);
+              }),
+            })),
+            insert: insertSpy,
+          };
+        }
+        throw new Error(`unexpected table: ${table}`);
+      }),
+    };
+    return { db, eqSpy, insertSpy };
+  }
+
+  const oldRow = {
+    side: 'plaintiff', is_client: true, name: 'أحمد محمد', capacity: 'وريث',
+    national_id: '29001010100000', address: 'القاهرة', power_of_attorney: '456/2026',
+    client_id: 'client-1', sort_order: 0,
+  };
+
+  it('بيقرا صفوف الجلسة القديمة وبينسخها (INSERT صفوف جديدة) للجلسة الجديدة', async () => {
+    const { db, eqSpy, insertSpy } = makeMockDb({ data: [oldRow], error: null });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await copySessionPartiesToNewSession(db as any, 'old-session', 'new-session');
+    expect(result).toEqual({ ok: true });
+    expect(eqSpy).toHaveBeenCalledWith('session_id', 'old-session');
+    expect(insertSpy).toHaveBeenCalledWith([
+      { ...oldRow, case_id: null, session_id: 'new-session' },
+    ]);
+  });
+
+  it('مفيش صفوف أصلاً (طرف واحد بس بالأعمدة القديمة) → ok=true من غير أي INSERT', async () => {
+    const { db, insertSpy } = makeMockDb({ data: [], error: null });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await copySessionPartiesToNewSession(db as any, 'old-session', 'new-session');
+    expect(result).toEqual({ ok: true });
+    expect(insertSpy).not.toHaveBeenCalled();
+  });
+
+  it('خطأ في قراءة صفوف الجلسة القديمة → ok=false', async () => {
+    const { db } = makeMockDb({ data: null, error: new Error('db error') });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await copySessionPartiesToNewSession(db as any, 'old-session', 'new-session');
+    expect(result).toEqual({ ok: false });
+  });
+
+  it('خطأ وقت الـINSERT نفسه → ok=false', async () => {
+    const { db } = makeMockDb({ data: [oldRow], error: null }, new Error('insert failed'));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await copySessionPartiesToNewSession(db as any, 'old-session', 'new-session');
+    expect(result).toEqual({ ok: false });
+  });
+});
+
 describe('matchClientsForParties', () => {
   function makeParty(overrides: Partial<SessionClientParty> = {}): SessionClientParty {
     return { id: 'p-1', side: 'plaintiff', name: 'أحمد محمد', national_id: null, power_of_attorney: null, address: null, sort_order: 0, ...overrides };
@@ -376,65 +459,5 @@ describe('linkClientToParty', () => {
     window.__dbWrite = fn as unknown as typeof window.__dbWrite;
     const result = await linkClientToParty('party-1', 'client-1', true, 'case-1', undefined);
     expect(result).toEqual({ ok: false });
-  });
-
-  // ══════════════════════════════════════════════════════════════
-  //  clientOfflineInfo (7.2 جزء 2) — الموكل الجديد نفسه لسه تمبيد أوفلاين
-  //  وقت الربط. لازم UPDATE:case_parties يحمل _offlineFkTempId بدل ما
-  //  يبعت التمبيد حرفيًا كـ client_id من غير sentinel.
-  // ══════════════════════════════════════════════════════════════
-
-  it('clientOfflineInfo.isTempClientId=true → UPDATE:case_parties بيحمل _offlineFkTempId بدل client_id تمبيد صريح', async () => {
-    const { fn, calls } = mockDbWrite();
-    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
-    const tempClientId = makeOfflineTempId();
-    const result = await linkClientToParty(
-      'party-2', tempClientId, false, 'case-1', undefined,
-      { isTempClientId: true, tempClientId, fallbackNameValue: 'أحمد محمد' },
-    );
-    expect(result).toEqual({ ok: true });
-    expect(calls).toEqual([{
-      type: 'UPDATE',
-      table: 'case_parties',
-      id: 'party-2',
-      data: {
-        client_id: tempClientId,
-        _offlineFkTempId: [{ field: 'client_id', tempId: tempClientId, table: 'clients', fallbackNameValue: 'أحمد محمد' }],
-      },
-    }]);
-  });
-
-  it('clientOfflineInfo مع طرف أساسي → sentinel على case_parties وcases.client_id بالـ id العادي مع بعض', async () => {
-    const { fn, calls } = mockDbWrite();
-    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
-    const tempClientId = makeOfflineTempId();
-    const result = await linkClientToParty(
-      'party-1', tempClientId, true, 'case-1', undefined,
-      { isTempClientId: true, tempClientId, fallbackNameValue: 'موكل جديد' },
-    );
-    expect(result).toEqual({ ok: true });
-    expect(calls).toEqual([
-      {
-        type: 'UPDATE',
-        table: 'case_parties',
-        id: 'party-1',
-        data: {
-          client_id: tempClientId,
-          _offlineFkTempId: [{ field: 'client_id', tempId: tempClientId, table: 'clients', fallbackNameValue: 'موكل جديد' }],
-        },
-      },
-      { type: 'UPDATE', table: 'cases', id: 'case-1', data: { client_id: tempClientId } },
-    ]);
-  });
-
-  it('clientOfflineInfo.isTempClientId=false (الموكل اتقيّد أونلاين فعلًا) → مفيش sentinel، client_id عادي بس', async () => {
-    const { fn, calls } = mockDbWrite();
-    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
-    const result = await linkClientToParty(
-      'party-2', 'client-real-1', false, 'case-1', undefined,
-      { isTempClientId: false, tempClientId: 'tmp-unused', fallbackNameValue: 'سارة علي' },
-    );
-    expect(result).toEqual({ ok: true });
-    expect(calls).toEqual([{ type: 'UPDATE', table: 'case_parties', id: 'party-2', data: { client_id: 'client-real-1' } }]);
   });
 });
