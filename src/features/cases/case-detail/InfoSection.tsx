@@ -5,6 +5,9 @@ import type { CaseDocWithUrl, CasePartyRow } from '../hooks/useCaseDetailActions
 // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 6): كشف التعارض بين البيانات
 // الحرة المكتوبة في القضية وملف الموكل المختار وقت الربط اللاحق.
 import { findClientDataMismatches, type FieldMismatch } from '../../calendar/hooks/caseSessionLinkingShared';
+// 🆕 (خطة "المسمى القانوني" — مرحلة 5): منطق موحّد لعرض المسمى القانوني
+// عند تعدد الأشخاص تحت طرف واحد — نفس الدالة مستخدمة في هيدر CaseDetailView.tsx.
+import { summarizePartySide } from '../../../shared/parties/partyDisplay';
 
 interface InfoSectionProps {
   caseData: MappedCase;
@@ -143,9 +146,23 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                                 React.createElement('span', {className: `text-[11px] font-black ${colorClass}`}, p.name)
                             )
                         );
+                        // 🆕 (خطة "المسمى القانوني" — مرحلة 5): يظهر بس لو الجهة
+                        // فيها أكتر من شخص مسمّى — الحالة الغالبة (شخص واحد لكل
+                        // جهة) تفضل بلا أي تغيير عن الشكل القديم، مطابقة لبند
+                        // "توسيع العرض فقط عند تعدد الأشخاص" في قسم 5 من الخطة.
+                        const renderLegalTitle = (side: 'plaintiff' | 'defendant', colorClass: string) => {
+                            const list = side === 'plaintiff' ? plaintiffs : defendants;
+                            const summary = summarizePartySide(list);
+                            if (!summary || summary.othersCount === 0) return null;
+                            const title = (side === 'plaintiff' ? caseData.plaintiff_legal_title : caseData.defendant_legal_title) || '';
+                            if (!title.trim()) return null;
+                            return React.createElement('p', {className: `text-[10px] font-black ${colorClass} mb-1.5`}, `🔖 ${title.trim()}`);
+                        };
                         return React.createElement('div', {className: "space-y-3"},
+                            renderLegalTitle('plaintiff', 'text-emerald-400/80'),
                             plaintiffs.map((p) => renderParty(p, 'text-emerald-400')),
                             plaintiffs.length > 0 && defendants.length > 0 && React.createElement('div', {className: "border-t border-white/5"}),
+                            renderLegalTitle('defendant', 'text-rose-400/80'),
                             defendants.map((p) => renderParty(p, 'text-rose-400'))
                         );
                     })()
