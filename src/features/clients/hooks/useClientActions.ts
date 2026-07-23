@@ -59,11 +59,20 @@ export interface ClientFormData {
 // فقط" في NewStandaloneSessionModal.tsx). sessionId بدل caseId — لا يوجد
 // cases.client_id يتحدّث هنا، المزامنة القديمة (لو الطرف أساسي) بتروح
 // لـ case_sessions.client_id بدل كده (شوف linkClientToSessionParty).
+// ⚡ NEW (خطة تطوير أطراف الدعوى — مرحلة 4 خطوة 2، 23 يوليو 2026): هدف
+// ربط رابع 'localParty' — لطرف جوه فورم قضية/جلسة *لسه ما اتحفظش* (زر
+// "إنشاء موكل جديد" جوه PartySubform، قبل ما يتضغط "حفظ" على الفورم
+// الأساسي كله). الطرف هنا لسه مجرد صف في state محلي (usePartyFields)،
+// مش صف حقيقي في case_parties، فمفيش أي DB write مطلوب هنا (بعكس
+// 'party'/'sessionParty' اللي بيحدّثوا case_parties.client_id فعليًا) —
+// مجرد إرجاع بيانات الموكل المُنشأ حديثًا للمستدعي عبر onLinked عشان
+// يحدّث partyFields بنفسه (raجع NewCaseModal.tsx/EditCaseModal.tsx).
 export type ClientLinkTarget =
     | { type: 'case'; caseId: string; caseIsOfflineTemp?: boolean; caseFallbackTitle?: string }
     | { type: 'session'; sessionId: string }
     | { type: 'party'; partyId: string; caseId: string; isPrimaryParty: boolean; caseIsOfflineTemp?: boolean; caseFallbackTitle?: string }
-    | { type: 'sessionParty'; partyId: string; sessionId: string; isPrimaryParty: boolean };
+    | { type: 'sessionParty'; partyId: string; sessionId: string; isPrimaryParty: boolean }
+    | { type: 'localParty' };
 
 // ⚡ NEW: كل حاجة محتاجها فتح NewClientModal بسياق (بيانات مبدئية + هدف
 // الربط + تسمية توضيحية + كول-باك تحديث بعد نجاح الربط) — بتتخزن كـ state
@@ -72,7 +81,13 @@ export interface ClientModalContext {
     initialData?: Partial<ClientFormData>;
     linkTarget?: ClientLinkTarget;
     contextLabel?: string;
-    onLinked?: (target: ClientLinkTarget, clientId: string) => void;
+    // ⚡ NEW (مرحلة 4 خطوة 2 — خطة تطوير أطراف الدعوى): باراميتر ثالث
+    // اختياري (بيانات الموكل اللي اتحفظت فعليًا) — بيتبعت بس مع هدف
+    // 'localParty' الجديد (باقي الأهداف مش محتاجاه، بيحدّثوا الداتابيز
+    // مباشرة). موجود عشان المستدعي (NewCaseModal/EditCaseModal) يقدر يملى
+    // اسم/رقم قومي/توكيل/عنوان الطرف محليًا فورًا، من غير ما يستنى
+    // fetchClients() (اللي بتتنادى async وغير مضمون توقيتها).
+    onLinked?: (target: ClientLinkTarget, clientId: string, clientData?: ClientFormData) => void;
 }
 
 interface DeleteConfirmState {
@@ -109,7 +124,7 @@ export function useClientActions(params: {
     // قضية/جلسة) + كول-باك اختياري بينادى بعد نجاح الربط (لتحديث الـ state
     // المحلي في المكان اللي فتح منه الموديل — قضية، جلسة... إلخ).
     clientLinkTarget?: ClientLinkTarget | null;
-    onClientLinked?: (target: ClientLinkTarget, clientId: string) => void;
+    onClientLinked?: (target: ClientLinkTarget, clientId: string, clientData?: ClientFormData) => void;
 }) {
     const {
         sendTelegram, fetchClients, fetchLawyers, clients, clientSearch,
@@ -287,7 +302,14 @@ export function useClientActions(params: {
                     });
                     onClientLinked?.(clientLinkTarget, linkedClientId);
                 }
-            } else if (linkedClientId && clientLinkTarget.type !== 'party' && clientLinkTarget.type !== 'sessionParty') {
+            } else if (linkedClientId && clientLinkTarget.type === 'localParty') {
+                // ⚡ NEW (مرحلة 4 خطوة 2): مفيش أي DB write هنا عمدًا — الطرف
+                // نفسه لسه مش محفوظ في case_parties (فورم قضية/جلسة جديدة أو
+                // تعديل قبل الضغط على "حفظ" الأساسي). بنكتفي بإرجاع بيانات
+                // الموكل المُنشأ حديثًا للمستدعي (onLinked) عشان يحدّث
+                // partyFields المحلي بنفسه (اسم/رقم قومي/توكيل/عنوان + client_id).
+                onClientLinked?.(clientLinkTarget, linkedClientId, form);
+            } else if (linkedClientId && clientLinkTarget.type !== 'party' && clientLinkTarget.type !== 'sessionParty' && clientLinkTarget.type !== 'localParty') {
                 const table = clientLinkTarget.type === 'case' ? 'cases' : 'case_sessions';
                 const targetId = clientLinkTarget.type === 'case' ? clientLinkTarget.caseId : clientLinkTarget.sessionId;
                 // ⚡ NEW (Phase 2): لو القضية المستهدفة نفسها لسه تمبيد أوفلاين
