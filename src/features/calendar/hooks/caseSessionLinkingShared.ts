@@ -49,13 +49,22 @@ export function withCaseSelfOfflineSentinel(
 
 /** لو العملية رجعت queued (أوفلاين)، بيضيف sentinel حل الـ FK
  * (_offlineFkTempId) عشان دورة المزامنة تربط السطر بـ id الحقيقي بعد
- * ما يتزامن. لو أونلاين، بيرجع data زي ما هي. */
+ * ما يتزامن. لو أونلاين، بيرجع data زي ما هي.
+ * ⚡ NEW (مرحلة 6.2 — خطة تعدد الأطراف، 23 يوليو 2026): `table` بقى
+ * بيقبل `'case_sessions'` كمان (مش بس `'cases'|'clients'`) — لدعم
+ * FK صفوف `case_parties` بتاعة جلسة مستقلة (`session_id`) لسه في
+ * الطابور. `resolveOfflineFkRefs`/`OfflineFkTempIdRef.table` في
+ * offlineQueue.ts أصلاً عام (`DbWriteTable`) ومكانش محتاج أي تعديل؛
+ * `FK_FALLBACK_NAME_COLUMN` مقصود إنها معملهاش entry لـ `case_sessions`
+ * (مفيش عمود "اسم" فريد منطقي يتبحث بيه — تعليق موجود بالفعل في
+ * offlineQueue.ts) فالحل هيعتمد بس على تطابق التمبيد في نفس دورة
+ * المزامنة، بالظبط زي أي جدول تاني برا القايمة دي. */
 export function withFkOfflineSentinel(
   offline: boolean | undefined,
   queued: boolean | undefined,
   field: string,
   tempId: string,
-  table: 'cases' | 'clients',
+  table: 'cases' | 'clients' | 'case_sessions',
   fallbackNameValue: string | null | undefined,
   data: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -75,6 +84,11 @@ export interface CaseInsertSourceFields {
   plaintiffRole?: string | null;
   plaintiffNationalId?: string | null;
   plaintiffPoa?: string | null;
+  // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 5): عنوان الموكل — مفقود من
+  // هنا قبل كده رغم إن جدول cases فيه عمود plaintiff_address فعليًا؛
+  // case_sessions مفيهاش العمود ده أصلاً، فبييجي بس لو فيه linkedClient
+  // وقت تحويل جلسة مستقلة مربوطة لقضية (شوف useSessionLinking.ts).
+  plaintiffAddress?: string | null;
   defendant?: string | null;
   defendantRole?: string | null;
   defendantNationalId?: string | null;
@@ -111,6 +125,7 @@ export function buildCaseInsertData(
     plaintiff_role: fields.plaintiffRole || null,
     plaintiff_national_id: fields.plaintiffNationalId || null,
     plaintiff_power_of_attorney: fields.plaintiffPoa || null,
+    plaintiff_address: fields.plaintiffAddress || null,
     defendant: fields.defendant || null,
     defendant_role: fields.defendantRole || null,
     defendant_national_id: fields.defendantNationalId || null,
@@ -125,6 +140,67 @@ export function buildCaseInsertData(
     ...(existingClientId !== undefined ? { client_id: existingClientId || null } : {}),
     _offlineTempId: offlineTempId,
   };
+}
+
+// ══════════════════════════════════════════════════════════════
+//  خطة تعدد الأطراف — مرحلة 7.1 (23 يوليو 2026): نقل صفوف case_parties
+//  عند تحويل جلسة مستقلة لقضية. قبل كده، تحويل الجلسة لقضية كان بياخد
+//  بس "الطرف الأساسي" في كل جهة (عبر buildCaseInsertData فوق، اللي بيكتب
+//  للأعمدة القديمة plaintiff/defendant بس) — أي طرف إضافي (مدعي تاني،
+//  مدعى عليه تاني) كان بيضيع تمامًا وقت التحويل رغم إنه كان موجود فعليًا
+//  في case_parties بتاعة الجلسة. الدالة دي بتقفل الفجوة دي.
+// ══════════════════════════════════════════════════════════════
+
+export type MovePartiesResult = { ok: true } | { ok: false };
+
+/**
+ * بتنقل كل صفوف case_parties المسجّلة بجلسة مستقلة (session_id) للقضية
+ * الجديدة اللي اتعملت من بيانات الجلسة دي (case_id) — UPDATE في مكانه
+ * لكل صف (نفس id، نفس علامة ⭐، نفس ترتيب) بدل حذف/إعادة إدراج، عشان أي
+ * ربط لاحق بموكل من النظام (client_id) على الطرف ده يفضل زي ما هو.
+ * لازم تتنادى بعد نجاح إنشاء القضية وربط الجلسة بيها (case_sessions.case_id).
+ *
+ * بترجع {ok:true} كمان لو مفيش صفوف أصلاً (جلسة قديمة قبل مرحلة 6 لسه
+ * بتاعة الأعمدة القديمة بس، أو وضع "existing" اللي مفيهوش أطراف خاصة
+ * بالجلسة نفسها) — مش خطأ حقيقي، الطرف الأساسي أصلاً اتكتب في القضية عبر
+ * buildCaseInsertData.
+ *
+ * caseId ممكن يكون تمبيد أوفلاين (لو إنشاء القضية نفسه اتقيّد أوفلاين) —
+ * caseOffline/caseQueued/caseTempId/caseFallbackTitle بينفعوا withFkOfflineSentinel
+ * عشان دورة المزامنة تحل case_id الحقيقي بعدين، نفس نمط أي FK تاني في
+ * الملف ده.
+ */
+export async function movePartiesFromSessionToCase(
+  db: SupabaseClient<Database>,
+  sessionId: string,
+  caseId: string,
+  caseOffline: boolean | undefined,
+  caseQueued: boolean | undefined,
+  caseTempId: string,
+  caseFallbackTitle: string | undefined,
+): Promise<MovePartiesResult> {
+  // الكاست لـ 'cases' هنا نفس نمط dbFrom() في offlineQueue.ts ونفس
+  // الكاست المستخدم في EditCaseModal.tsx/StandaloneSessionDetailModal.tsx —
+  // case_parties لسه مش موجودة في database.types.ts المولّد.
+  const { data, error } = await db.from('case_parties' as 'cases')
+    .select('id')
+    .eq('session_id', sessionId);
+  if (error || !data || data.length === 0) return { ok: true };
+
+  let allOk = true;
+  for (const row of data as unknown as { id: string }[]) {
+    const result = await window.__dbWrite({
+      type: 'UPDATE',
+      table: 'case_parties',
+      id: row.id,
+      data: withFkOfflineSentinel(
+        caseOffline, caseQueued, 'case_id', caseTempId, 'cases', caseFallbackTitle,
+        { case_id: caseId, session_id: null },
+      ),
+    });
+    if (result.error) allOk = false;
+  }
+  return allOk ? { ok: true } : { ok: false };
 }
 
 export interface MatchedClient {
@@ -164,4 +240,254 @@ export async function findMatchingClientByName(
   const isExact = (c.full_name || '').trim().toLowerCase() === normalized
     || (c.client_name || '').trim().toLowerCase() === normalized;
   return { client: c, matchType: isExact ? 'exact' : 'fuzzy' };
+}
+
+// ══════════════════════════════════════════════════════════════
+//  خطة تعدد الأطراف — مرحلة 7.2 جزء 1 (23 يوليو 2026): طبقة المنطق
+//  لاكتشاف *كل* أطراف الجلسة اللي is_client=true (مش بس session.plaintiff/
+//  f.plaintiff كنص واحد زي قبل كده) والبحث عن موكل مطابق لكل واحد فيهم
+//  على حدة، + دوال الربط الفعلي (كل طرف بياخد client_id بتاعه في
+//  case_parties، والطرف الأساسي فقط — أول واحد is_client=true بترتيب
+//  sort_order — بيحدّث cases.client_id القديم كمان، بنفس السلوك الحالي
+//  تمامًا قبل التغيير ده، عشان صفر كسر سلوك).
+//  ⚠️ الجزء ده (منطق بس) — التوصيل الفعلي بواجهة useSessionLinking.ts/
+//  useClientLinking.ts + شاشات StandaloneSessionDetailModal.tsx/
+//  NewStandaloneSessionModal.tsx (عرض أكتر من "لقينا موكل مطابق" في نفس
+//  الوقت) هو جزء 2 التالي — الدوال هنا مستقلة وقابلة للاختبار لوحدها.
+// ══════════════════════════════════════════════════════════════
+
+/** طرف واحد is_client=true تابع لجلسة مستقلة — الاستعلام بيقرا بـ
+ * session_id عمدًا (مش case_id) عشان يشتغل *قبل* نقل الأطراف عبر
+ * movePartiesFromSessionToCase ومن غير أي اعتماد على caseId يكون id
+ * حقيقي (لو إنشاء القضية نفسه أوفلاين، caseId هيفضل تمبيد لحد المزامنة —
+ * الاستعلام بـ case_id كان هيرجع فاضي في الحالة دي). session_id دايمًا
+ * حقيقي في المسارين اللي بينادوا الدالة دي، نفس افتراض
+ * movePartiesFromSessionToCase بالظبط. */
+export interface SessionClientParty {
+  id: string;
+  side: 'plaintiff' | 'defendant';
+  name: string;
+  national_id: string | null;
+  power_of_attorney: string | null;
+  address: string | null;
+  sort_order: number;
+}
+
+/**
+ * بتجيب كل صفوف case_parties بـ session_id = sessionId وis_client = true،
+ * مرتبة بـ sort_order — أول صف في المصفوفة الراجعة هو "الطرف الأساسي"
+ * لأغراض توافق cases.client_id (شوف linkClientToParty تحت). بترجع
+ * مصفوفة فاضية لو مفيش صفوف (جلسة قديمة قبل مرحلة 6، أو مفيش أي طرف
+ * is_client=true أصلاً) — الاستدعاء المفروض يعتبرها fallback لمسار
+ * findMatchingClientByName القديم (اسم واحد بس)، مش خطأ.
+ */
+export async function fetchSessionClientParties(
+  db: SupabaseClient<Database>,
+  sessionId: string,
+): Promise<SessionClientParty[]> {
+  // نفس كاست 'cases' المستخدم في movePartiesFromSessionToCase فوق —
+  // case_parties لسه مش موجودة في database.types.ts المولّد.
+  const { data, error } = await db.from('case_parties' as 'cases')
+    .select('id,side,name,national_id,power_of_attorney,address,sort_order')
+    .eq('session_id', sessionId)
+    .eq('is_client', true)
+    .order('sort_order', { ascending: true });
+  if (error || !data) return [];
+  return data as unknown as SessionClientParty[];
+}
+
+export interface PartyClientMatch {
+  party: SessionClientParty;
+  client: MatchedClient;
+  matchType: ClientMatchType;
+}
+
+/**
+ * بتدوّر على موكل مطابق (findMatchingClientByName) لكل طرف في المصفوفة
+ * المدخلة، بالترتيب. الطرف اللي مالوش تطابق مش بيتضاف للمصفوفة الراجعة
+ * (الواجهة بتعرف "مفيش تطابق" لطرف معيّن بمقارنة parties الأصلية بمصفوفة
+ * matches الراجعة — نفس فكرة clientStep === 'notfound' القديمة لكن لكل
+ * طرف لوحده).
+ */
+export async function matchClientsForParties(
+  db: SupabaseClient<Database>,
+  parties: SessionClientParty[],
+): Promise<PartyClientMatch[]> {
+  const matches: PartyClientMatch[] = [];
+  for (const party of parties) {
+    const found = await findMatchingClientByName(db, party.name);
+    if (found) matches.push({ party, client: found.client, matchType: found.matchType });
+  }
+  return matches;
+}
+
+/**
+ * بتربط موكل (clientId) بطرف معيّن — case_parties.client_id بتاع الطرف
+ * ده بس (id حقيقي دايمًا، الطرف أصلاً صف موجود في القاعدة من قبل إنشاء
+ * القضية). لو isPrimaryParty=true (الطرف ده هو أول عنصر في
+ * fetchSessionClientParties)، بتحدّث cases.client_id القديم كمان — بنفس
+ * السلوك بالظبط اللي كان موجود قبل مرحلة 7.2 (لما كان في موكل واحد بس
+ * بيتفحص وبيتربط بـ cases.client_id مباشرة). caseId ممكن يكون لسه تمبيد
+ * أوفلاين (withCaseSelfOfflineSentinel)، caseTitle بيتستخدم كـ fallback
+ * بالاسم في الحالة دي بس.
+ *
+ * ⚡ NEW (7.2 جزء 2، 23 يوليو 2026): باراميتر سادس اختياري `clientOfflineInfo`
+ * — لما clientId نفسه لسه تمبيد أوفلاين (سيناريو "إضافة موكل جديد" لطرف
+ * إضافي غير الأساسي، أونلاين إنشاء الموكل ممكن يتقيّد أوفلاين زي أي INSERT
+ * تاني). من غيره، الـ UPDATE على case_parties كان هيبعت التمبيد نفسه كـ
+ * client_id حرفيًا من غير أي sentinel يوضح لدورة المزامنة إنه محتاج حل —
+ * فجوة كانت موجودة في نسخة جزء 1 من الدالة دي (لسه ما كانتش مستخدمة إلا
+ * لموكلين مطابقين من findMatchingClientByName اللي id بتاعهم حقيقي دايمًا).
+ * لو الباراميتر مش متبعت (زي كل الاستدعاءات القديمة)، السلوك زي ما هو
+ * بالظبط — نفس شكل الناتج القديم حرفيًا.
+ */
+export async function linkClientToParty(
+  partyId: string,
+  clientId: string,
+  isPrimaryParty: boolean,
+  caseId: string,
+  caseTitle: string | undefined,
+  clientOfflineInfo?: { isTempClientId: boolean; tempClientId: string; fallbackNameValue: string | null },
+): Promise<{ ok: boolean }> {
+  const partyUpdateData = clientOfflineInfo
+    ? withFkOfflineSentinel(
+        clientOfflineInfo.isTempClientId, true, 'client_id', clientOfflineInfo.tempClientId, 'clients',
+        clientOfflineInfo.fallbackNameValue, { client_id: clientId },
+      )
+    : { client_id: clientId };
+  const partyResult = await window.__dbWrite({
+    type: 'UPDATE',
+    table: 'case_parties',
+    id: partyId,
+    data: partyUpdateData,
+  });
+  let caseOk = true;
+  if (isPrimaryParty) {
+    const caseResult = await window.__dbWrite({
+      type: 'UPDATE',
+      table: 'cases',
+      id: caseId,
+      data: withCaseSelfOfflineSentinel(caseId, { client_id: clientId }, caseTitle),
+    });
+    caseOk = !caseResult.error;
+  }
+  return { ok: !partyResult.error && caseOk };
+}
+
+// ══════════════════════════════════════════════════════════════
+//  خطة تعدد الأطراف — مرحلة 13 جزء 2 (23 يوليو 2026): نسخة من
+//  linkClientToParty فوق، بس لطرف تابع لجلسة مستقلة *لسه ما اتحوّلتش
+//  لقضية* (زرار "إضافة الموكل لقائمة الموكلين فقط" في NewStandaloneSessionModal —
+//  مفيش case_id أصلًا في اللحظة دي، الطرف لسه عنده session_id بس). نفس
+//  فلسفة linkClientToParty بالحرف (case_parties.client_id للطرف ده بس +
+//  تحديث "الأساسي" لو ده الطرف الأساسي)، غير إن المزامنة القديمة بتروح
+//  لـ case_sessions.client_id بدل cases.client_id (مفيش cases.client_id
+//  أصلًا من غير قضية) — نفس عمود case_sessions.client_id اللي كان بيتحدّث
+//  قبل مرحلة 13 عن طريق linkTarget نوعه 'session' (مسار الموكل الواحد
+//  القديم في useClientActions.ts)، صفر تغيير في العمود المستهدف نفسه.
+// ══════════════════════════════════════════════════════════════
+
+export async function linkClientToSessionParty(
+  partyId: string,
+  clientId: string,
+  isPrimaryParty: boolean,
+  sessionId: string,
+  clientOfflineInfo?: { isTempClientId: boolean; tempClientId: string; fallbackNameValue: string | null },
+): Promise<{ ok: boolean }> {
+  const partyUpdateData = clientOfflineInfo
+    ? withFkOfflineSentinel(
+        clientOfflineInfo.isTempClientId, true, 'client_id', clientOfflineInfo.tempClientId, 'clients',
+        clientOfflineInfo.fallbackNameValue, { client_id: clientId },
+      )
+    : { client_id: clientId };
+  const partyResult = await window.__dbWrite({
+    type: 'UPDATE',
+    table: 'case_parties',
+    id: partyId,
+    data: partyUpdateData,
+  });
+  let sessionOk = true;
+  if (isPrimaryParty) {
+    // ⚠️ مفيش withCaseSelfOfflineSentinel هنا عمدًا — sessionId هنا لازم
+    // يكون id حقيقي دايمًا (الطرف بيتفتح ليه زرار بس لو savedFormData.sessionId
+    // موجود، وده بس بيتحدد لو الجلسة اتحفظت أونلاين بنجاح — راجع الشرط
+    // في NewStandaloneSessionModal.tsx). لو الجلسة نفسها أوفلاين، الزرار
+    // مبيظهرش أصلًا (نفس سلوك مسار 'session' القديم في handleAddClientOnly).
+    const sessionResult = await window.__dbWrite({
+      type: 'UPDATE',
+      table: 'case_sessions',
+      id: sessionId,
+      data: { client_id: clientId },
+    });
+    sessionOk = !sessionResult.error;
+  }
+  return { ok: !partyResult.error && sessionOk };
+}
+
+// ══════════════════════════════════════════════════════════════
+//  خطة توحيد مصدر بيانات الموكل — المرحلة السادسة (تنبيه عند الربط
+//  اللاحق): لما قضية/جلسة مستقلة عندها بيانات حرة (plaintiff_*) اتربطت
+//  لاحقًا (بعد الإنشاء) بموكل من النظام، بنقارن القيم الحرة المكتوبة
+//  بقيم ملف الموكل الحقيقي. لو فيه تعارض حقيقي (القيمتين موجودتين
+//  ومختلفتين — مش مجرد حقل فاضي هيتملى)، بترجع أسماء الحقول المتعارضة
+//  عشان الواجهة تعرض تنبيه تأكيد بدل ما تستبدل صامت.
+// ══════════════════════════════════════════════════════════════
+
+export interface FreeTextPartyFields {
+  plaintiff?: string | null;
+  plaintiff_national_id?: string | null;
+  plaintiff_power_of_attorney?: string | null;
+  /** case_sessions مفيهاش العمود ده أصلاً (شوف فاز 3) — سيبها undefined
+   * لو المصدر جلسة، هتتجاهل تلقائيًا في المقارنة. */
+  plaintiff_address?: string | null;
+}
+
+export interface ClientPartyFields {
+  full_name?: string | null;
+  client_name?: string | null;
+  national_id?: string | null;
+  cr_number?: string | null;
+  address?: string | null;
+}
+
+export interface FieldMismatch {
+  field: 'name' | 'national_id' | 'poa' | 'address';
+  label: string;
+  freeTextValue: string;
+  clientValue: string;
+}
+
+/**
+ * بترجع مصفوفة الحقول اللي فيها تعارض فعلي — القيمة الحرة موجودة، وقيمة
+ * الموكل موجودة، والاتنين مختلفين بعد trim. حقل فاضي في أي ناحية (لسه
+ * ما اتكتبش، أو ملف الموكل ناقصه) مش تعارض، هيتملى عادي من غير تنبيه.
+ */
+export function findClientDataMismatches(
+  freeText: FreeTextPartyFields,
+  client: ClientPartyFields,
+): FieldMismatch[] {
+  const mismatches: FieldMismatch[] = [];
+  const clientName = (client.full_name || client.client_name || '').trim();
+  const freeName = (freeText.plaintiff || '').trim();
+  if (freeName && clientName && freeName !== clientName) {
+    mismatches.push({ field: 'name', label: 'الاسم', freeTextValue: freeName, clientValue: clientName });
+  }
+  const freeNid = (freeText.plaintiff_national_id || '').trim();
+  const clientNid = (client.national_id || '').trim();
+  if (freeNid && clientNid && freeNid !== clientNid) {
+    mismatches.push({ field: 'national_id', label: 'الرقم القومي', freeTextValue: freeNid, clientValue: clientNid });
+  }
+  const freePoa = (freeText.plaintiff_power_of_attorney || '').trim();
+  const clientPoa = (client.cr_number || '').trim();
+  if (freePoa && clientPoa && freePoa !== clientPoa) {
+    mismatches.push({ field: 'poa', label: 'رقم التوكيل', freeTextValue: freePoa, clientValue: clientPoa });
+  }
+  if (freeText.plaintiff_address !== undefined) {
+    const freeAddr = (freeText.plaintiff_address || '').trim();
+    const clientAddr = (client.address || '').trim();
+    if (freeAddr && clientAddr && freeAddr !== clientAddr) {
+      mismatches.push({ field: 'address', label: 'العنوان', freeTextValue: freeAddr, clientValue: clientAddr });
+    }
+  }
+  return mismatches;
 }
