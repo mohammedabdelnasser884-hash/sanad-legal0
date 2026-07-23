@@ -449,6 +449,7 @@ export interface Database {
           plaintiff_national_id: string | null
           plaintiff_power_of_attorney: string | null
           defendant_national_id: string | null
+          plaintiff_address: string | null
           deleted_at: string | null
         }
         Insert: {
@@ -484,6 +485,7 @@ export interface Database {
           plaintiff_national_id?: string | null
           plaintiff_power_of_attorney?: string | null
           defendant_national_id?: string | null
+          plaintiff_address?: string | null
           deleted_at?: string | null
         }
         Update: {
@@ -519,6 +521,7 @@ export interface Database {
           plaintiff_national_id?: string | null
           plaintiff_power_of_attorney?: string | null
           defendant_national_id?: string | null
+          plaintiff_address?: string | null
           deleted_at?: string | null
         }
         // ⚠️ مطلوبة بنيويًا من supabase-js (بيتحقق منها داخليًا وقت استنتاج
