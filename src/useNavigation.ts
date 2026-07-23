@@ -76,6 +76,56 @@ const PATH_TABS: Record<string, TabName> = Object.fromEntries(
 
 const LS_TAB_KEY = 'nasser_nav_tab';
 
+// ─── Nested modals (modal opened INSIDE an already-open top-level modal) ────
+// ⚡ NEW (خطة "تطوير أطراف الدعوى" — مرحلة 4، 23 يوليو 2026): آلية عامة
+// لأي "نموذج فرعي" بيتفتح جوه نموذج رئيسي مفتوح بالفعل (زي نموذج فرعي
+// لطرف الدعوى جوه NewCaseModal). مشكلة زر الرجوع القديمة (قسم المرجع في
+// تقرير خطة المسمى القانوني، بند هـ) كانت بتحصل لأن useNavigation فوق
+// بيتتبع "مودال واحد بس" (activeModal)، فأي حالة محلية (useState) لنموذج
+// فرعي جوه مودال مفتوح أصلاً مفيهاش أي حماية من زر الرجوع — ضغطة الرجوع
+// كانت بتوصل لـ onPop تحت وهو مش عارف إن فيه نموذج فرعي مفتوح، فيقفل
+// المودال الرئيسي كله (أو يتوه) بدل ما يقفل النموذج الفرعي بس.
+//
+// الحل: stack بسيط (خارج React state تمامًا، على مستوى الملف) بيسجل فيه
+// أي نموذج فرعي نفسه وقت الفتح عن طريق registerNestedModal()، وonPop تحت
+// بيفحص الـ stack ده **أول حاجة قبل أي منطق تاني** — لو فيه نموذج فرعي
+// مسجل، يقفل هو بس (ويرجع)، من غير ما يوصل لمنطق قفل المودال الرئيسي.
+// هي نفس الـ listener الواحد (onPop) اللي بيتسجل مرة واحدة في الأب، فمفيش
+// أي مشكلة ترتيب تسجيل listeners بين مكونات مختلفة.
+type NestedModalCloseFn = () => void;
+const nestedModalStack: NestedModalCloseFn[] = [];
+
+/**
+ * يسجّل نموذج فرعي مفتوح حاليًا عشان زر الرجوع (الفعلي/فيزيائي) يقفله هو
+ * بس، مش المودال الرئيسي اللي هو مفتوح جواه. الاستخدام (جوه useEffect):
+ *
+ *   useEffect(() => {
+ *     if (!isOpen) return;
+ *     return registerNestedModal(() => setIsOpen(false));
+ *   }, [isOpen]);
+ *
+ * بيرجّع دالة "إلغاء تسجيل" — لازم تتنده وقت القفل اليدوي (زرار حفظ/إغلاق)
+ * برضو (بترجع تلقائيًا من الـ useEffect cleanup فوق) عشان الـ stack وحالة
+ * الـ history يفضلوا متزامنين حتى لو المستخدم قفل بزرار مش بزر الرجوع.
+ */
+export function registerNestedModal(onClose: NestedModalCloseFn): () => void {
+  window.history.pushState({ type: 'nested' }, '', window.location.pathname);
+  nestedModalStack.push(onClose);
+  let active = true;
+  return () => {
+    if (!active) return;
+    active = false;
+    const idx = nestedModalStack.lastIndexOf(onClose);
+    if (idx !== -1) nestedModalStack.splice(idx, 1);
+    // لو الـ entry اللي إحنا ضفناها لسه هي الحالية (يعني ده قفل يدوي، مش
+    // نتيجة إن المستخدم دعس رجوع بالفعل وonPop تحت هو اللي قفلنا) — نرجع
+    // نمسحها من الـ history عشان الـ stack يفضل متوازن.
+    if ((window.history.state as { type?: string } | null)?.type === 'nested') {
+      window.history.back();
+    }
+  };
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function tabFromUrl(): TabName | null {
@@ -151,6 +201,16 @@ export function useNavigation(): NavigationState {
   // ── popstate handler ─────────────────────────────────────────────────
   useEffect(() => {
     const onPop = (e: PopStateEvent) => {
+      // ── Case 0: a nested sub-modal is open → close IT only, and stop ──
+      // (راجع تعريف nestedModalStack فوق) — لازم يتفحص قبل أي حاجة تانية،
+      // عشان زر الرجوع وهو مودال رئيسي فاتح ونموذج فرعي جواه مفتوح كمان،
+      // يقفل النموذج الفرعي بس ويسيب المودال الرئيسي زي ما هو.
+      if (nestedModalStack.length > 0) {
+        const closeFn = nestedModalStack.pop();
+        closeFn?.();
+        return;
+      }
+
       const currentModal = activeModalRef.current;
       const currentTab   = tabRef.current;
 
