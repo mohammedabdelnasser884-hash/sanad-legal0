@@ -21,6 +21,9 @@ interface SessionsCalendarProps {
     // React state محلي بحت مش مسجّل في useNavigation. زر الرجوع كان بيقفل
     // تاب التقويم كله بدل ما يقفل المودال بس.
     nav: NavigationState;
+    // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 3): زرار "✏️ عدّل من
+    // ملف الموكل" جوه EditStandaloneModal.
+    onOpenClientProfile?: (client: MappedClient) => void;
 }
 
 // شكل صف case_sessions اللي بيترجع من استعلامي fetchMissedCount هنا
@@ -35,7 +38,7 @@ interface OverdueReminderRow {
     done: boolean;
 }
 
-function SessionsCalendar({ cases, clients, onOpenCase, onOpenReminders, onClientAdded, initialTab, nav }: SessionsCalendarProps) {
+function SessionsCalendar({ cases, clients, onOpenCase, onOpenReminders, onClientAdded, initialTab, nav, onOpenClientProfile }: SessionsCalendarProps) {
     const [activeTab, setActiveTab] = useState<'month'|'calendar'|'missed'>(initialTab || 'calendar');
     const [missedCount, setMissedCount] = useState(0);
     // النوع الأعم (CalendarSessionRow) بيغطي كل الاستخدامات التلاتة (Calendar/Missed/Month)
@@ -102,6 +105,8 @@ function SessionsCalendar({ cases, clients, onOpenCase, onOpenReminders, onClien
             onClose: () => setStandaloneTarget(null),
             onDone: () => { setStandaloneTarget(null); setRefreshKey((k: number) => k + 1); },
             onClientAdded,
+            clients,
+            onOpenClientProfile,
         }),
         React.createElement('div', { className: "space-y-2 fade-in" },
 
