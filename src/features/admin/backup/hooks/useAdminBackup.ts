@@ -21,19 +21,26 @@ const FETCH_PAGE_SIZE = 1000;
 const INSERT_CHUNK_SIZE = 500;
 
 // ── جدول الجداول اللي بيغطيها الباك أب، بترتيب الإدخال (الآباء الأول) ──
-const BACKUP_TABLES: BackupTableName[] = ['clients','cases','case_sessions','case_fees','fee_payments','case_documents','reminders','client_portal_pins','activity_log'];
+// case_parties اتضافت بعد case_sessions (مرحلة 12 من خطة تعدد الأطراف —
+// الجدول ده بيرجع لـ cases/case_sessions الاتنين، فلازم ييجي بعد الاتنين).
+const BACKUP_TABLES: BackupTableName[] = ['clients','cases','case_sessions','case_parties','case_fees','fee_payments','case_documents','reminders','client_portal_pins','activity_log'];
 
 // ── نفس الجداول لكن بترتيب الحذف (الأبناء الأول، عشان القيود الأجنبية) ──
 // ⚠️ profiles و activity_log مُستثناتان عمداً من الحذف (upsert فقط) — انظر التعليق في handleRestoreBackup
-const RESTORE_DELETE_ORDER: BackupTableName[] = ['fee_payments','case_fees','case_documents','case_sessions','reminders','client_portal_pins','cases','clients'];
-const RESTORE_INSERT_ORDER: BackupTableName[] = ['clients','cases','case_sessions','case_fees','fee_payments','case_documents','reminders','client_portal_pins'];
+// case_parties محطوطة الأول في ترتيب الحذف: معندهاش أي جدول بيرجعلها بـ FK
+// (مفيش ابن ليها)، وهي نفسها بترجع لـ cases/case_sessions/clients (CASCADE/SET NULL) —
+// فحذفها الأول آمن ومتوافق مع فلسفة "الأبناء الأول" هنا.
+const RESTORE_DELETE_ORDER: BackupTableName[] = ['case_parties','fee_payments','case_fees','case_documents','case_sessions','reminders','client_portal_pins','cases','clients'];
+// case_parties بعد case_sessions في ترتيب الإدخال لنفس السبب (بترجع لـ cases و
+// case_sessions الاتنين عن طريق case_id/session_id، فلازم الاتنين يكونوا موجودين قبلها).
+const RESTORE_INSERT_ORDER: BackupTableName[] = ['clients','cases','case_sessions','case_parties','case_fees','fee_payments','case_documents','reminders','client_portal_pins'];
 
 // ── الجداول الحقيقية الوحيدة اللي البك أب/الاستعادة بيلفوا عليها فعليًا ──
 // (نفس محتوى BACKUP_TABLES/RESTORE_*_ORDER + 'profiles'/'activity_log'
 // المُضافين لاحقًا في handleCreateBackup/handleRestoreBackup) — union حقيقي
 // من أسماء الجداول، بدل string عام.
 type BackupTableName =
-  | 'clients' | 'cases' | 'case_sessions' | 'case_fees' | 'fee_payments'
+  | 'clients' | 'cases' | 'case_sessions' | 'case_parties' | 'case_fees' | 'fee_payments'
   | 'case_documents' | 'reminders' | 'client_portal_pins' | 'activity_log'
   | 'profiles';
 
