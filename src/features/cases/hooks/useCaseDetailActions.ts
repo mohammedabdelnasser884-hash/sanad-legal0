@@ -209,6 +209,37 @@ export function useCaseDetailActions(
     const partyDefendants = safeCaseParties.filter((p) => p.side === 'defendant');
     const hasCaseParties = safeCaseParties.length > 0;
 
+    // ⚡ NEW (خطة تطوير أطراف الدعوى، مرحلة 6 — 24 يوليو 2026): المسمى
+    // القانوني الجامع لكل جهة (مخزّن على مستوى القضية نفسها منذ مرحلة 1
+    // من نفس الخطة) — بيُستخدم كعنوان فوق قائمة الأشخاص في تقرير الـ PDF
+    // بس لما يكون عدد أشخاص الجهة أكتر من واحد (مطابقةً لنفس شرط الظهور
+    // في فورم الإدخال وInfoSection.tsx، بند 5-2 من التقرير).
+    const safePlaintiffLegalTitle = escapeHtml((caseData.plaintiff_legal_title || '').trim());
+    const safeDefendantLegalTitle = escapeHtml((caseData.defendant_legal_title || '').trim());
+
+    // بيبني بلوك عرض جهة واحدة (مدعي أو مدعى عليه) داخل قسم "أطراف الدعوى":
+    //   - شخص واحد (الحالة الغالبة): بلوك حقل مفرد، **بلا أي تغيير عن الشكل
+    //     القديم** (label = الصفة + علامة "— موكل"، span = الاسم).
+    //   - أكتر من شخص: بلوك واحد يمتد بعرض الصف كامل، بعنوان 🔖 المسمى
+    //     القانوني (لو موجود) فوق قائمة مضغوطة سطر لكل شخص — بدل ما كان
+    //     بيتكرر بلوك حقل كامل لكل شخص (تفاديًا لإطالة التقرير غير الضرورية
+    //     عند تعدد الأشخاص، حسب اشتراط بند 5-1 من التقرير).
+    const renderPartySideBlock = (
+      persons: { name: string; capacity: string; isClient: boolean }[],
+      legalTitle: string
+    ): string => {
+      if (persons.length === 0) return '';
+      if (persons.length === 1) {
+        const p = persons[0];
+        return `<div class="field"><label>${p.capacity}${p.isClient ? ' — موكل' : ''}</label><span>${p.name}</span></div>`;
+      }
+      const titleLine = legalTitle ? `<div class="party-group-title">🔖 ${legalTitle}</div>` : '';
+      const lines = persons.map((p) =>
+        `<div class="party-person-line">${p.name}${p.capacity ? ` <span class="party-person-capacity">(${p.capacity})</span>` : ''}${p.isClient ? ' <span class="party-person-client">— موكل</span>' : ''}</div>`
+      ).join('');
+      return `<div class="party-group-box">${titleLine}${lines}</div>`;
+    };
+
     // ⚡ FIX (19 يوليو 2026): بيانات الجلسة/السكرتير كانت بتتحفظ في القضية
     // بس مكانتش بتظهر في تقرير PDF خالص — بنضيفها كقسم مستقل تحت الهيدر.
     const safeSessionTimeLabel = caseData.session_time === 'صباحي' ? '🌅 صباحي' : caseData.session_time === 'مسائي' ? '🌆 مسائي' : '';
@@ -247,6 +278,11 @@ ${PDF_FONT_LINK}
   .field{background:#f8f9fa;border-radius:8px;padding:10px 12px;}
   .field label{font-size:9px;color:#888;display:block;margin-bottom:3px;font-weight:700;}
   .field span{font-size:12px;font-weight:700;color:#1a1a2e;}
+  .party-group-box{grid-column:1/-1;background:#f8f9fa;border-radius:8px;padding:10px 12px;}
+  .party-group-title{font-size:11px;font-weight:900;color:#1a1a2e;margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid #e8e8e8;}
+  .party-person-line{font-size:11px;font-weight:700;color:#1a1a2e;padding:2px 0;}
+  .party-person-capacity{font-size:10px;font-weight:600;color:#888;}
+  .party-person-client{font-size:10px;font-weight:700;color:#D4AF37;}
   .session-card{border:1px solid #e8e8e8;border-right:4px solid #D4AF37;border-radius:8px;padding:12px;margin-bottom:8px;}
   .session-date{font-size:12px;font-weight:900;color:#D4AF37;margin-bottom:6px;}
   .session-label{font-size:9px;color:#888;font-weight:700;margin-top:6px;}
@@ -296,8 +332,8 @@ ${PDF_FONT_LINK}
   <div class="section">
     <h2>⚖️ أطراف الدعوى</h2>
     <div class="grid2">
-      ${partyPlaintiffs.map((p) => `<div class="field"><label>${p.capacity}${p.isClient ? ' — موكل' : ''}</label><span>${p.name}</span></div>`).join('')}
-      ${partyDefendants.map((p) => `<div class="field"><label>${p.capacity}${p.isClient ? ' — موكل' : ''}</label><span>${p.name}</span></div>`).join('')}
+      ${renderPartySideBlock(partyPlaintiffs, safePlaintiffLegalTitle)}
+      ${renderPartySideBlock(partyDefendants, safeDefendantLegalTitle)}
     </div>
   </div>` : ''}
 
