@@ -306,6 +306,87 @@ export interface Database {
         // هنا (محتاجة استعلام تاني على information_schema)، فسايبينها فاضية.
         Relationships: []
       },
+      // ⚠️ NEW (خطة تعدد الأطراف، مرحلة 1 — 22 يوليو 2026): جدول
+      // case_parties (database/migrations/case-parties-migration.sql).
+      // الأعمدة/الأنواع هنا منقولة حرفيًا من نص الـ migration نفسه (مش
+      // تخمين من information_schema زي باقي الملف ده) — see CREATE TABLE
+      // case_parties هناك للتفاصيل الكاملة (constraints، indexes، RLS).
+      case_parties: {
+        Row: {
+          id: string
+          tenant_id: string | null
+          case_id: string | null
+          session_id: string | null
+          side: string | null
+          is_client: boolean | null
+          name: string | null
+          capacity: string | null
+          national_id: string | null
+          address: string | null
+          power_of_attorney: string | null
+          client_id: string | null
+          sort_order: number | null
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          tenant_id?: string | null
+          case_id?: string | null
+          session_id?: string | null
+          side?: string | null
+          is_client?: boolean | null
+          name?: string | null
+          capacity?: string | null
+          national_id?: string | null
+          address?: string | null
+          power_of_attorney?: string | null
+          client_id?: string | null
+          sort_order?: number | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          tenant_id?: string | null
+          case_id?: string | null
+          session_id?: string | null
+          side?: string | null
+          is_client?: boolean | null
+          name?: string | null
+          capacity?: string | null
+          national_id?: string | null
+          address?: string | null
+          power_of_attorney?: string | null
+          client_id?: string | null
+          sort_order?: number | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "case_parties_case_id_fkey"
+            columns: ["case_id"]
+            isOneToOne: false
+            referencedRelation: "cases"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "case_parties_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "case_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "case_parties_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          }
+        ]
+      },
       case_sessions: {
         Row: {
           id: string
