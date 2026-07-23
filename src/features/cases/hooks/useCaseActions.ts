@@ -4,10 +4,13 @@ import { logActivity } from '../../../shared/lib/dataAccess';
 import { checkCaseNumberDuplicate } from '../../../shared/lib/caseValidation';
 import { showErrorToast } from '../../../shared/lib/errorReporting';
 import { db } from '../../../supabaseClient';
+import { withFkOfflineSentinel } from '../../calendar/hooks/caseSessionLinkingShared';
 import type { Dispatch, SetStateAction } from 'react';
 import type { ClientRow, ProfileRow } from '../../../types';
 import type { NavigationState } from '../../../useNavigation';
 import type { MappedCase } from '../../../hooks/useAppData';
+import type { PartyFieldValue } from '../../../shared/parties/partyTypes';
+import { validateParties } from '../../../shared/lib/casePartiesValidation';
 
 // شكل البيانات اللي بتوصل فعليًا من NewCaseModal/EditCaseModal لـ onSave —
 // اتحقق من كل استخدام حقيقي في handleSaveCase/handleUpdateCase تحت، وبيغطي
@@ -40,6 +43,23 @@ export interface CaseFormSubmitData {
     plaintiff_national_id?: string;
     plaintiff_power_of_attorney?: string;
     defendant_national_id?: string;
+    // ⚡ NEW (21 يوليو 2026): عنوان الموكل — راجع NewCaseModal/EditCaseModal.
+    plaintiff_address?: string;
+    // ⚡ NEW (مرحلة 4.2 — خطة تعدد الأطراف، 22 يوليو 2026): array أطراف
+    // الدعوى الكامل (usePartyFields().parties) — لو موجودة، handleSaveCase
+    // بيكتب صف في case_parties لكل طرف (بالإضافة لمزامنة الأعمدة القديمة
+    // فوق من "الطرف الأساسي" في كل جهة، اللي بتحصل زي ما هي بالظبط).
+    // اختيارية عشان أي كود قديم/تستات بتبعت الشكل القديم من غيرها تفضل شغالة.
+    parties?: PartyFieldValue[];
+    // ⚡ NEW (مرحلة 5.2 — خطة تعدد الأطراف، 22 يوليو 2026): بس من
+    // EditCaseModal — أرقام (ids) صفوف case_parties الحقيقية اللي كانت
+    // موجودة فعلاً وقت فتح الفورم (existingPartyRows وقت الـ mount، شوف
+    // مرحلة 5.1). handleUpdateCase بيستخدمها عشان يفرّق تعديل (id موجود
+    // في القايمة دي) عن إضافة جديدة (id مؤقت `legacy-*`/`party-*` مش
+    // موجود فيها)، وكمان عشان يحدد أي صف قديم اتشال من الفورم فيحذفه.
+    // مفيش داعي نستعلم تاني من الداتابيز وقت الحفظ — النسخة اللي أُخذت
+    // وقت الفتح كافية للمقارنة وبتشتغل حتى أوفلاين.
+    existingPartyIds?: string[];
 }
 
 // شكل بيانات مودال تأكيد الحذف/الأرشفة (زي ما بيتبنى في handleDeleteCase تحت)
@@ -161,6 +181,7 @@ export function useCaseActions(params: {
             plaintiff_national_id: form.plaintiff_national_id || null,
             plaintiff_power_of_attorney: form.plaintiff_power_of_attorney || null,
             defendant_national_id: form.defendant_national_id || null,
+            plaintiff_address: form.plaintiff_address || null,
             // 🔒 FIX (تقرير الموثوقية — نتيجة 3، ٦.٢): تحسين احتياطي —
             // التريجر trg_tenant_id_cases (set_tenant_id_from_profile) بيملّ
             // tenant_id تلقائيًا من current_tenant_id() لو الحقل جاي فاضي،
@@ -171,6 +192,56 @@ export function useCaseActions(params: {
             _offlineTempId: offlineTempId,
         };
         const offlineId = 'offline-' + Date.now();
+
+        // ⚡ NEW (مرحلة 4.2 — خطة تعدد الأطراف): بيكتب صف في case_parties لكل
+        // طرف في form.parties، بنداءات __dbWrite منفصلة (قرار قسم 8 — خيار أ:
+        // نتنازل عن الذرّية الكاملة مقابل التوافق مع الأوفلاين). لو القضية
+        // نفسها لسه في الطابور (offline&&queued)، كل صف طرف بياخد
+        // _offlineFkTempId (نفس آلية caseSessionLinkingShared.ts) عشان يتربط
+        // بالـ case_id الحقيقي وقت المزامنة بدل ما ننتظر id حقيقي دلوقتي.
+        // النتيجة بترجع سبب الفشل صراحةً (بدل boolean بس) عشان مكان النداء
+        // يقدر يختار الرسالة المناسبة من غير ما نعرض توست مزدوج (واحد من
+        // جوه الدالة وواحد تاني من بره) لنفس المشكلة.
+        type InsertPartiesResult = { ok: true } | { ok: false; reason: 'validation'; message: string } | { ok: false; reason: 'write' };
+        const insertCaseParties = async (caseId: string | null, isOffline: boolean, isQueued: boolean): Promise<InsertPartiesResult> => {
+            const parties = form.parties;
+            if (!parties || parties.length === 0) return { ok: true };
+            // 🔒 NEW (خطوة 4.3 — خطة تعدد الأطراف، قسم 7-ج): فاليديشن سيرفر
+            // مكرر — نفس قواعد casePartiesValidation.ts (اسم/صفة إجباريين،
+            // رقم قومي 14 رقم لموكل المكتب، طرف is_client واحد على الأقل،
+            // منع تكرار الرقم القومي...) بتتفحص تاني هنا قبل أي INSERT حقيقي،
+            // مش بس فاليديشن الفورم (usePartyFields.ts). ده خط دفاع تاني —
+            // فورم NewCaseModal.tsx بيمنع الحفظ أصلاً لو الفاليديشن فشلت، فمن
+            // المفروض الحالة دي متوصلش هنا عمليًا، لكن لو مصدر حفظ تاني ظهر
+            // مستقبلًا (أو state الفورم اتلاعب فيه برمجيًا قبل onSave)، بنرفض
+            // كتابة أي صف بدل ما نسيب بيانات غير صالحة توصل case_parties —
+            // ومفيش أي INSERT بيتبعت خالص لو الفحص فشل (رفض كامل قبل أول نداء).
+            const serverCheck = validateParties(parties);
+            if (!serverCheck.valid) {
+                return { ok: false, reason: 'validation', message: serverCheck.message || '⚠️ بيانات أطراف الدعوى غير مكتملة أو غير صحيحة' };
+            }
+            let allOk = true;
+            for (let i = 0; i < parties.length; i++) {
+                const p = parties[i];
+                const rowData: Record<string, unknown> = {
+                    case_id: caseId,
+                    side: p.side,
+                    is_client: p.is_client,
+                    name: p.name,
+                    capacity: p.capacity,
+                    national_id: p.national_id || null,
+                    address: p.address || null,
+                    power_of_attorney: p.power_of_attorney || null,
+                    client_id: p.client_id || null,
+                    sort_order: i,
+                };
+                const finalData = withFkOfflineSentinel(isOffline, isQueued, 'case_id', offlineTempId, 'cases', form.title, rowData);
+                const partyResult = await window.__dbWrite({ type: 'INSERT', table: 'case_parties', data: finalData });
+                if (partyResult.error) allOk = false;
+            }
+            return allOk ? { ok: true } : { ok: false, reason: 'write' };
+        };
+
         const { error, offline, queued, data: insertedCase } = await window.__dbWrite({
             type: 'INSERT', table: 'cases', data: payload, returning: true
         });
@@ -197,6 +268,21 @@ export function useCaseActions(params: {
                 });
             }
             toast('📥 محفوظة محلياً — ستُضاف فور عودة الإنترنت');
+            // الأطراف بتتقيّد هي كمان في نفس طابور الأوفلاين — بتتحل تلقائيًا
+            // بالـ case_id الحقيقي وقت المزامنة (_offlineFkTempId فوق).
+            const offlinePartiesResult = await insertCaseParties(null, true, true);
+            // ⚡ NEW (4.3): القضية نفسها اتقيّدت أوفلاين بنجاح (توست فوق)،
+            // لكن لو فحص الأطراف فشل (نادر جدًا — يعني state الفورم اتلاعب
+            // فيه برمجيًا بعد فاليديشن الفورم)، لازم نعلم المستخدم إن أطراف
+            // الدعوى مانضافتش رغم إن القضية اتقيّدت، بدل ما نسكت عن الفشل.
+            if (!offlinePartiesResult.ok) {
+                toast(
+                    offlinePartiesResult.reason === 'validation'
+                        ? offlinePartiesResult.message
+                        : '⚠️ القضية اتقيّدت محليًا، لكن حصل خطأ في حفظ بعض أطراف الدعوى الإضافية — راجعها بعد المزامنة',
+                    true
+                );
+            }
             setCases((prev) => [{ ...payload, id: offlineId, ...form, status: 'نشطة', date: form.date || '—' } as unknown as MappedCase, ...prev]);
         } else if (error) {
             // 🔒 FIX (تقرير الموثوقية — نتيجة 3): خط دفاع أخير — راجع
@@ -230,6 +316,22 @@ export function useCaseActions(params: {
                 // المُدرج (مثلاً سياسة RLS بتمنع SELECT بعد INSERT) — القضية
                 // موجودة فعليًا، بس الجلسة الأولى محتاجة تتضاف يدويًا.
                 toast('⚠️ القضية اتسجلت، بس الجلسة الأولى محتاجة تتضاف يدويًا من صفحة القضية', true);
+            }
+            // ⚡ NEW (مرحلة 4.2): تسجيل كل أطراف الدعوى في case_parties — أونلاين
+            // بالـ id الحقيقي مباشرة (مفيش داعي لسنتينل هنا).
+            if (newCaseId) {
+                const partiesResult = await insertCaseParties(newCaseId, false, false);
+                if (!partiesResult.ok) {
+                    // 🔒 (4.3): فشل الفاليديشن بيتعرض برسالته المحدّدة (نفس
+                    // رسالة usePartyFields.ts)، وفشل الكتابة بيتعرض برسالة
+                    // عامة — توست واحد بس في الحالتين، مش توست مزدوج.
+                    toast(
+                        partiesResult.reason === 'validation'
+                            ? partiesResult.message
+                            : '⚠️ القضية اتسجلت، لكن حصل خطأ في حفظ بعض أطراف الدعوى الإضافية — راجعها من تفاصيل القضية',
+                        true
+                    );
+                }
             }
             toast('✅ تم الحفظ في نظام سند!');
             // إشعار تليجرام
@@ -396,6 +498,61 @@ export function useCaseActions(params: {
                 return;
             }
             if (caseDup.duplicate) { toast(caseDup.message!, true); setSavingCase(false); return; }
+
+            // ⚡ NEW (مرحلة 5.2 — خطة تعدد الأطراف، 22 يوليو 2026): نفس فلسفة
+            // insertCaseParties في handleSaveCase (فاليديشن سيرفر مكرر أولاً،
+            // رفض كامل قبل أي كتابة لو فشلت — راجع 4.3)، بس هنا upsert-by-id
+            // بدل INSERT بس: id موجود في existingPartyIds (اللي جت من
+            // EditCaseModal وقت فتح الفورم) = تعديل، id مؤقت (`legacy-*`/
+            // `party-*`) أو أي id تاني مش في القايمة = إضافة جديدة، وأي id
+            // كان في existingPartyIds واتشال من form.parties دلوقتي = حذف.
+            // بنداءات __dbWrite منفصلة (زي 4.2 بالظبط — بدون ذرّية كاملة)،
+            // ومفيش حاجة لـ _offlineFkTempId هنا (بعكس 4.2) لأن caseId هنا
+            // حقيقي دايمًا (القضية أصلاً موجودة قبل التعديل)، أونلاين أو
+            // أوفلاين — window.__dbWrite بيتعامل مع الأوفلاين لوحده لكل نداء.
+            type SyncPartiesResult = { ok: true } | { ok: false; reason: 'validation'; message: string } | { ok: false; reason: 'write' };
+            const syncCaseParties = async (targetCaseId: string): Promise<SyncPartiesResult> => {
+                const parties = form.parties;
+                if (!parties) return { ok: true };
+                const serverCheck = validateParties(parties);
+                if (!serverCheck.valid) {
+                    return { ok: false, reason: 'validation', message: serverCheck.message || '⚠️ بيانات أطراف الدعوى غير مكتملة أو غير صحيحة' };
+                }
+                const existingIds = form.existingPartyIds || [];
+                const currentIds = new Set(parties.map((p) => p.id));
+                let allOk = true;
+                // 1) حذف أي صف كان موجود فعلاً وقت فتح الفورم واتشال منها دلوقتي
+                for (const oldId of existingIds) {
+                    if (!currentIds.has(oldId)) {
+                        const delResult = await window.__dbWrite({ type: 'DELETE', table: 'case_parties', id: oldId });
+                        if (delResult.error) allOk = false;
+                    }
+                }
+                // 2) upsert لكل طرف موجود في الفورم دلوقتي — تعديل لو الـ id
+                // حقيقي وموجود في existingIds، إضافة جديدة لو مش موجود فيها
+                // (id مؤقت من usePartyFields أو fallback القديم).
+                for (let i = 0; i < parties.length; i++) {
+                    const p = parties[i];
+                    const rowData: Record<string, unknown> = {
+                        case_id: targetCaseId,
+                        side: p.side,
+                        is_client: p.is_client,
+                        name: p.name,
+                        capacity: p.capacity,
+                        national_id: p.national_id || null,
+                        address: p.address || null,
+                        power_of_attorney: p.power_of_attorney || null,
+                        client_id: p.client_id || null,
+                        sort_order: i,
+                    };
+                    const result = existingIds.includes(p.id)
+                        ? await window.__dbWrite({ type: 'UPDATE', table: 'case_parties', data: rowData, id: p.id })
+                        : await window.__dbWrite({ type: 'INSERT', table: 'case_parties', data: rowData });
+                    if (result.error) allOk = false;
+                }
+                return allOk ? { ok: true } : { ok: false, reason: 'write' };
+            };
+
             const payload = {
                 case_number_official: form.number || null,
                 title: form.title,
@@ -417,6 +574,7 @@ export function useCaseActions(params: {
                 plaintiff_national_id: form.plaintiff_national_id || null,
                 plaintiff_power_of_attorney: form.plaintiff_power_of_attorney || null,
                 defendant_national_id: form.defendant_national_id || null,
+                plaintiff_address: form.plaintiff_address || null,
             };
             // FIX: Optimistic Locking لتعديل القضايا — كان `updated_at` بيتجاب
             // ويتخزّن في الـ state (شوف useAppData.ts) خصيصًا للاستخدام هنا، بس
@@ -435,6 +593,19 @@ export function useCaseActions(params: {
                 // تحديث فوري في الـ state المحلي
                 setCases((prev) => prev.map((c) => c.id === caseId ? { ...c, ...form } : c));
                 if (selectedCase?.id === caseId) setSelectedCase((p) => p ? { ...p, ...form } : p);
+                // ⚡ NEW (5.2): القضية اتقيّدت أوفلاين — نفس مبدأ 4.3، نزامن
+                // أطراف الدعوى (حذف/تعديل/إضافة) في نفس الطابور، ونعلم
+                // المستخدم لو فيه فشل فاليديشن/كتابة من غير ما نمنع نجاح
+                // تعديل القضية نفسها.
+                const offlinePartiesResult = await syncCaseParties(caseId);
+                if (!offlinePartiesResult.ok) {
+                    toast(
+                        offlinePartiesResult.reason === 'validation'
+                            ? offlinePartiesResult.message
+                            : '⚠️ التعديل اتحفظ محليًا، لكن حصل خطأ في مزامنة بعض أطراف الدعوى — راجعها بعد المزامنة',
+                        true
+                    );
+                }
             } else if (conflict) {
                 // 💥 حد تاني عدّل نفس القضية بعد ما إحنا فتحناها — منرفضش نكتب
                 // فوق تعديله بصمت. بنسيب البيانات المعروضة زي ما هي ونطلب من
@@ -473,6 +644,19 @@ export function useCaseActions(params: {
                             }]);
                         }
                     }
+                }
+                // ⚡ NEW (5.2): مزامنة أطراف الدعوى الفعلية أونلاين — بالـ id
+                // الحقيقي مباشرة (مفيش داعي لسنتينل، caseId حقيقي أصلاً).
+                const partiesResult = await syncCaseParties(caseId);
+                if (!partiesResult.ok) {
+                    // 🔒 نفس مبدأ 4.3: توست واحد بس، برسالة الفاليديشن
+                    // المحددة لو ده السبب، أو رسالة عامة لو فشل الكتابة.
+                    toast(
+                        partiesResult.reason === 'validation'
+                            ? partiesResult.message
+                            : '⚠️ تم تحديث القضية، لكن حصل خطأ في مزامنة بعض أطراف الدعوى — راجعها من تفاصيل القضية',
+                        true
+                    );
                 }
                 toast('✅ تم تحديث القضية');
                 logActivity(db, 'تعديل قضية', {
@@ -517,16 +701,33 @@ export function useCaseActions(params: {
     // في القضية (بعكس handleUpdateCase اللي بيعيد كتابة كل الحقول من الـ form).
     const handleLinkClient = async (caseId: string, clientId: string) => {
         const existingCase = cases.find((c) => c.id === caseId);
+        const linkedClient = clients.find((cl) => cl.id === clientId);
         const knownUpdatedAt = existingCase?.updated_at
             || (selectedCase?.id === caseId ? selectedCase?.updated_at : null)
             || null;
+        // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 6): قبل كده الدالة دي
+        // كانت بتحدّث client_id بس، وتسيب plaintiff/plaintiff_national_id/
+        // plaintiff_power_of_attorney/plaintiff_address زي ما هي (بيانات
+        // حرة قديمة ممكن تكون مختلفة عن ملف الموكل الحقيقي) — أي مكان
+        // بيقرا العمودين دول مباشرة من غير join كان هيعرض بيانات قديمة
+        // رغم إن القضية بقت "مربوطة". دلوقتي بنزامن الحقول دي من ملف
+        // الموكل الحي في نفس عملية الربط — الواجهة (InfoSection.tsx) هي
+        // اللي بتعرض تنبيه التعارض قبل ما تنده الدالة دي أصلاً لو فيه
+        // قيم حرة مختلفة عن الموكل، فبحلول ما نوصل هنا يبقى إما مفيش
+        // تعارض أو المستخدم أكّد الاستبدال.
+        const syncedFields = linkedClient ? {
+            plaintiff: linkedClient.full_name || null,
+            plaintiff_national_id: linkedClient.national_id || null,
+            plaintiff_power_of_attorney: linkedClient.cr_number || null,
+            plaintiff_address: linkedClient.address || null,
+        } : {};
         const { error, offline, queued, conflict, data: writtenRow } = await window.__dbWrite({
-            type: 'UPDATE', table: 'cases', data: { client_id: clientId }, id: caseId, knownUpdatedAt
+            type: 'UPDATE', table: 'cases', data: { client_id: clientId, ...syncedFields }, id: caseId, knownUpdatedAt
         });
         if (offline && queued) {
             toast('📥 الربط محفوظ محلياً — سيُزامن عند عودة الإنترنت');
-            setCases((prev) => prev.map((c) => c.id === caseId ? { ...c, client_id: clientId } : c));
-            if (selectedCase?.id === caseId) setSelectedCase((p) => p ? { ...p, client_id: clientId } : p);
+            setCases((prev) => prev.map((c) => c.id === caseId ? { ...c, client_id: clientId, ...syncedFields } : c));
+            if (selectedCase?.id === caseId) setSelectedCase((p) => p ? { ...p, client_id: clientId, ...syncedFields } : p);
             return;
         }
         if (conflict) {
@@ -537,7 +738,7 @@ export function useCaseActions(params: {
             toast('❌ فشل ربط القضية بالموكل — تحقق من الاتصال وأعد المحاولة', true);
             return;
         }
-        const clientName = clients.find((cl) => cl.id === clientId)?.full_name || null;
+        const clientName = linkedClient?.full_name || null;
         toast('✅ تم ربط القضية بالموكل');
         logActivity(db, 'ربط قضية بموكل', {
             userName: _userName,
@@ -546,12 +747,54 @@ export function useCaseActions(params: {
             client_name: clientName,
         });
         const freshFields = writtenRow?.updated_at ? { updated_at: writtenRow.updated_at } : {};
-        setCases((prev) => prev.map((c) => c.id === caseId ? { ...c, client_id: clientId, ...freshFields } : c));
-        if (selectedCase?.id === caseId) setSelectedCase((p) => p ? { ...p, client_id: clientId, ...freshFields } : p);
+        setCases((prev) => prev.map((c) => c.id === caseId ? { ...c, client_id: clientId, ...syncedFields, ...freshFields } : c));
+        if (selectedCase?.id === caseId) setSelectedCase((p) => p ? { ...p, client_id: clientId, ...syncedFields, ...freshFields } : p);
+        fetchCases(0, casesFilter);
+    };
+
+    // ─ فك ربط قضية عن موكلها ─
+    // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 4): عكس handleLinkClient
+    // بالظبط — بتصفّر عمود client_id بس (ترجعه NULL) من غير ما تلمس أي
+    // حقل تاني في القضية (الاسم/الرقم القومي/التوكيل/العنوان بتاعت
+    // القضية بتفضل زي ما هي كانت آخر مرة، بس دلوقتي بقت بيانات حرة قابلة
+    // للتعديل بدل ما تتقرا من ملف الموكل — نفس آلية EditCaseModal.tsx
+    // اللي بتحدد isLinked من client_id).
+    const handleUnlinkClient = async (caseId: string) => {
+        const existingCase = cases.find((c) => c.id === caseId);
+        const knownUpdatedAt = existingCase?.updated_at
+            || (selectedCase?.id === caseId ? selectedCase?.updated_at : null)
+            || null;
+        const { error, offline, queued, conflict, data: writtenRow } = await window.__dbWrite({
+            type: 'UPDATE', table: 'cases', data: { client_id: null }, id: caseId, knownUpdatedAt
+        });
+        if (offline && queued) {
+            toast('📥 فك الربط محفوظ محلياً — سيُزامن عند عودة الإنترنت');
+            setCases((prev) => prev.map((c) => c.id === caseId ? { ...c, client_id: null } : c));
+            if (selectedCase?.id === caseId) setSelectedCase((p) => p ? { ...p, client_id: null } : p);
+            return;
+        }
+        if (conflict) {
+            toast('⚠️ هذه القضية عدّلها شخص آخر بعد ما فتحتها — أعد فتحها وحاول فك الربط مرة أخرى', true);
+            return;
+        }
+        if (error) {
+            toast('❌ فشل فك ربط القضية عن الموكل — تحقق من الاتصال وأعد المحاولة', true);
+            return;
+        }
+        toast('✅ تم فك الربط — بيانات الموكل في القضية بقت قابلة للتعديل الحر');
+        logActivity(db, 'فك ربط قضية عن موكل', {
+            userName: _userName,
+            entity_type: 'case', entity_id: caseId, details: existingCase?.title || null,
+            case_name: existingCase?.title || null,
+        });
+        const freshFields = writtenRow?.updated_at ? { updated_at: writtenRow.updated_at } : {};
+        setCases((prev) => prev.map((c) => c.id === caseId ? { ...c, client_id: null, ...freshFields } : c));
+        if (selectedCase?.id === caseId) setSelectedCase((p) => p ? { ...p, client_id: null, ...freshFields } : p);
         fetchCases(0, casesFilter);
     };
 
     // ─ إنشاء موكل جديد من بيانات القضية وربطه بها ─
+
     // ⚡ REMOVED (خطة توحيد إنشاء الموكل، Phase 1): كانت هنا نسخة كاملة من
     // منطق "إنشاء موكل" (INSERT مباشر بحقول ناقصة: اسم + رقم قومي بس، من
     // غير هاتف/نوع/فحص تكرار كامل). اتشالت واستُبدلت بفتح NewClientModal
@@ -560,5 +803,5 @@ export function useCaseActions(params: {
     // الزرار بتاعها في InfoSection.tsx بقى بيستدعي onCreateAndLinkClient
     // اللي هو دلوقتي مجرد فتح-موديل، مش عملية حفظ.
 
-    return { handleLogout, handleSaveCase, handleDeleteCase, handlePermanentDeleteCase, handleRestoreCase, handleUpdateCase, handleLinkClient };
+    return { handleLogout, handleSaveCase, handleDeleteCase, handlePermanentDeleteCase, handleRestoreCase, handleUpdateCase, handleLinkClient, handleUnlinkClient };
 }
