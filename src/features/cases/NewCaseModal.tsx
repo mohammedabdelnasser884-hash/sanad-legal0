@@ -9,6 +9,7 @@ import { PartyFieldsGroup } from '@/shared/parties/PartyFieldsGroup';
 import type { PartyFieldValue } from '@/shared/parties/partyTypes';
 import type { ClientRow, ProfileRow } from '../../types';
 import type { CaseFormSubmitData } from './hooks/useCaseActions';
+import type { ClientModalContext } from '../clients/hooks/useClientActions';
 
 interface NewCaseModalProps {
     onClose: () => void;
@@ -19,6 +20,10 @@ interface NewCaseModalProps {
     clients: ClientRow[];
     countryCourts?: string[];
     countryCaseTypes?: string[];
+    // ⚡ NEW (خطة تطوير أطراف الدعوى — مرحلة 4 خطوة 2، 23 يوليو 2026): فتح
+    // موديل "إنشاء موكل جديد" الموحّد (نفس اللي بيستخدمه CaseDetailView)
+    // من جوه كارت أي طرف — راجع App.tsx (openNewClientModal) وAppModals.tsx.
+    openNewClientModal?: (ctx: ClientModalContext) => void;
 }
 
 interface NewCaseForm {
@@ -39,7 +44,7 @@ const SESSION_TIME_OPTIONS = [
     { value: 'مسائي', label: '🌆 مسائي' },
 ];
 
-function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCourts,countryCaseTypes}: NewCaseModalProps){
+function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCourts,countryCaseTypes,openNewClientModal}: NewCaseModalProps){
     const [form,setForm]=useState<NewCaseForm>({
         title:'',court:'',court_floor:'',court_hall:'',type:'',caseNum:'',caseYear:'',
         court_level:'',court_level_other:'',circuit_number:'',date:'',session_time:'صباحي',
@@ -65,17 +70,46 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
         partyFields.updateParty(partyId,'address',picked.address || '');
     };
 
-    // سلوت "ربط بموكل من النظام" — بيتعرض بس فوق اسم أي طرف عليه ⭐
-    // (قسم 4 من الخطة: "تفعيلها يبين حقل ربط بموكل من النظام فوق اسم
-    // الطرف ده تحديدًا")، ومفيش لو مفيش موكلين مسجلين أصلاً.
+    // ⚡ NEW (خطة تطوير أطراف الدعوى — مرحلة 4 خطوة 2): بعد ما موديل
+    // "إنشاء موكل جديد" الموحّد يحفظ الموكل فعليًا (هدف ربط 'localParty' —
+    // مفيش case حقيقي لسه)، بنطبّق بياناته على الطرف محليًا فورًا (بدل ما
+    // نستنى تحديث قائمة clients اللي بتتحدث async وغير مضمون توقيتها).
+    const applyCreatedClientToParty = (partyId: string, clientId: string, form?: {full_name:string; national_id:string; cr_number:string; address:string}) => {
+        partyFields.updateParty(partyId,'client_id',clientId);
+        if(form){
+            partyFields.updateParty(partyId,'name',form.full_name || '');
+            partyFields.updateParty(partyId,'national_id',form.national_id || '');
+            partyFields.updateParty(partyId,'power_of_attorney',form.cr_number || '');
+            partyFields.updateParty(partyId,'address',form.address || '');
+        }
+    };
+
+    // سلوت "ربط بموكل من النظام" + "إنشاء موكل جديد" — بيتعرض بس فوق اسم
+    // أي طرف عليه ⭐ (قسم 4 من الخطة: "تفعيلها يبين حقل ربط بموكل من
+    // النظام فوق اسم الطرف ده تحديدًا"). الوظيفتان معًا (الأولى والثانية من
+    // الثلاث المذكورة في قسم 6-د) — قفل readOnly (الثالثة) بيتم من الفورم
+    // الأب في المراحل اللي هتتحدد لاحقًا.
     const renderPartyExtra = (party: PartyFieldValue) => {
-        if(!party.is_client || clients.length===0) return null;
-        return React.createElement(Sel,{
-            label:"ربط بموكل من النظام (اختياري)",
-            value:party.client_id || '',
-            onChange:(e: React.ChangeEvent<HTMLSelectElement>) =>linkClientToParty(party.id,e.target.value),
-            options:[{value:'',label:'— بدون ربط (بيانات يدوية) —'},...clients.map((c: ClientRow) =>({value:c.id,label:c.full_name}))]
-        });
+        if(!party.is_client) return null;
+        return React.createElement('div',{className:'space-y-2'},
+            clients.length>0 && React.createElement(Sel,{
+                label:"ربط بموكل من النظام (اختياري)",
+                value:party.client_id || '',
+                onChange:(e: React.ChangeEvent<HTMLSelectElement>) =>linkClientToParty(party.id,e.target.value),
+                options:[{value:'',label:'— بدون ربط (بيانات يدوية) —'},...clients.map((c: ClientRow) =>({value:c.id,label:c.full_name}))]
+            }),
+            !party.client_id && openNewClientModal && React.createElement('button',{
+                type:'button',
+                onClick:()=>openNewClientModal({
+                    initialData:{full_name:party.name || '', national_id:party.national_id || '', cr_number:party.power_of_attorney || '', address:party.address || ''},
+                    linkTarget:{type:'localParty'},
+                    contextLabel:'سيتم ربطه بهذا الطرف تلقائيًا بعد الحفظ',
+                    onLinked:(_target,clientId,form)=>applyCreatedClientToParty(party.id,clientId,form),
+                }),
+                className:'text-[10px] font-bold text-emerald-400 mt-1',
+                'data-testid':'new-case-create-client-'+party.id,
+            },'➕ إنشاء موكل جديد من هذه البيانات')
+        );
     };
 
     const inputCls = "w-full p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600 transition-colors";
@@ -258,6 +292,11 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
                             defendant: primaryDefendant?.name || undefined,
                             defendant_role: primaryDefendant?.capacity || undefined,
                             defendant_national_id: primaryDefendant?.national_id || undefined,
+                            // 🆕 (خطة "المسمى القانوني" — مرحلة 3): بتوصل فاضية
+                            // ('') لو الجهة فيها شخص واحد بس — نفس افتراضي
+                            // usePartyFields()/validateParties.
+                            plaintiff_legal_title: partyFields.legalTitles.plaintiff || undefined,
+                            defendant_legal_title: partyFields.legalTitles.defendant || undefined,
                             // ⚡ NEW (مرحلة 4.2): array الأطراف الكامل — useCaseActions.ts
                             // بيكتب صف في case_parties لكل طرف فيه (بالإضافة لمزامنة
                             // الأعمدة القديمة فوق من الطرف الأساسي بس).
