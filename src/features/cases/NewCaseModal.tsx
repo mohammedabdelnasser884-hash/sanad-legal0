@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { toast } from '../../shared/lib/notifications';
-import { validateFullNameParts } from '../../shared/lib/clientValidation';
 import { I } from '../../constants';
 import { Inp } from '@/shared/ui/Inp';
-import { PoaInput } from '@/shared/ui/PoaInput';
 import { Sel } from '@/shared/ui/Sel';
 import DatePicker from '@/shared/ui/DatePicker';
+import { usePartyFields } from '@/shared/parties/usePartyFields';
+import { PartyFieldsGroup } from '@/shared/parties/PartyFieldsGroup';
+import type { PartyFieldValue } from '@/shared/parties/partyTypes';
 import type { ClientRow, ProfileRow } from '../../types';
 import type { CaseFormSubmitData } from './hooks/useCaseActions';
 
@@ -21,31 +22,61 @@ interface NewCaseModalProps {
 }
 
 interface NewCaseForm {
-    title: string; court: string; court_other: string; court_floor: string; court_hall: string;
-    type: string; type_other: string; caseNum: string; caseYear: string;
+    title: string; court: string; court_floor: string; court_hall: string;
+    type: string; caseNum: string; caseYear: string;
     court_level: string; court_level_other: string; circuit_number: string; date: string; session_time: string;
-    client_id: string; client_name: string; client_capacity: string; opponent: string; opponent_capacity: string;
     session_hall: string; secretary_hall: string; secretary_name: string; secretary_mobile: string;
-    // ⚡ NEW (19 يوليو 2026): بيانات رسمية إضافية للأطراف — نفس الحقول
-    // الموجودة فعليًا في جدول cases (وفي فورم الجلسة المستقلة)، كانت
-    // مسجلة بس من فلو تحويل جلسة مستقلة لقضية. دلوقتي بتتسجل من هنا كمان
-    // عشان التوحيد بين الفلوين (شوف onlyDigits تحت لنفس منطق الفاليديشن).
-    plaintiff_national_id: string; plaintiff_power_of_attorney: string; defendant_national_id: string;
+    // ⚡ ملحوظة (مرحلة 4 — خطة تعدد الأطراف، 22 يوليو 2026): بيانات
+    // الموكل/الخصم (الاسم/الصفة/الرقم القومي/العنوان/التوكيل/الربط
+    // بموكل من النظام) بقت كلها جوه usePartyFields() تحت (array أطراف)
+    // بدل حقول مفردة هنا — راجع PartyFieldsGroup في الـ JSX تحت.
 }
 
-// نفس الهيلبر المستخدم في NewStandaloneSessionModal.tsx — بيسمح بالأرقام
-// بس، وبيحدد أقصى طول (14 رقم للرقم القومي بشكل افتراضي).
-const onlyDigits = (v: string, max = 14) => v.replace(/\D/g, '').slice(0, max);
+// خيارات وقت الجلسة — كانت زرارين، دلوقتي select واحد عشان تقدر تقعد جنب
+// حقل التاريخ في نفس السطر (طلب مباشر، 22 يوليو 2026).
+const SESSION_TIME_OPTIONS = [
+    { value: 'صباحي', label: '🌅 صباحي' },
+    { value: 'مسائي', label: '🌆 مسائي' },
+];
 
 function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCourts,countryCaseTypes}: NewCaseModalProps){
     const [form,setForm]=useState<NewCaseForm>({
-        title:'',court:'',court_other:'',court_floor:'',court_hall:'',type:'',type_other:'',caseNum:'',caseYear:'',
+        title:'',court:'',court_floor:'',court_hall:'',type:'',caseNum:'',caseYear:'',
         court_level:'',court_level_other:'',circuit_number:'',date:'',session_time:'صباحي',
-        client_id:'',client_name:'',client_capacity:'',opponent:'',opponent_capacity:'',
         session_hall:'',secretary_hall:'',secretary_name:'',secretary_mobile:'',
-        plaintiff_national_id:'',plaintiff_power_of_attorney:'',defendant_national_id:''
     });
     const s=<K extends keyof NewCaseForm>(k: K,v: NewCaseForm[K])=>setForm((p) =>({...p,[k]:v}));
+
+    // ⚡ NEW (مرحلة 4 — خطة تعدد الأطراف): array أطراف الدعوى (مدعين
+    // ومدعى عليهم، بلا حدود) بدل حقلي "الموكل"/"الخصم" المفردين القدامى.
+    const partyFields = usePartyFields();
+
+    // ربط طرف بعينه بموكل موجود من النظام — بيملى الاسم/الرقم القومي/
+    // التوكيل/العنوان دفعة واحدة من بيانات الموكل الحقيقية (نفس سلوك
+    // الربط القديم، بس دلوقتي لأي طرف عليه ⭐ مش للموكل الوحيد بس).
+    const linkClientToParty = (partyId: string, clientId: string) => {
+        if(!clientId){ partyFields.updateParty(partyId,'client_id',null); return; }
+        const picked = clients.find((c: ClientRow) =>c.id===clientId);
+        if(!picked) return;
+        partyFields.updateParty(partyId,'client_id',clientId);
+        partyFields.updateParty(partyId,'name',picked.full_name || '');
+        partyFields.updateParty(partyId,'national_id',picked.national_id || '');
+        partyFields.updateParty(partyId,'power_of_attorney',picked.cr_number || '');
+        partyFields.updateParty(partyId,'address',picked.address || '');
+    };
+
+    // سلوت "ربط بموكل من النظام" — بيتعرض بس فوق اسم أي طرف عليه ⭐
+    // (قسم 4 من الخطة: "تفعيلها يبين حقل ربط بموكل من النظام فوق اسم
+    // الطرف ده تحديدًا")، ومفيش لو مفيش موكلين مسجلين أصلاً.
+    const renderPartyExtra = (party: PartyFieldValue) => {
+        if(!party.is_client || clients.length===0) return null;
+        return React.createElement(Sel,{
+            label:"ربط بموكل من النظام (اختياري)",
+            value:party.client_id || '',
+            onChange:(e: React.ChangeEvent<HTMLSelectElement>) =>linkClientToParty(party.id,e.target.value),
+            options:[{value:'',label:'— بدون ربط (بيانات يدوية) —'},...clients.map((c: ClientRow) =>({value:c.id,label:c.full_name}))]
+        });
+    };
 
     const inputCls = "w-full p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600 transition-colors";
     const inpStyle = {fontFamily:'Cairo,sans-serif'};
@@ -62,48 +93,82 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
             ),
             React.createElement('div',{className:"space-y-4"},
 
-                // موضوع الدعوى
-                React.createElement(Inp,{label:"موضوع ومسمى الدعوى",value:form.title,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('title',e.target.value),placeholder:"مثال: نزاع تجاري بين شركة .. وآخرين",required:true,'data-testid':'new-case-title'}),
-
-                // ── أطراف الدعوى ──
-                React.createElement('div',{className:"border-t border-white/5 pt-1"},
-                    React.createElement('p',{className:"text-[10px] font-black text-slate-500 mb-3"},"— أطراف الدعوى —")
-                ),
-
-                // الموكل + صفته
-                React.createElement('div',{className:"grid grid-cols-2 gap-2"},
-                    React.createElement('div',null,
-                        React.createElement(Inp,{label:"الموكل",value:form.client_name,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('client_name',e.target.value),placeholder:"اسم الموكل",required:true,readOnly:!!form.client_id,className:form.client_id?"w-full p-3 text-xs rounded-xl border border-white/10 bg-white/5 text-slate-300 placeholder-slate-600 cursor-not-allowed":undefined,'data-testid':'new-case-client-name'}),
-                        form.client_id&&React.createElement('p',{className:"text-[9px] text-slate-500 mt-1"},"🔗 مربوط بموكل من النظام — لتعديله اختر «بدون ربط» بالأسفل")
-                    ),
-                    React.createElement(Inp,{label:"صفة الموكل",value:form.client_capacity,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('client_capacity',e.target.value),placeholder:"مثال: مدعي / متهم...",required:true,'data-testid':'new-case-client-capacity'})
-                ),
-
-                // بيانات التوكيل — سطر كامل تحت اسم الموكل مباشرة: رقم / حرف / سنة / مكتب توثيق
-                React.createElement(PoaInput,{value:form.plaintiff_power_of_attorney,onChange:(v: string) =>s('plaintiff_power_of_attorney',v)}),
-
-                // الرقم القومي للموكل
-                // 🔒 FIX (تقرير الموثوقية — نتيجة 4): الرقم القومي للموكل بقى
-                // إجباري (required + فحص 14 رقم بالظبط في زرار الحفظ) — القرار
-                // المتخذ: إجباري للموكل بس، اختياري للخصم (غالبًا مش بيبقى
-                // معانا)، وفحص الصيغة (أرقام فقط + 14 رقم) لو الخصم اتكتب.
-                React.createElement(Inp,{label:"الرقم القومي للموكل",value:form.plaintiff_national_id,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('plaintiff_national_id',onlyDigits(e.target.value)),placeholder:"14 رقم",required:true,inputMode:"numeric",maxLength:14,'data-testid':'new-case-plaintiff-national-id'}),
-
-                // الخصم + صفته
-                React.createElement('div',{className:"grid grid-cols-2 gap-2"},
-                    React.createElement(Inp,{label:"الخصم",value:form.opponent,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('opponent',e.target.value),placeholder:"اسم الخصم",required:true,'data-testid':'new-case-opponent'}),
-                    React.createElement(Inp,{label:"صفة الخصم",value:form.opponent_capacity,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('opponent_capacity',e.target.value),placeholder:"مثال: مدعى عليه...",required:true,'data-testid':'new-case-opponent-capacity'})
-                ),
-
-                // الرقم القومي للخصم
-                React.createElement(Inp,{label:"الرقم القومي للخصم",value:form.defendant_national_id,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('defendant_national_id',onlyDigits(e.target.value)),placeholder:"14 رقم",inputMode:"numeric",maxLength:14,'data-testid':'new-case-defendant-national-id'}),
-
-                // ── بيانات القيد الرسمي ──
-                React.createElement('div',{className:"border-t border-white/5 pt-1"},
+                // ══════════════ بيانات القيد الرسمي ══════════════
+                React.createElement('div',{className:"pt-1"},
                     React.createElement('p',{className:"text-[10px] font-black text-slate-500 mb-3"},"— بيانات القيد الرسمي —")
                 ),
 
-                // ١. درجة التقاضي (أول عنصر)
+                // ١. موضوع الدعوى
+                React.createElement(Inp,{label:"موضوع ومسمى الدعوى",value:form.title,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('title',e.target.value),placeholder:"مثال: نزاع تجاري بين شركة .. وآخرين",required:true,'data-testid':'new-case-title'}),
+
+                // ٢. المحكمة المختصة
+                // ⚡ FIX (طلب مباشر من جيمي، 22 يوليو 2026): كان مربع اختيار
+                // (Sel) بيجبر اختيار "أخرى" الأول قبل ما تقدر تكتب اسم محكمة
+                // مش موجود في قايمة الدولة — تجربة مزعجة. دلوقتي مربع نص حر
+                // دايمًا، مع datalist للاقتراح بس (مش إجبار) من قايمة محاكم
+                // الدولة لو موجودة — الكتابة الحرة فيه شغالة زي أي input عادي.
+                React.createElement('div',null,
+                    React.createElement('label',{className:"block text-[10px] font-bold text-slate-400 mb-1.5"},"المحكمة المختصة"),
+                    React.createElement('input',{
+                        value:form.court,
+                        onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('court',e.target.value),
+                        placeholder:"اكتب اسم المحكمة",
+                        className:inputCls, style:inpStyle,
+                        list: (countryCourts && countryCourts.length>0) ? 'new-case-courts-list' : undefined,
+                    }),
+                    countryCourts && countryCourts.length>0 && React.createElement('datalist',{id:'new-case-courts-list'},
+                        countryCourts.map((c: string) => React.createElement('option',{key:c,value:c}))
+                    )
+                ),
+
+                // ٣. رقم الدعوى الرسمي + السنة
+                React.createElement('div',null,
+                    React.createElement('label',{className:"block text-[10px] font-bold text-slate-400 mb-1.5"},"رقم الدعوى الرسمي"),
+                    React.createElement('div',{className:"flex gap-2 items-center"},
+                        React.createElement('input',{value:form.caseNum,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('caseNum',e.target.value),placeholder:"رقم الدعوى",className:"flex-1 p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600 text-center",style:inpStyle}),
+                        React.createElement('span',{className:"text-slate-500 font-black text-sm shrink-0"},"/"),
+                        React.createElement('input',{value:form.caseYear,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('caseYear',e.target.value),placeholder:"السنة",maxLength:4,className:"w-24 p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600 text-center",style:inpStyle})
+                    )
+                ),
+
+                // ٤. تصنيف الدعوى + رقم الدائرة (نفس السطر)
+                // ⚡ FIX (طلب مباشر من جيمي، 22 يوليو 2026): تصنيف الدعوى نص حر
+                // دايمًا، مع datalist للاقتراح بس من قايمة تصنيفات الدولة.
+                React.createElement('div',{className:"grid grid-cols-2 gap-2"},
+                    React.createElement('div',null,
+                        React.createElement('label',{className:"block text-[10px] font-bold text-slate-400 mb-1.5"},"تصنيف الدعوى"),
+                        React.createElement('input',{
+                            value:form.type,
+                            onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('type',e.target.value),
+                            placeholder:"مدني / تجاري...",
+                            className:inputCls, style:inpStyle,
+                            list: (countryCaseTypes && countryCaseTypes.length>0) ? 'new-case-types-list' : undefined,
+                        }),
+                        countryCaseTypes && countryCaseTypes.length>0 && React.createElement('datalist',{id:'new-case-types-list'},
+                            countryCaseTypes.map((t: string) => React.createElement('option',{key:t,value:t}))
+                        )
+                    ),
+                    React.createElement('div',null,
+                        React.createElement('label',{className:"block text-[10px] font-bold text-slate-400 mb-1.5"},"رقم الدائرة"),
+                        React.createElement('input',{value:form.circuit_number,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('circuit_number',e.target.value),placeholder:"مثال: 12 تجاري",className:inputCls,style:inpStyle})
+                    )
+                ),
+
+                // ٥. تاريخ الجلسة القادمة + وقت الجلسة (نفس السطر، وقت الجلسة
+                // بيظهر بس بعد ما التاريخ يتحدد — قبل كده بياخد العرض كله لوحده).
+                form.date
+                    ? React.createElement('div',{className:"grid grid-cols-2 gap-2 items-start"},
+                        React.createElement(DatePicker,{label:"تاريخ الجلسة القادمة",value:form.date,onChange:(v: string) =>s("date",v)}),
+                        React.createElement(Sel,{
+                            label:"وقت الجلسة",
+                            value:form.session_time,
+                            onChange:(e: React.ChangeEvent<HTMLSelectElement>) =>s('session_time',e.target.value),
+                            options:SESSION_TIME_OPTIONS,
+                        })
+                    )
+                    : React.createElement(DatePicker,{label:"تاريخ الجلسة القادمة",value:form.date,onChange:(v: string) =>s("date",v)}),
+
+                // ٦. درجة التقاضي
                 React.createElement('div',null,
                     React.createElement('label',{className:"block text-[10px] font-bold text-slate-400 mb-1.5"},"درجة التقاضي"),
                     React.createElement('div',{className:"flex gap-2"},
@@ -121,98 +186,17 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
                     })
                 ),
 
-                // ٢. المحكمة المختصة
-                React.createElement('div',null,
-                    React.createElement('label',{className:"block text-[10px] font-bold text-slate-400 mb-1.5"},"المحكمة المختصة"),
-                    (countryCourts && countryCourts.length>0)
-                        ? React.createElement(React.Fragment,null,
-                            React.createElement(Sel,{
-                                value:form.court,
-                                onChange:(e: React.ChangeEvent<HTMLSelectElement>) =>s('court',e.target.value),
-                                options:[{value:'',label:'— اختر المحكمة —'},...countryCourts.map((c:string)=>({value:c,label:c})),{value:'أخرى',label:'أخرى (اكتب يدوياً)'}]
-                            }),
-                            form.court==='أخرى'&&React.createElement('input',{
-                                value:form.court_other,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('court_other',e.target.value),
-                                placeholder:"اكتب اسم المحكمة",
-                                className:"w-full mt-2 p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600",
-                                style:inpStyle
-                            })
-                        )
-                        : React.createElement('input',{value:form.court,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('court',e.target.value),placeholder:"اكتب اسم المحكمة يدوياً",className:inputCls,style:inpStyle})
-                ),
+                // ══════════════ أطراف الدعوى ══════════════
+                // ⚡ CHANGED (مرحلة 4 — خطة تعدد الأطراف، 22 يوليو 2026): بدل
+                // حقلي "الموكل"/"الخصم" المفردين، PartyFieldsGroup بيدعم عدد
+                // بلا حدود من المدعين والمدعى عليهم، وأي عدد منهم ممكن يتحدد
+                // كـ"موكلنا" (⭐) — راجع قسم 2 و4 من الخطة. سلوت "ربط بموكل من
+                // النظام" بيظهر تلقائيًا فوق اسم أي طرف عليه ⭐ (renderPartyExtra
+                // فوق) بدل ما يكون فوق حقل الموكل بس زي الشكل القديم.
+                React.createElement('div',{className:"border-t border-white/5 pt-4 mt-2"}),
+                React.createElement(PartyFieldsGroup,{controller:partyFields,renderPartyExtra,testIdPrefix:'new-case'}),
 
-                // ٣. رقم الدعوى الرسمي + السنة
-                React.createElement('div',null,
-                    React.createElement('label',{className:"block text-[10px] font-bold text-slate-400 mb-1.5"},"رقم الدعوى الرسمي"),
-                    React.createElement('div',{className:"flex gap-2 items-center"},
-                        React.createElement('input',{value:form.caseNum,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('caseNum',e.target.value),placeholder:"رقم الدعوى",className:"flex-1 p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600 text-center",style:inpStyle}),
-                        React.createElement('span',{className:"text-slate-500 font-black text-sm shrink-0"},"/"),
-                        React.createElement('input',{value:form.caseYear,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('caseYear',e.target.value),placeholder:"السنة",maxLength:4,className:"w-24 p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600 text-center",style:inpStyle})
-                    )
-                ),
-
-                // ٤. تصنيف الدعوى
-                React.createElement('div',null,
-                    React.createElement('label',{className:"block text-[10px] font-bold text-slate-400 mb-1.5"},"تصنيف الدعوى"),
-                    (countryCaseTypes && countryCaseTypes.length>0)
-                        ? React.createElement(React.Fragment,null,
-                            React.createElement(Sel,{
-                                value:form.type,
-                                onChange:(e: React.ChangeEvent<HTMLSelectElement>) =>s('type',e.target.value),
-                                options:[{value:'',label:'— اختر التصنيف —'},...countryCaseTypes.map((t:string)=>({value:t,label:t})),{value:'أخرى',label:'أخرى (اكتب يدوياً)'}]
-                            }),
-                            form.type==='أخرى'&&React.createElement('input',{
-                                value:form.type_other,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('type_other',e.target.value),
-                                placeholder:"اكتب تصنيف الدعوى",
-                                className:"w-full mt-2 p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600",
-                                style:inpStyle
-                            })
-                        )
-                        : React.createElement('input',{value:form.type,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('type',e.target.value),placeholder:"مثال: مدني / تجاري / جنائي...",className:inputCls,style:inpStyle})
-                ),
-
-                // ٥. رقم الدائرة
-                React.createElement('div',null,
-                    React.createElement('label',{className:"block text-[10px] font-bold text-slate-400 mb-1.5"},"رقم الدائرة"),
-                    React.createElement('input',{value:form.circuit_number,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('circuit_number',e.target.value),placeholder:"مثال: 12 تجاري",className:inputCls,style:inpStyle})
-                ),
-
-                // ٦. تاريخ الجلسة
-                React.createElement(DatePicker,{label:"تاريخ الجلسة القادمة",value:form.date,onChange:(v: string) =>s("date",v)}),
-
-                // وقت الجلسة (يظهر بعد اختيار التاريخ)
-                form.date&&React.createElement('div',{className:"space-y-3"},
-                    React.createElement('div',null,
-                        React.createElement('label',{className:"block text-[10px] font-bold text-slate-400 mb-1.5"},"وقت الجلسة"),
-                        React.createElement('div',{className:"flex gap-2"},
-                            ['صباحي','مسائي'].map((t: string) =>React.createElement('button',{
-                                key:t,type:"button",
-                                onClick:()=>s('session_time',t),
-                                className:`flex-1 py-2.5 rounded-xl text-[10px] font-black transition-all active:scale-95 ${form.session_time===t?'bg-premium-gold text-premium-bg':'bg-white/5 border border-white/10 text-slate-400'}`
-                            },t==='صباحي'?'🌅 صباحي':'🌆 مسائي'))
-                        )
-                    )
-                ),
-
-                // ٧. الموكل من القائمة (اختياري)
-                clients.length>0&&React.createElement(Sel,{
-                    label:"ربط بموكل من النظام (اختياري)",
-                    value:form.client_id,
-                    onChange:(e: React.ChangeEvent<HTMLSelectElement>) =>{
-                        const id = e.target.value;
-                        s('client_id',id);
-                        // لو اختار موكل فعلي من القائمة، نملى حقل "الموكل" فوق
-                        // تلقائيًا باسمه (يفضل قابل للتعديل بعد كده). لو رجع
-                        // لـ "بدون ربط"، ما بنمسحش اللي هو كاتبه بإيده.
-                        if(id){
-                            const picked = clients.find((c: ClientRow) =>c.id===id);
-                            if(picked) s('client_name',picked.full_name||'');
-                        }
-                    },
-                    options:[{value:'',label:'— اختر موكلاً (اختياري) —'},...clients.map((c: ClientRow) =>({value:c.id,label:c.full_name}))]
-                }),
-
-                // ── بيانات إضافية ──
+                // ══════════════ بيانات إضافية ══════════════
                 React.createElement('div',{className:"border-t border-white/10 pt-4 mt-2"},
                     React.createElement('p',{className:"text-[10px] font-black text-slate-500 mb-3"},"— بيانات إضافية (غير ضرورية) —")
                 ),
@@ -225,13 +209,15 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
                     React.createElement('label',{className:"block text-[10px] font-bold text-slate-400 mb-1.5"},"قاعة سكرتير الجلسة"),
                     React.createElement('input',{value:form.secretary_hall,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('secretary_hall',e.target.value),placeholder:"رقم أو اسم قاعة السكرتير",className:inputCls,style:inpStyle})
                 ),
-                React.createElement('div',null,
-                    React.createElement('label',{className:"block text-[10px] font-bold text-slate-400 mb-1.5"},"اسم سكرتير الجلسة"),
-                    React.createElement('input',{value:form.secretary_name,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('secretary_name',e.target.value),placeholder:"اسم السكرتير",className:inputCls,style:inpStyle})
-                ),
-                React.createElement('div',null,
-                    React.createElement('label',{className:"block text-[10px] font-bold text-slate-400 mb-1.5"},"موبايل سكرتير الجلسة"),
-                    React.createElement('input',{value:form.secretary_mobile,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('secretary_mobile',e.target.value.replace(/\D/g,'').slice(0,11)),placeholder:"رقم الموبايل",inputMode:"numeric",maxLength:11,className:inputCls,style:inpStyle})
+                React.createElement('div',{className:"grid grid-cols-2 gap-2"},
+                    React.createElement('div',null,
+                        React.createElement('label',{className:"block text-[10px] font-bold text-slate-400 mb-1.5"},"اسم سكرتير الجلسة"),
+                        React.createElement('input',{value:form.secretary_name,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('secretary_name',e.target.value),placeholder:"اسم السكرتير",className:inputCls,style:inpStyle})
+                    ),
+                    React.createElement('div',null,
+                        React.createElement('label',{className:"block text-[10px] font-bold text-slate-400 mb-1.5"},"موبايل سكرتير الجلسة"),
+                        React.createElement('input',{value:form.secretary_mobile,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('secretary_mobile',e.target.value.replace(/\D/g,'').slice(0,11)),placeholder:"رقم الموبايل",inputMode:"numeric",maxLength:11,className:inputCls,style:inpStyle})
+                    )
                 ),
 
                 // زر الحفظ
@@ -240,36 +226,42 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
                     'data-testid':'new-case-save',
                     onClick:()=>{
                         if(!form.title.trim()){toast('يرجى إدخال موضوع ومسمى الدعوى',true);return;}
-                        if(!form.client_name.trim()){toast('يرجى إدخال اسم الموكل',true);return;}
-                        if(!form.client_capacity.trim()){toast('يرجى إدخال صفة الموكل',true);return;}
-                        if(!form.opponent.trim()){toast('يرجى إدخال اسم الخصم',true);return;}
-                        // 🔒 FIX (تقرير الموثوقية — نتيجة 5 الفرعية): اسم الخصم لازم
-                        // يكون ثلاثي على الأقل زي اسم الموكل بالظبط — بس من غير فحص
-                        // تكرار خالص (تكرار اسم الخصم في أكتر من قضية أمر طبيعي جدًا).
-                        const oppNameErr = validateFullNameParts(form.opponent);
-                        if(oppNameErr){toast('⚠️ اسم الخصم لازم يكون ثلاثي على الأقل (الاسم الأول، الأب، الجد)',true);return;}
-                        if(!form.opponent_capacity.trim()){toast('يرجى إدخال صفة الخصم',true);return;}
-                        if(form.plaintiff_national_id.length!==14){toast('⚠️ الرقم القومي للموكل مطلوب ولازم يكون 14 رقم بالظبط',true);return;}
-                        if(form.defendant_national_id && form.defendant_national_id.length!==14){toast('⚠️ الرقم القومي للخصم لازم يكون 14 رقم بالظبط',true);return;}
+                        // ⚡ CHANGED (مرحلة 4 — خطة تعدد الأطراف): فاليديشن أطراف
+                        // الدعوى كلها بقت من casePartiesValidation.ts (اسم/صفة كل
+                        // طرف، الرقم القومي لمن عليه ⭐، طرف واحد ⭐ على الأقل، عدم
+                        // تكرار الرقم القومي) — مش فحوصات مفردة هنا زي الشكل القديم.
+                        if(!partyFields.validation.valid){toast(partyFields.validation.message || 'يرجى مراجعة بيانات أطراف الدعوى',true);return;}
                         const number = form.caseNum&&form.caseYear ? form.caseNum+'/'+form.caseYear : form.caseNum||form.caseYear||'';
                         const finalCourtLevel = form.court_level==='أخرى' ? form.court_level_other : form.court_level;
-                        const finalCourt = form.court==='أخرى' ? (form.court_other||'—') : (form.court||'—');
-                        const finalType  = form.type==='أخرى'  ? (form.type_other||'عام') : (form.type||'عام');
+                        const finalCourt = form.court.trim() || '—';
+                        const finalType  = form.type.trim() || 'عام';
+                        // ⚡ NEW (مرحلة 4): الأعمدة القديمة (plaintiff/defendant/...)
+                        // لسه موجودة على cases (قسم 3 من الخطة)، فبنبعت لها نسخة من
+                        // "الطرف الأساسي" في كل جهة — أولوية لمن عليه ⭐ (موكل
+                        // المكتب الفعلي)، وإلا أول طرف في الجهة. حفظ كل الأطراف
+                        // فعليًا في case_parties هيتضاف في مرحلة 4 التالية (ربط
+                        // useCaseActions.ts بالجدول الجديد — مش جزء من الخطوة دي).
+                        const primaryPlaintiff = partyFields.plaintiffs.find((p) =>p.is_client) || partyFields.plaintiffs[0];
+                        const primaryDefendant = partyFields.defendants.find((p) =>p.is_client) || partyFields.defendants[0];
                         onSave({
                             ...form,
                             number,
                             court: finalCourt,
                             type: finalType,
                             court_level: finalCourtLevel,
-                            // ⚡ FIX: الصفة كانت بتتحط جوه نص plaintiff/defendant نفسه بصيغة
-                            // "الاسم (الصفة)" — ده كان بيكسر أي شاشة تانية بتقرا الاسم مباشرة
-                            // (زي الجلسات المستقلة اللي عندها عمود plaintiff_role/defendant_role
-                            // منفصل أصلاً). دلوقتي بنبعت الاسم نضيف والصفة في عمودها الخاص بيها،
-                            // بنفس الطريقة اللي case_sessions شغالة بيها من الأول.
-                            plaintiff: form.client_name,
-                            plaintiff_role: form.client_capacity || undefined,
-                            defendant: form.opponent,
-                            defendant_role: form.opponent_capacity || undefined,
+                            client_id: primaryPlaintiff?.client_id || undefined,
+                            plaintiff: primaryPlaintiff?.name || undefined,
+                            plaintiff_role: primaryPlaintiff?.capacity || undefined,
+                            plaintiff_national_id: primaryPlaintiff?.national_id || undefined,
+                            plaintiff_power_of_attorney: primaryPlaintiff?.power_of_attorney || undefined,
+                            plaintiff_address: primaryPlaintiff?.address || undefined,
+                            defendant: primaryDefendant?.name || undefined,
+                            defendant_role: primaryDefendant?.capacity || undefined,
+                            defendant_national_id: primaryDefendant?.national_id || undefined,
+                            // ⚡ NEW (مرحلة 4.2): array الأطراف الكامل — useCaseActions.ts
+                            // بيكتب صف في case_parties لكل طرف فيه (بالإضافة لمزامنة
+                            // الأعمدة القديمة فوق من الطرف الأساسي بس).
+                            parties: partyFields.parties,
                         });
                     },
                     className:"w-full py-3.5 bg-gradient-to-tr from-premium-gold to-amber-200 text-premium-bg rounded-xl font-black text-sm shadow-md flex items-center justify-center gap-2 disabled:opacity-60 active:scale-95 transition-transform mt-2"
