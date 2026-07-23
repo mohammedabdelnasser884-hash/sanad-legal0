@@ -149,7 +149,10 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
     const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
     const [postSaveModal, setPostSaveModal] = useState(false);
-    const [savedFormData, setSavedFormData] = useState<{ form: Form; finalCaseType: string; finalCourtLevel: string; fullCaseNumber: string; sessionId: string | null } | null>(null);
+    // 🆕 (خطة "المسمى القانوني" — بند مؤجل من التقرير): plaintiffLegalTitle/
+    // defendantLegalTitle اتضافوا هنا (مطابقة لـ SavedFormData في
+    // useClientLinking.ts) عشان يتنقلوا للقضية الجديدة وقت التحويل.
+    const [savedFormData, setSavedFormData] = useState<{ form: Form; finalCaseType: string; finalCourtLevel: string; fullCaseNumber: string; sessionId: string | null; plaintiffLegalTitle?: string | null; defendantLegalTitle?: string | null } | null>(null);
     const {
         linkingCase, linkingClient, linkingToCase,
         createdCaseId, setCreatedCaseId,
@@ -236,7 +239,13 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
             // 🔒 فاليديشن سيرفر مكرر (نفس نمط 4.3/5.2) — دفاع في العمق لو
             // مصدر حفظ تاني ظهر مستقبلًا أو state اتلاعب فيه بعد فاليديشن
             // الفورم أعلى handleSave.
-            const serverCheck = validateParties(parties);
+            // 🆕 (خطة "المسمى القانوني" — مرحلة 3): بنبعت legalTitles هنا
+            // كمان، وإلا قاعدة 6 (إلزامية المسمى القانوني عند ≥٢ أشخاص)
+            // مش هتتفحص كخط دفاع تاني (نفس ملحوظة useCaseActions.ts).
+            const serverCheck = validateParties(parties, {
+                plaintiff: partyFields.legalTitles.plaintiff || '',
+                defendant: partyFields.legalTitles.defendant || '',
+            });
             if (!serverCheck.valid) {
                 return { ok: false, reason: 'validation', message: serverCheck.message || '⚠️ بيانات أطراف الدعوى غير مكتملة أو غير صحيحة' };
             }
@@ -300,6 +309,13 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                     defendant: primaryDefendant?.name || null,
                     defendant_role: primaryDefendant?.capacity || null,
                     defendant_national_id: primaryDefendant?.national_id || null,
+                    // 🆕 (خطة "المسمى القانوني" — مرحلة 3): زي primaryPlaintiff/
+                    // primaryDefendant فوق، بتتبعت بس في وضع standalone —
+                    // partyFields.legalTitles تفضل فاضية ('') في وضع
+                    // "existing" (أطراف القضية المختارة أصلاً، مش أطراف
+                    // خاصة بالجلسة نفسها).
+                    plaintiff_legal_title: linkMode === 'standalone' ? (partyFields.legalTitles.plaintiff || null) : null,
+                    defendant_legal_title: linkMode === 'standalone' ? (partyFields.legalTitles.defendant || null) : null,
                     description: form.description || null,
                     result: form.result || null,
                     next_action: form.next_action || null,
@@ -413,7 +429,19 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                 defendant_role: primaryDefendant?.capacity || '',
                 defendant_national_id: primaryDefendant?.national_id || '',
             };
-            setSavedFormData({ form: formForLinking, finalCaseType, finalCourtLevel, fullCaseNumber, sessionId: sessionData?.id || null });
+            setSavedFormData({
+                form: formForLinking,
+                finalCaseType,
+                finalCourtLevel,
+                fullCaseNumber,
+                sessionId: sessionData?.id || null,
+                // 🆕 (خطة "المسمى القانوني" — بند مؤجل من التقرير): نفس شرط
+                // primaryPlaintiff/primaryDefendant فوق — بس في وضع
+                // standalone (أطراف خاصة بالجلسة نفسها، مش أطراف قضية
+                // مختارة أصلاً في وضع "existing").
+                plaintiffLegalTitle: linkMode === 'standalone' ? (partyFields.legalTitles.plaintiff || null) : null,
+                defendantLegalTitle: linkMode === 'standalone' ? (partyFields.legalTitles.defendant || null) : null,
+            });
             setPostSaveModal(true);
         } catch {
             toast('❌ حدث خطأ غير متوقع، حاول مرة أخرى', true);
