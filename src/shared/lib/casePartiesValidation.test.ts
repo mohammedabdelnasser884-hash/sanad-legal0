@@ -56,7 +56,8 @@ describe('validateParties', () => {
             party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد محمد علي', capacity: 'مدعي', national_id: '12345678901234' }),
             party({ id: 'p2', side: 'plaintiff', is_client: false, name: 'كريم', capacity: 'منضم' }),
         ];
-        const result = validateParties(parties);
+        // شخصان تحت "مدعي" — لازم مسمى قانوني (قاعدة 6 الجديدة)
+        const result = validateParties(parties, { plaintiff: 'الشركاء', defendant: '' });
         expect(result.valid).toBe(true);
     });
 
@@ -85,7 +86,8 @@ describe('validateParties', () => {
             party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'الأب أحمد علي', capacity: 'مدعي', national_id: '11111111111111' }),
             party({ id: 'p2', side: 'plaintiff', is_client: true, name: 'الابن محمد أحمد', capacity: 'مدعي', national_id: '22222222222222' }),
         ];
-        const result = validateParties(parties);
+        // شخصان تحت "مدعي" — لازم مسمى قانوني (قاعدة 6 الجديدة)
+        const result = validateParties(parties, { plaintiff: 'ورثة المرحوم علي أحمد', defendant: '' });
         expect(result.valid).toBe(true);
     });
 
@@ -120,7 +122,8 @@ describe('validateParties', () => {
             party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد محمد علي', capacity: 'مدعي', national_id: '12345678901234' }),
             party({ id: 'p2', side: 'plaintiff', is_client: false, name: 'كريم', capacity: 'منضم' }),
         ];
-        const result = validateParties(parties);
+        // شخصان تحت "مدعي" — لازم مسمى قانوني (قاعدة 6 الجديدة)
+        const result = validateParties(parties, { plaintiff: 'الشركاء', defendant: '' });
         expect(result.valid).toBe(true);
     });
 
@@ -140,5 +143,63 @@ describe('validateParties', () => {
         const parties = [party({ id: 'p1', side: 'plaintiff', is_client: true, name: '', capacity: '', national_id: '' })];
         const result = validateParties(parties);
         expect(result.message).toBe(result.errors[0].message);
+    });
+
+    // ══════════════════════════════════════════════════════════
+    // قاعدة 6 (جديدة) — إلزامية "المسمى القانوني" عند تعدد الأشخاص
+    // (مرحلة 2 من خطة "المسمى القانوني" — 23 يوليو 2026).
+    // ══════════════════════════════════════════════════════════
+    describe('قاعدة 6 — المسمى القانوني الجامع عند تعدد الأشخاص تحت طرف واحد', () => {
+        it('بيقبل طرف واحد بس بدون أي مسمى قانوني (الحالة العادية — 99% من القضايا)', () => {
+            const parties = [
+                party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد محمد علي', capacity: 'مدعي', national_id: '12345678901234' }),
+                party({ id: 'd1', side: 'defendant', is_client: false, name: 'محمود سعيد إبراهيم', capacity: 'مدعى عليه' }),
+            ];
+            const result = validateParties(parties); // legalTitles غير متبعتة خالص — لازم يفضل يشتغل زي ما هو
+            expect(result.valid).toBe(true);
+        });
+
+        it('بيرفض لو المدعي شخصان فأكثر والمسمى القانوني فاضي', () => {
+            const parties = [
+                party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'محمد أحمد', capacity: 'وارث', national_id: '11111111111111' }),
+                party({ id: 'p2', side: 'plaintiff', is_client: false, name: 'محمود أحمد سعيد', capacity: 'وارث' }),
+            ];
+            const result = validateParties(parties, { plaintiff: '', defendant: '' });
+            expect(result.valid).toBe(false);
+            expect(result.errors.some((e) => e.partyId === '' && e.field === 'legal_title')).toBe(true);
+        });
+
+        it('بيقبل لو المدعي شخصان فأكثر والمسمى القانوني مكتوب', () => {
+            const parties = [
+                party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'محمد أحمد', capacity: 'وارث', national_id: '11111111111111' }),
+                party({ id: 'p2', side: 'plaintiff', is_client: false, name: 'محمود أحمد سعيد', capacity: 'وارث' }),
+            ];
+            const result = validateParties(parties, { plaintiff: 'ورثة المرحوم أحمد علي', defendant: '' });
+            expect(result.valid).toBe(true);
+        });
+
+        it('بيرفض لو المدعى عليه شخصان فأكثر والمسمى القانوني فاضي (الفحص مستقل لكل طرف)', () => {
+            const parties = [
+                party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد محمد علي', capacity: 'مدعي', national_id: '12345678901234' }),
+                party({ id: 'd1', side: 'defendant', is_client: false, name: 'محمود سعيد إبراهيم', capacity: 'مدعى عليه' }),
+                party({ id: 'd2', side: 'defendant', is_client: false, name: 'كريم سعيد إبراهيم', capacity: 'مدعى عليه' }),
+            ];
+            const result = validateParties(parties, { plaintiff: '', defendant: '' });
+            expect(result.valid).toBe(false);
+            expect(result.errors.some((e) => e.field === 'legal_title' && e.message.includes('المدعى عليه'))).toBe(true);
+            // طرف المدعي (شخص واحد بس) ما يفروضش عليه مسمى قانوني
+            expect(result.errors.some((e) => e.field === 'legal_title' && e.message.includes('المدعي)'))).toBe(false);
+        });
+
+        it('بيقبل لو الطرفين شخصان فأكثر والمسمى القانوني مكتوب لكل واحد فيهم', () => {
+            const parties = [
+                party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'محمد أحمد', capacity: 'مستأنف', national_id: '11111111111111' }),
+                party({ id: 'p2', side: 'plaintiff', is_client: false, name: 'محمود أحمد سعيد', capacity: 'مستأنف' }),
+                party({ id: 'd1', side: 'defendant', is_client: false, name: 'كريم سعيد إبراهيم', capacity: 'مستأنف ضده' }),
+                party({ id: 'd2', side: 'defendant', is_client: false, name: 'سعيد إبراهيم علي', capacity: 'مستأنف ضده' }),
+            ];
+            const result = validateParties(parties, { plaintiff: 'الشركاء في شركة كذا', defendant: 'ورثة المرحوم إبراهيم علي' });
+            expect(result.valid).toBe(true);
+        });
     });
 });
