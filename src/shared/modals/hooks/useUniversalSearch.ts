@@ -94,6 +94,13 @@ export interface QuickFilter {
     count: number;
 }
 
+// شكل الصف الخام اللي بيرجع من db.from('case_parties').select('case_id')
+// (نتيجة البحث عن تطابق اسم أي طرف من أطراف الدعوى، مش بس الطرف الأساسي
+// المخزّن في cases.plaintiff/defendant).
+interface RawPartySearchRow {
+    case_id: string | null;
+}
+
 // شكل الصف الخام اللي بيرجع من db.from('cases').select(...) (نتيجة البحث
 // المباشر في قاعدة البيانات) قبل التطبيع لـ SearchCaseResult.
 interface RawCaseSearchRow {
@@ -157,7 +164,7 @@ export function useUniversalSearch() {
             setSearching(true);
             try {
                 const pattern = `%${trimmed}%`;
-                const [{ data: docs }, { data: sessions }, { data: notes }, { data: casesRes }, { data: clientsRes }] = await Promise.all([
+                const [{ data: docs }, { data: sessions }, { data: notes }, { data: casesRes }, { data: clientsRes }, { data: partyMatches }] = await Promise.all([
                     db.from('case_documents')
                         .select('id,case_id,file_name,category,created_at')
                         .ilike('file_name', pattern)
@@ -202,11 +209,39 @@ export function useUniversalSearch() {
                         ].join(','))
                         .order('created_at', { ascending: false })
                         .limit(LIMIT),
+                    // مرحلة 9: بحث عن تطابق اسم أي طرف من أطراف الدعوى (case_parties.name) —
+                    // مش بس الطرف الأساسي المخزّن في cases.plaintiff/defendant. بنرجّع
+                    // case_id بس هنا؛ القضايا الفعلية بتتجاب في خطوة تانية تحت لو لقينا
+                    // معرّفات قضايا جديدة مش موجودة أصلًا في casesRes فوق (تجنّبًا لتكرار الجلب).
+                    db.from('case_parties')
+                        .select('case_id')
+                        .ilike('name', pattern)
+                        .not('case_id', 'is', null)
+                        .limit(LIMIT),
                 ]);
+                // مرحلة 9 (تكملة): معرّفات القضايا اللي طابق اسم طرف فيها البحث، ومش
+                // موجودة أصلًا ضمن casesRes (اللي جاية من تطابق title/court/plaintiff/defendant
+                // مباشرة) — من غير ده هتتكرر بيانات القضية نفسها مرتين في النتيجة.
+                const existingCaseIds = new Set((casesRes || []).map((r: RawCaseSearchRow) => r.id));
+                const extraCaseIds = Array.from(new Set(
+                    ((partyMatches || []) as RawPartySearchRow[])
+                        .map(p => p.case_id)
+                        .filter((id): id is string => !!id && !existingCaseIds.has(id))
+                ));
+
+                let extraCasesRes: RawCaseSearchRow[] = [];
+                if (extraCaseIds.length > 0) {
+                    const { data: extraData } = await db.from('cases')
+                        .select('id,title,case_number_official,court_name,case_type,plaintiff,defendant,status,client_id,next_hearing,court_floor,court_hall,session_hall,secretary_hall,secretary_name,court_level,circuit_number,updated_at')
+                        .in('id', extraCaseIds)
+                        .limit(LIMIT);
+                    extraCasesRes = extraData || [];
+                }
+
                 setDbDocs(docs || []);
                 setDbSessions(sessions || []);
                 setDbNotes(notes || []);
-                setDbCases((casesRes || []).map((r: RawCaseSearchRow) => ({
+                setDbCases([...(casesRes || []), ...extraCasesRes].map((r: RawCaseSearchRow) => ({
                     id: r.id,
                     title: r.title || '—',
                     number: r.case_number_official || '—',
