@@ -54,6 +54,23 @@ function makeMockDb() {
         })),
       };
     }
+    if (table === 'case_parties') {
+      // ⚡ NEW (خطة تعدد الأطراف، 7.1/7.2): fetchSessionClientParties
+      // بتستخدم .select().eq().eq().order(...)، وmovePartiesFromSessionToCase
+      // بتستخدم .select().eq(...) بس — نفس kind من object بيغطي السلسلتين،
+      // افتراضيًا [] فاضية (مفيش أطراف إضافية) عشان مسار الاسم الواحد
+      // القديم يفضل شغال زي ما هو في التستات اللي مش بتغطي تعدد الأطراف.
+      const chain = {
+        eq: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            order: vi.fn(() => Promise.resolve(get('case_parties:select', { data: [], error: null }))),
+          })),
+          // movePartiesFromSessionToCase: .select('id').eq('session_id', sessionId) — بس eq واحدة
+          then: (resolve: (r: Result) => void) => resolve(get('case_parties:select', { data: [], error: null })),
+        })),
+      };
+      return { select: vi.fn(() => chain) };
+    }
     return {};
   });
 
@@ -386,7 +403,7 @@ describe('useClientLinking', () => {
       act(() => { result.current.handleAddAndLinkClient(); });
 
       expect(onOpenCreateClientForCase).toHaveBeenCalledWith(
-        'case-add-1', 'موكل جديد', '12345', '',
+        'case-add-1', 'موكل جديد', '12345', '', undefined,
         { isOfflineTemp: false, fallbackTitle: undefined },
       );
     });
@@ -404,7 +421,7 @@ describe('useClientLinking', () => {
       act(() => { result.current.handleAddAndLinkClient(); });
 
       expect(onOpenCreateClientForCase).toHaveBeenCalledWith(
-        tempCaseId, 'موكل ب', '', '',
+        tempCaseId, 'موكل ب', '', '', undefined,
         { isOfflineTemp: true, fallbackTitle: 'قضية أوفلاين ب' },
       );
     });
@@ -420,7 +437,7 @@ describe('useClientLinking', () => {
       act(() => { result.current.handleAddAndLinkClient(); });
 
       expect(onOpenCreateClientForCase).toHaveBeenCalledWith(
-        expect.stringMatching(/^tmp-/), 'موكل بدون عنوان', '', '',
+        expect.stringMatching(/^tmp-/), 'موكل بدون عنوان', '', '', undefined,
         { isOfflineTemp: true, fallbackTitle: '30 لسنة 2026' },
       );
     });
