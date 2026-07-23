@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from '../../../shared/lib/notifications';
 import { db } from '../../../supabaseClient';
 import { showErrorToast } from '../../../shared/lib/errorReporting';
@@ -6,7 +6,9 @@ import { recalcNextHearing } from '../../../shared/lib/dataAccess';
 import type { Form } from '../NewStandaloneSessionModal';
 import {
   makeOfflineTempId, isOfflineTempId, withFkOfflineSentinel, withCaseSelfOfflineSentinel, findMatchingClientByName, buildCaseInsertData,
+  movePartiesFromSessionToCase, fetchSessionClientParties, matchClientsForParties, linkClientToParty,
 } from './caseSessionLinkingShared';
+import type { SessionClientParty, PartyClientMatch } from './caseSessionLinkingShared';
 
 export type SavedFormData = { form: Form; finalCaseType: string; finalCourtLevel: string; fullCaseNumber: string; sessionId: string | null };
 
@@ -35,7 +37,50 @@ export type OpenCreateClientForCase = (
   plaintiffName: string,
   plaintiffNationalId?: string | null,
   plaintiffPoa?: string | null,
+  plaintiffAddress?: string | null,
   caseOfflineInfo?: { isOfflineTemp: boolean; fallbackTitle?: string },
+) => void;
+
+// ⚡ NEW (خطة تعدد الأطراف، 7.2 جزء 2 — 23 يوليو 2026): كول-باك بيفتح
+// NewClientModal الموحّد لطرف بعينه (وسط wizard "طرف واحد في المرة")،
+// بدل onOpenCreateClientForCase العام اللي بيتعامل مع "الموكل الأساسي"
+// بس. الفرق عن onOpenCreateClientForCase: (1) partyId + isPrimaryParty —
+// عشان useClientActions.ts يعرف يربط case_parties.client_id (+
+// cases.client_id لو أساسي بس) بدل cases.client_id مباشرة، (2) باراميتر
+// أخير onAfterLink — الموديل بيفتح ويقفل بشكل مستقل (async عبر
+// App.tsx/openNewClientModal)، فمفيش طريقة لهوك useClientLinking يعرف
+// امتى الربط خلص عشان ينتقل للطرف الجاي في partyList — onAfterLink هي
+// نفس goToNextPartyOrDone بتاعة الطرف الحالي، بتتنادى من onLinked
+// الموجودة في App.tsx (handleOpenCreateClientForParty) بعد نجاح الربط.
+export type OpenCreateClientForParty = (
+  partyId: string,
+  caseId: string,
+  isPrimaryParty: boolean,
+  partyName: string,
+  partyNationalId: string | null | undefined,
+  partyPoa: string | null | undefined,
+  partyAddress: string | null | undefined,
+  caseOfflineInfo: { isOfflineTemp: boolean; fallbackTitle?: string } | undefined,
+  onAfterLink: () => void,
+) => void;
+
+// ⚡ NEW (خطة تعدد الأطراف، مرحلة 13 جزء 2 — 23 يوليو 2026): مرآة لـ
+// OpenCreateClientForParty فوق، بس لطرف تابع لجلسة مستقلة *لسه ما
+// اتحوّلتش لقضية* (خطوة "idle" — قبل حتى ما المستخدم يقرر يعمل إيه).
+// مفيش caseOfflineInfo هنا (sessionId دايمًا id حقيقي وقت ظهور الزرار —
+// راجع تعليق linkClientToSessionParty)، ومفيش onAfterLink بمعنى wizard
+// انتقال لطرف تاني تلقائي (الأزرار هنا مستقلة زي InfoSection.tsx في
+// مرحلة 13 جزء 1، مش wizard) — onAfterLink هنا بس بتعلّم useClientLinking.ts
+// إن الطرف ده اتربط عشان زراره يختفي من قايمة "idle".
+export type OpenCreateClientForSessionParty = (
+  partyId: string,
+  sessionId: string,
+  isPrimaryParty: boolean,
+  partyName: string,
+  partyNationalId: string | null | undefined,
+  partyPoa: string | null | undefined,
+  partyAddress: string | null | undefined,
+  onAfterLink: () => void,
 ) => void;
 
 export function useClientLinking(
@@ -44,6 +89,8 @@ export function useClientLinking(
   onClientAdded?: () => void,
   onOpenCreateClient?: OpenCreateClientForSession,
   onOpenCreateClientForCase?: OpenCreateClientForCase,
+  onOpenCreateClientForParty?: OpenCreateClientForParty,
+  onOpenCreateClientForSessionParty?: OpenCreateClientForSessionParty,
 ) {
   const [linkingCase, setLinkingCase] = useState(false);
   const [linkingClient, setLinkingClient] = useState(false);
@@ -57,6 +104,54 @@ export function useClientLinking(
   // هيرفضه تاني بنفس الرسالة). الفلاج ده بيسمح للواجهة تميّز الحالتين.
   const [foundClientMatchType, setFoundClientMatchType] = useState<'exact' | 'fuzzy' | null>(null);
   const [linkingToCase, setLinkingToCase] = useState(false);
+
+  // ⚡ NEW (خطة تعدد الأطراف، 7.2 جزء 2 — 23 يوليو 2026): نفس wizard
+  // useSessionLinking.ts بالحرف (راجع التعليق المطوّل هناك) — partyList
+  // فاضية = جلسة قديمة قبل مرحلة 6 (أو الجلسة لسه ما اتحفظتش أونلاين
+  // خالص، sessionId فاضي) → fallback تلقائي لمسار الاسم الواحد القديم.
+  const [partyList, setPartyList] = useState<SessionClientParty[]>([]);
+  const [partyMatches, setPartyMatches] = useState<PartyClientMatch[]>([]);
+  const [partyIndex, setPartyIndex] = useState(0);
+
+  // ⚡ NEW (خطة تعدد الأطراف، مرحلة 13 جزء 2 — 23 يوليو 2026): أطراف
+  // الجلسة (is_client=true) لعرض زرار مستقل لكل واحد فيهم في خطوة
+  // "idle" (قبل ما المستخدم يختار "إنشاء قضية" أو "إضافة موكل فقط") —
+  // مختلفة عن partyList فوق (اللي بتتملى بس جوه handleLinkCase، بعد
+  // ما القضية اتعملت فعلًا). بتتملى بمجرد ما savedFormData.sessionId
+  // يبقى متاح (فور نجاح حفظ الجلسة أونلاين) — كل الأطراف الراجعة هنا
+  // مضمون إنها مش مربوطة (client_id) لسه، لأن الجلسة لسه جديدة تمامًا
+  // (usePartyFields مبيدّيش قيمة client_id للأطراف الجديدة أصلًا).
+  const [idlePartyList, setIdlePartyList] = useState<SessionClientParty[]>([]);
+  const [linkedIdlePartyIds, setLinkedIdlePartyIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    let cancelled = false;
+    setIdlePartyList([]);
+    setLinkedIdlePartyIds(new Set());
+    if (savedFormData?.sessionId) {
+      fetchSessionClientParties(db, savedFormData.sessionId).then((parties) => {
+        if (!cancelled) setIdlePartyList(parties);
+      });
+    }
+    return () => { cancelled = true; };
+  }, [savedFormData?.sessionId]);
+
+  const goToNextPartyOrDone = (currentIndex: number, parties: SessionClientParty[], matches: PartyClientMatch[]) => {
+    const nextIndex = currentIndex + 1;
+    if (nextIndex >= parties.length) { setClientStep('done'); return; }
+    setPartyIndex(nextIndex);
+    const nextParty = parties[nextIndex];
+    const match = matches.find((m) => m.party.id === nextParty.id);
+    if (match) {
+      setFoundClient(match.client);
+      setFoundClientMatchType(match.matchType);
+      setClientStep('found');
+    } else {
+      setFoundClient(null);
+      setFoundClientMatchType(null);
+      setClientStep('notfound');
+    }
+  };
 
   const handleLinkCase = async () => {
     if (!savedFormData) return;
@@ -115,6 +210,14 @@ export function useClientLinking(
       // ⚡ ربط الجلسة المستقلة الأصلية بالقضية الجديدة — من غير الخطوة دي
       // الجلسة كانت هتفضل "مستقلة" (case_id = null) حتى بعد إنشاء ملف
       // القضية، وده كان بيمنع فتح صفحة جلسات القضية عند الضغط عليها تاني.
+      // ⚡ NEW (7.2 جزء 2): لازم تتقرا هنا *قبل* movePartiesFromSessionToCase
+      // تحت — الدالة دي بتحدّث الصفوف نفسها (session_id → null، case_id →
+      // القضية الجديدة)، فلو استنينا وقريناها بعدين بـ session_id مش هنلاقي
+      // حاجة. فاضية دايمًا لو savedFormData.sessionId فاضي (الجلسة اتقيدت
+      // أوفلاين ولسه معندهاش id حقيقي) — مفيش استعلام غير آمن هنا.
+      const clientPartiesBeforeMove = savedFormData.sessionId
+        ? await fetchSessionClientParties(db, savedFormData.sessionId)
+        : [];
       if (savedFormData.sessionId) {
         const { error: sessionLinkErr } = await window.__dbWrite({
           type: 'UPDATE',
@@ -127,20 +230,55 @@ export function useClientLinking(
         });
         if (sessionLinkErr) {
           showErrorToast('session_case_link', sessionLinkErr, 'تم إنشاء القضية لكن تعذّر ربط الجلسة بها. حاول تحديث الصفحة.', 'ربط الجلسة بالقضية');
-        } else if (!(offline && queued)) {
-          // ⚡ FIX: next_hearing كان بيفضل فاضي في القضية الجديدة رغم إن
-          // فيها جلسة مربوطة فعليًا — نفس منطق recalcNextHearing الموحّد
-          // المستخدم في كل مكان تاني بيضيف/يربط جلسة بقضية.
-          // 🆕 المرحلة 2: أونلاين بس هنا — أوفلاين، next_hearing هتتحسب
-          // تلقائيًا بعد المزامنة (المرحلة 4 القادمة في الخطة، لسه ما
-          // اتنفذتش)، مفيش معنى نناديها دلوقتي على تمبيد مش موجود فعليًا
-          // في القاعدة.
-          await recalcNextHearing(db, realOrTempCaseId);
+        } else {
+          // ⚡ NEW (مرحلة 7.1 — خطة تعدد الأطراف، 23 يوليو 2026): نقل كل
+          // صفوف case_parties بتاعة الجلسة (مش بس الطرف الأساسي اللي
+          // buildCaseInsertData كتبه فوق للأعمدة القديمة) للقضية الجديدة.
+          // savedFormData.sessionId هنا حقيقي دايمًا جوه الشرط ده (الفرع ده
+          // بيتنفذ بس لو الجلسة اتحفظت أونلاين بنجاح — راجع تعليق الشرط
+          // فوق)، فمفيش داعي لأي تمبيد على جنب المصدر.
+          const moveResult = await movePartiesFromSessionToCase(
+            db, savedFormData.sessionId, realOrTempCaseId, offline, queued, offlineTempId, caseTitle,
+          );
+          if (!moveResult.ok) {
+            toast('⚠️ تم إنشاء القضية وربط الجلسة، لكن حصل خطأ في نقل بعض أطراف الدعوى الإضافية — راجعها يدويًا', true);
+          }
+          if (!(offline && queued)) {
+            // ⚡ FIX: next_hearing كان بيفضل فاضي في القضية الجديدة رغم إن
+            // فيها جلسة مربوطة فعليًا — نفس منطق recalcNextHearing الموحّد
+            // المستخدم في كل مكان تاني بيضيف/يربط جلسة بقضية.
+            // 🆕 المرحلة 2: أونلاين بس هنا — أوفلاين، next_hearing هتتحسب
+            // تلقائيًا بعد المزامنة (المرحلة 4 القادمة في الخطة، لسه ما
+            // اتنفذتش)، مفيش معنى نناديها دلوقتي على تمبيد مش موجود فعليًا
+            // في القاعدة.
+            await recalcNextHearing(db, realOrTempCaseId);
+          }
         }
       }
       onSaved(); // تحديث قائمة القضايا والجلسات فوراً (بعد اكتمال الربط)
-      // ابحث عن الموكل — read-only، مفيش له معنى أوفلاين (نتيجته هتبقى
-      // فاضية طبيعي لو مفيش نت، وده مقبول ومش تغيير سلوك — نفس قرار الخطة).
+      // ⚡ NEW (7.2 جزء 2): لو الجلسة فيها أطراف is_client=true فعلية
+      // (clientPartiesBeforeMove اللي اتقرت فوق قبل النقل)، بندخل wizard
+      // "طرف واحد في المرة" بدل مسار الاسم الواحد القديم — نفس فرع
+      // useSessionLinking.ts بالحرف.
+      if (clientPartiesBeforeMove.length > 0) {
+        const matches = await matchClientsForParties(db, clientPartiesBeforeMove);
+        setPartyList(clientPartiesBeforeMove);
+        setPartyMatches(matches);
+        setPartyIndex(0);
+        const firstParty = clientPartiesBeforeMove[0];
+        const firstMatch = matches.find((m) => m.party.id === firstParty.id);
+        if (firstMatch) {
+          setFoundClient(firstMatch.client);
+          setFoundClientMatchType(firstMatch.matchType);
+          setClientStep('found');
+        } else {
+          setClientStep('notfound');
+        }
+        return;
+      }
+      // ── fallback: جلسة قديمة/لسه ما اتحفظتش أونلاين (مسار الاسم الواحد
+      // القديم، صفر تغيير سلوك) — ابحث عن الموكل، read-only، مفيش له معنى
+      // أوفلاين (نتيجته هتبقى فاضية طبيعي لو مفيش نت، وده مقبول). ──
       const plaintiffName = f.plaintiff?.trim();
       if (!plaintiffName) { setClientStep('notfound'); return; }
       // ⚡ FIX (توحيد): findMatchingClientByName (caseSessionLinkingShared.ts)
@@ -161,6 +299,32 @@ export function useClientLinking(
 
   const handleLinkExistingClient = async () => {
     if (!createdCaseId || !foundClient) return;
+    // ⚡ NEW (7.2 جزء 2): wizard الأطراف المتعددة — الطرف الحالي (partyIndex)
+    // بس بياخد الربط عبر linkClientToParty (case_parties.client_id + طرف
+    // أساسي بس بيحدّث cases.client_id القديم كمان)، وبعدين بننتقل للطرف
+    // الجاي أو 'done'. مفيش لمسة لمسار الاسم الواحد القديم تحت.
+    if (partyList.length > 0) {
+      const currentParty = partyList[partyIndex];
+      if (!currentParty) return;
+      setLinkingToCase(true);
+      try {
+        const isTempCaseId = isOfflineTempId(createdCaseId);
+        const caseTitle = isTempCaseId && savedFormData
+          ? (savedFormData.form.title || savedFormData.fullCaseNumber || 'قضية من جلسة مستقلة')
+          : undefined;
+        const isPrimary = partyIndex === 0;
+        const result = await linkClientToParty(currentParty.id, foundClient.id, isPrimary, createdCaseId, caseTitle);
+        if (!result.ok) {
+          showErrorToast('party_client_link', new Error('link failed'), `تعذّر ربط "${currentParty.name}" بالموكل. حاول مرة أخرى.`, 'ربط طرف بموكل');
+        } else {
+          toast(`✅ تم ربط "${currentParty.name}" بـ"${foundClient.full_name}"`);
+        }
+        goToNextPartyOrDone(partyIndex, partyList, partyMatches);
+      } catch { toast('❌ خطأ غير متوقع', true); }
+      finally { setLinkingToCase(false); }
+      return;
+    }
+    // ── fallback: جلسة قديمة (مسار الاسم الواحد القديم، صفر تغيير سلوك) ──
     setLinkingToCase(true);
     try {
       // 🆕 المرحلة 3-1 (خطة توسيع الأوفلاين): تحويل من db.from() المباشر لـ
@@ -203,15 +367,51 @@ export function useClientLinking(
   // التمبيد الأوفلاين لو createdCaseId نفسه لسه tmp-) بقوا بيحصلوا جوه
   // handleSaveClient الموحّد (useClientActions.ts) بعد الحفظ.
   const handleAddAndLinkClient = () => {
-    if (!savedFormData || !createdCaseId) return;
+    if (!createdCaseId) return;
+    const isTempCaseId = isOfflineTempId(createdCaseId);
+    // ⚡ NEW (7.2 جزء 2): wizard الأطراف المتعددة — بيفتح NewClientModal
+    // الموحّد ببيانات الطرف الحالي (اسمه/رقمه القومي/توكيله/عنوانه هو، مش
+    // savedFormData.form.plaintiff) عبر onOpenCreateClientForParty الجديدة
+    // (target نوعه 'party' في useClientActions.ts — case_parties.client_id
+    // بتاع الطرف ده بس + cases.client_id لو ده الطرف الأساسي). onAfterLink
+    // = goToNextPartyOrDone للطرف الحالي، بتتنادى من onLinked في App.tsx
+    // بعد نجاح الربط الفعلي (الموديل بيفتح/يقفل مستقل عن الهوك ده).
+    if (partyList.length > 0) {
+      const currentParty = partyList[partyIndex];
+      if (!currentParty) return;
+      const caseTitle = isTempCaseId && savedFormData
+        ? (savedFormData.form.title || savedFormData.fullCaseNumber || 'قضية من جلسة مستقلة')
+        : undefined;
+      const isPrimary = partyIndex === 0;
+      onOpenCreateClientForParty?.(
+        currentParty.id, createdCaseId, isPrimary,
+        currentParty.name, currentParty.national_id, currentParty.power_of_attorney, currentParty.address,
+        { isOfflineTemp: isTempCaseId, fallbackTitle: caseTitle },
+        () => goToNextPartyOrDone(partyIndex, partyList, partyMatches),
+      );
+      return;
+    }
+    // ── fallback: جلسة قديمة (مسار الاسم الواحد القديم، صفر تغيير سلوك) ──
+    if (!savedFormData) return;
     const { form: f } = savedFormData;
     if (!f.plaintiff?.trim()) return;
-    const isTempCaseId = isOfflineTempId(createdCaseId);
     const caseTitle = isTempCaseId ? (f.title || savedFormData.fullCaseNumber || 'قضية من جلسة مستقلة') : undefined;
     onOpenCreateClientForCase?.(
-      createdCaseId, f.plaintiff, f.plaintiff_national_id, f.plaintiff_power_of_attorney,
+      // ⚠️ NewStandaloneSessionModal.Form مفيهاش حقل عنوان (undefined هنا) —
+      // الحقل ده خاص بفورم القضية العادية (NewCaseModal/EditCaseModal) بس.
+      createdCaseId, f.plaintiff, f.plaintiff_national_id, f.plaintiff_power_of_attorney, undefined,
       { isOfflineTemp: isTempCaseId, fallbackTitle: caseTitle },
     );
+  };
+
+  // ⚡ NEW (7.2 جزء 2): تخطي الطرف الحالي بس (مش إغلاق الموديل كله) —
+  // بينتقل للطرف الجاي في partyList أو 'done'. بيتفعّل بس لما partyList
+  // فيها أطراف؛ الواجهة (زرار "تخطي" الحالي) لازم تفرّق بين الحالتين:
+  // partyList.length > 0 → نده الدالة دي، غير كده (مسار قديم) → فضل نفس
+  // السلوك القديم (onFullClose من الأب مباشرة، بدون تغيير).
+  const handleSkipParty = () => {
+    if (partyList.length === 0) return;
+    goToNextPartyOrDone(partyIndex, partyList, partyMatches);
   };
 
   // ⚡ CHANGED (خطة توحيد إنشاء الموكل، Phase 3): بقى بيفتح NewClientModal
@@ -234,12 +434,36 @@ export function useClientLinking(
     onOpenCreateClient?.(savedFormData.sessionId, f.plaintiff, f.plaintiff_national_id, f.plaintiff_power_of_attorney);
   };
 
+  // ⚡ NEW (خطة تعدد الأطراف، مرحلة 13 جزء 2 — 23 يوليو 2026): نفس فكرة
+  // handleAddClientOnly فوق، بس لطرف بعينه من idlePartyList — بتتنادى
+  // لكل زرار مستقل على حدة (مش wizard)، فبتحدد "الطرف الأساسي" بمقارنة
+  // id الطرف بأول عنصر في idlePartyList (نفس تعريف "الأساسي" المستخدم
+  // في كل مكان تاني — أول is_client=true بترتيب sort_order). onAfterLink
+  // بتضيف الطرف لـ linkedIdlePartyIds عشان زراره يختفي فورًا من غير ما
+  // نستنى إعادة فتح الموديل.
+  const handleAddClientOnlyForParty = (party: SessionClientParty) => {
+    if (!savedFormData?.sessionId) return;
+    const isPrimary = idlePartyList[0]?.id === party.id;
+    onOpenCreateClientForSessionParty?.(
+      party.id, savedFormData.sessionId, isPrimary,
+      party.name, party.national_id, party.power_of_attorney, party.address,
+      () => setLinkedIdlePartyIds((prev) => new Set(prev).add(party.id)),
+    );
+  };
+
   return {
 
     linkingCase, linkingClient, linkingToCase,
     createdCaseId, setCreatedCaseId,
     clientStep, setClientStep,
     foundClient, setFoundClient, foundClientMatchType,
+    // ⚡ NEW (7.2 جزء 2): partyList/partyIndex لعرض "طرف X من Y" وتحديد
+    // الطرف الحالي في الواجهة، وhandleSkipParty لتخطي الطرف ده بس.
+    partyList, partyIndex, handleSkipParty,
+    // ⚡ NEW (مرحلة 13 جزء 2): idlePartyList/linkedIdlePartyIds لعرض زرار
+    // مستقل لكل طرف في خطوة "idle"، وhandleAddClientOnlyForParty لفتح
+    // NewClientModal لطرف بعينه.
+    idlePartyList, linkedIdlePartyIds, handleAddClientOnlyForParty,
     handleLinkCase, handleLinkExistingClient, handleAddAndLinkClient, handleAddClientOnly,
   };
 }
