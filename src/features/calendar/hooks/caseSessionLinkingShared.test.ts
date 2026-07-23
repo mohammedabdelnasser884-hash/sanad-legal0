@@ -1,8 +1,10 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   makeOfflineTempId, isOfflineTempId, withCaseSelfOfflineSentinel, withFkOfflineSentinel,
   buildCaseInsertData, findMatchingClientByName,
+  fetchSessionClientParties, matchClientsForParties, linkClientToParty,
 } from './caseSessionLinkingShared';
+import type { SessionClientParty } from './caseSessionLinkingShared';
 
 // ══════════════════════════════════════════════════════════════════
 // تيست وحدة مباشر للمنطق المشترك بين useClientLinking.ts وuseSessionLinking.ts
@@ -208,5 +210,171 @@ describe('findMatchingClientByName', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await findMatchingClientByName(db as any, 'ahmed mohamed');
     expect(result?.matchType).toBe('exact');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════
+// خطة تعدد الأطراف — مرحلة 7.2 جزء 1 (23 يوليو 2026): fetchSessionClientParties
+// / matchClientsForParties / linkClientToParty.
+// ══════════════════════════════════════════════════════════════════
+
+describe('fetchSessionClientParties', () => {
+  function makeMockDb(result: { data?: unknown; error?: unknown }) {
+    const eqSpy = vi.fn();
+    const orderSpy = vi.fn();
+    const db = {
+      from: vi.fn(() => ({
+        select: vi.fn(() => ({
+          eq: vi.fn((col: string, val: unknown) => {
+            eqSpy(col, val);
+            return {
+              eq: vi.fn((col2: string, val2: unknown) => {
+                eqSpy(col2, val2);
+                return {
+                  order: vi.fn((col3: string, opts: unknown) => {
+                    orderSpy(col3, opts);
+                    return Promise.resolve(result);
+                  }),
+                };
+              }),
+            };
+          }),
+        })),
+      })),
+    };
+    return { db, eqSpy, orderSpy };
+  }
+
+  it('بيستعلم بـ session_id وis_client=true مرتبة بـ sort_order تصاعدي', async () => {
+    const rows: SessionClientParty[] = [
+      { id: 'p-1', side: 'plaintiff', name: 'أحمد محمد', national_id: null, power_of_attorney: null, address: null, sort_order: 0 },
+    ];
+    const { db, eqSpy, orderSpy } = makeMockDb({ data: rows, error: null });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await fetchSessionClientParties(db as any, 'session-1');
+    expect(result).toEqual(rows);
+    expect(eqSpy).toHaveBeenCalledWith('session_id', 'session-1');
+    expect(eqSpy).toHaveBeenCalledWith('is_client', true);
+    expect(orderSpy).toHaveBeenCalledWith('sort_order', { ascending: true });
+  });
+
+  it('مفيش صفوف (جلسة قديمة أو مفيش أطراف is_client) → مصفوفة فاضية', async () => {
+    const { db } = makeMockDb({ data: [], error: null });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await fetchSessionClientParties(db as any, 'session-1');
+    expect(result).toEqual([]);
+  });
+
+  it('خطأ في الاستعلام → مصفوفة فاضية (مش استثناء)', async () => {
+    const { db } = makeMockDb({ data: null, error: new Error('db error') });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await fetchSessionClientParties(db as any, 'session-1');
+    expect(result).toEqual([]);
+  });
+});
+
+describe('matchClientsForParties', () => {
+  function makeParty(overrides: Partial<SessionClientParty> = {}): SessionClientParty {
+    return { id: 'p-1', side: 'plaintiff', name: 'أحمد محمد', national_id: null, power_of_attorney: null, address: null, sort_order: 0, ...overrides };
+  }
+
+  function makeMockDbForNames(byName: Record<string, Array<{ id: string; full_name: string | null }>>) {
+    const db = {
+      from: vi.fn(() => ({
+        select: vi.fn(() => ({
+          is: vi.fn(() => ({
+            or: vi.fn((clause: string) => {
+              // نفس اللي findMatchingClientByName بيبنيه: full_name.ilike.%NAME%,client_name.ilike.%NAME%
+              const match = /full_name\.ilike\.%(.+)%,/.exec(clause);
+              const name = match ? match[1] : '';
+              return { limit: vi.fn(() => Promise.resolve({ data: byName[name] || [], error: null })) };
+            }),
+          })),
+        })),
+      })),
+    };
+    return db;
+  }
+
+  it('بيرجع تطابق لكل طرف لقاله نتيجة، وبيتجاهل الطرف اللي مالوش (بالترتيب)', async () => {
+    const p1 = makeParty({ id: 'p-1', name: 'أحمد محمد' });
+    const p2 = makeParty({ id: 'p-2', name: 'محمود علي', side: 'defendant' });
+    const db = makeMockDbForNames({
+      'أحمد محمد': [{ id: 'c-1', full_name: 'أحمد محمد' }],
+      'محمود علي': [],
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await matchClientsForParties(db as any, [p1, p2]);
+    expect(result).toEqual([{ party: p1, client: { id: 'c-1', full_name: 'أحمد محمد' }, matchType: 'exact' }]);
+  });
+
+  it('مصفوفة أطراف فاضية → مصفوفة تطابقات فاضية من غير أي استعلام', async () => {
+    const db = { from: vi.fn() };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await matchClientsForParties(db as any, []);
+    expect(result).toEqual([]);
+    expect(db.from).not.toHaveBeenCalled();
+  });
+});
+
+describe('linkClientToParty', () => {
+  type DbWriteOp = { type: string; table: string; id?: string; data?: Record<string, unknown> };
+  function mockDbWrite(results: Record<string, { error: unknown }> = {}) {
+    const calls: DbWriteOp[] = [];
+    const fn = vi.fn(async (op: DbWriteOp) => {
+      calls.push(op);
+      return results[`${op.type}:${op.table}`] ?? { error: null };
+    });
+    return { fn, calls };
+  }
+
+  beforeEach(() => {
+    window.__dbWrite = undefined as unknown as typeof window.__dbWrite;
+  });
+
+  it('طرف مش أساسي (isPrimaryParty=false) → UPDATE واحدة بس على case_parties، مفيش أي لمسة لـ cases', async () => {
+    const { fn, calls } = mockDbWrite();
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const result = await linkClientToParty('party-2', 'client-1', false, 'case-1', undefined);
+    expect(result).toEqual({ ok: true });
+    expect(calls).toEqual([{ type: 'UPDATE', table: 'case_parties', id: 'party-2', data: { client_id: 'client-1' } }]);
+  });
+
+  it('الطرف الأساسي (isPrimaryParty=true) → UPDATE على case_parties وUPDATE على cases.client_id مع بعض', async () => {
+    const { fn, calls } = mockDbWrite();
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const result = await linkClientToParty('party-1', 'client-1', true, 'case-1', 'عنوان القضية');
+    expect(result).toEqual({ ok: true });
+    expect(calls).toEqual([
+      { type: 'UPDATE', table: 'case_parties', id: 'party-1', data: { client_id: 'client-1' } },
+      { type: 'UPDATE', table: 'cases', id: 'case-1', data: { client_id: 'client-1' } },
+    ]);
+  });
+
+  it('caseId تمبيد أوفلاين + طرف أساسي → UPDATE:cases بيحمل _offlineSelfTempId/_offlineSelfFallbackName', async () => {
+    const { fn, calls } = mockDbWrite();
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const tempCaseId = makeOfflineTempId();
+    await linkClientToParty('party-1', 'client-1', true, tempCaseId, 'عنوان مؤقت');
+    const caseCall = calls.find((c) => c.table === 'cases');
+    expect(caseCall?.data).toEqual({
+      client_id: 'client-1',
+      _offlineSelfTempId: tempCaseId,
+      _offlineSelfFallbackName: 'عنوان مؤقت',
+    });
+  });
+
+  it('فشل UPDATE على case_parties → ok=false حتى لو الطرف مش أساسي', async () => {
+    const { fn } = mockDbWrite({ 'UPDATE:case_parties': { error: new Error('fail') } });
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const result = await linkClientToParty('party-2', 'client-1', false, 'case-1', undefined);
+    expect(result).toEqual({ ok: false });
+  });
+
+  it('فشل UPDATE على cases (طرف أساسي) → ok=false حتى لو case_parties نجحت', async () => {
+    const { fn } = mockDbWrite({ 'UPDATE:cases': { error: new Error('fail') } });
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const result = await linkClientToParty('party-1', 'client-1', true, 'case-1', undefined);
+    expect(result).toEqual({ ok: false });
   });
 });
