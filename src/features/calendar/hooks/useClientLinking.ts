@@ -10,7 +10,20 @@ import {
 } from './caseSessionLinkingShared';
 import type { SessionClientParty, PartyClientMatch } from './caseSessionLinkingShared';
 
-export type SavedFormData = { form: Form; finalCaseType: string; finalCourtLevel: string; fullCaseNumber: string; sessionId: string | null };
+// 🆕 (خطة "المسمى القانوني" — بند مؤجل من التقرير): plaintiffLegalTitle/
+// defendantLegalTitle اتضافوا هنا في SavedFormData تحديدًا (مش في تعريف
+// Form نفسه) عشان منلمسش الأماكن التانية الكتير اللي بتستخدم Form —
+// قيمتهم جايين من partyFields.legalTitles وقت setSavedFormData في
+// NewStandaloneSessionModal.tsx.
+export type SavedFormData = {
+  form: Form;
+  finalCaseType: string;
+  finalCourtLevel: string;
+  fullCaseNumber: string;
+  sessionId: string | null;
+  plaintiffLegalTitle?: string | null;
+  defendantLegalTitle?: string | null;
+};
 
 /**
  * منطق إنشاء قضية من بيانات جلسة مستقلة + ربط/إضافة الموكل — منقول حرفيًا
@@ -182,6 +195,9 @@ export function useClientLinking(
           defendant: f.defendant,
           defendantRole: f.defendant_role,
           defendantNationalId: f.defendant_national_id,
+          // 🆕 (خطة "المسمى القانوني" — بند مؤجل من التقرير)
+          plaintiffLegalTitle: savedFormData.plaintiffLegalTitle,
+          defendantLegalTitle: savedFormData.defendantLegalTitle,
           circuitNumber: f.circuit_number,
           sessionHall: f.session_hall,
           sessionTime: f.session_time,
