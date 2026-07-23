@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from '../../../shared/lib/notifications';
 import { safeUpdate } from '../../../shared/lib/dataAccess';
+import { copySessionPartiesToNewSession } from '../hooks/caseSessionLinkingShared';
 import { escapeTelegramHtml } from '../../../shared/lib/sanitize';
 import DatePicker from '@/shared/ui/DatePicker';
 import { I } from '../../../constants';
@@ -58,7 +59,7 @@ function SessionUpdateModal({ session, caseData, db, onClose, onDone, onNotify, 
         // (بس تاريخ ومطلوب) وتفقد كل هويتها. القضايا الحقيقية مش محتاجة
         // النسخ ده لأن البيانات بتتجاب من جدول cases عن طريق case_id.
         const isStandalone = !caseData.id;
-        const { error } = await db.from('case_sessions').insert([{
+        const { data: newSessionRow, error } = await db.from('case_sessions').insert([{
             case_id: caseData.id,
             session_date: nextDate,
             session_time: session.session_time || null,
@@ -87,16 +88,36 @@ function SessionUpdateModal({ session, caseData, db, onClose, onDone, onNotify, 
                 defendant: session.defendant || null,
                 defendant_role: session.defendant_role || null,
                 defendant_national_id: session.defendant_national_id || null,
+                // 🆕 (خطة "المسمى القانوني" — بند مؤجل ثانٍ، 24 يوليو 2026):
+                // كانا مفقودين هنا قبل كده — الجلسة القادمة كانت بترجع
+                // بلا 🔖 المسمى الجامع حتى لو الجلسة الحالية فيها ورثة/شركاء
+                // وعليها مسمى مكتوب.
+                plaintiff_legal_title: session.plaintiff_legal_title || null,
+                defendant_legal_title: session.defendant_legal_title || null,
                 // ⚡ FIX: كان client_id مش بيتبعت خالص هنا — الجلسة القادمة
                 // كانت بتتولد "مش مربوطة" بالموكل حتى لو الجلسة الحالية
                 // كانت مربوطة، وده باج فقدان ربط كامل مش بس بيانات قديمة.
                 client_id: session.client_id || null,
             } : {}),
-        }]);
+        }]).select('id').single();
 
         setSaving(false);
 
         if (error) { toast('❌ فشل إنشاء الجلسة الجديدة', true); return; }
+
+        // 🆕 (خطة "المسمى القانوني" — بند مؤجل ثانٍ، 24 يوليو 2026): نسخ كل
+        // صفوف case_parties بتاعة الجلسة الحالية (لو فيها أكتر من شخص تحت
+        // أي طرف — ورثة/شركاء) للجلسة الجديدة. هذه نسخة (INSERT) لا نقل
+        // (UPDATE) — الجلسة القديمة لازم تفضل محتفظة بصفوفها الأصلية كسجل
+        // تاريخي لما حصل فيها. مقصورة على المسار المستقل فقط (isStandalone)
+        // — القضايا الحقيقية بتاخد أطرافها من case_parties.case_id، مش
+        // مرتبطة بـsession_id، فمش محتاجة أي نسخ هنا أصلاً.
+        if (isStandalone && newSessionRow?.id) {
+            const copyResult = await copySessionPartiesToNewSession(db, session.id, newSessionRow.id);
+            if (!copyResult.ok) {
+                toast('⚠️ تم إنشاء الجلسة القادمة لكن تعذّر نسخ بيانات بعض أطراف الدعوى — راجعها يدويًا', true);
+            }
+        }
 
         toast('✅ تم تحديث الجلسة وإنشاء الجلسة القادمة');
 
