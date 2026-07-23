@@ -51,11 +51,17 @@ export function formatPoaValue(v: PoaValue): string {
 const boxCls = 'w-full px-2 py-2.5 text-[11px] text-center rounded-lg border border-white/10 bg-premium-bg text-white placeholder-slate-600 transition-colors';
 const boxStyle = { fontFamily: 'Cairo,sans-serif' };
 
-export const PoaInput = ({ label = 'بيانات التوكيل', value, onChange, required }: {
-    label?: string; value: string; onChange: (next: string) => void; required?: boolean;
+// ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 2): دعم readOnly عشان
+// EditCaseModal يقدر يقفل حقل التوكيل لما القضية مربوطة بموكل من النظام
+// (نفس فكرة قفل باقي حقول الموكل — القيمة الحية بتيجي من ملف الموكل نفسه).
+const boxClsReadOnly = 'w-full px-2 py-2.5 text-[11px] text-center rounded-lg border border-white/10 bg-white/5 text-slate-300 cursor-not-allowed';
+
+export const PoaInput = ({ label = 'بيانات التوكيل', value, onChange, required, readOnly }: {
+    label?: string; value: string; onChange: (next: string) => void; required?: boolean; readOnly?: boolean;
 }) => {
     const parsed = parsePoaString(value);
     const update = (patch: Partial<PoaValue>) => onChange(formatPoaValue({ ...parsed, ...patch }));
+    const cls = readOnly ? boxClsReadOnly : boxCls;
 
     return React.createElement('div', null,
         label && React.createElement('label', { className: 'block text-[10px] font-bold text-slate-400 mb-1.5' },
@@ -65,27 +71,27 @@ export const PoaInput = ({ label = 'بيانات التوكيل', value, onChang
         // سطر واحد بـ 4 خانات: رقم (ضيقة) / حرف (ضيقة) / سنة (ضيقة) / مكتب توثيق (واسعة)
         React.createElement('div', { className: 'grid gap-1.5', style: { gridTemplateColumns: '1.1fr 0.9fr 1.1fr 2fr' } },
             React.createElement('input', {
-                value: parsed.number,
+                value: parsed.number, readOnly,
                 onChange: (e: React.ChangeEvent<HTMLInputElement>) => update({ number: onlyDigitsN(e.target.value, 5) }),
                 placeholder: 'رقم', inputMode: 'numeric', maxLength: 5,
-                className: boxCls, style: boxStyle,
+                className: cls, style: boxStyle,
             }),
             React.createElement('input', {
-                value: parsed.letters,
+                value: parsed.letters, readOnly,
                 onChange: (e: React.ChangeEvent<HTMLInputElement>) => update({ letters: onlyArabicLetters(e.target.value, 2) }),
                 placeholder: 'حرف', maxLength: 2,
-                className: boxCls, style: boxStyle,
+                className: cls, style: boxStyle,
             }),
             React.createElement('input', {
-                value: parsed.year,
+                value: parsed.year, readOnly,
                 onChange: (e: React.ChangeEvent<HTMLInputElement>) => update({ year: onlyDigitsN(e.target.value, 4) }),
                 placeholder: 'سنة', inputMode: 'numeric', maxLength: 4,
-                className: boxCls, style: boxStyle,
+                className: cls, style: boxStyle,
             }),
             React.createElement('input', {
-                value: parsed.office,
+                value: parsed.office, readOnly,
                 onChange: (e: React.ChangeEvent<HTMLInputElement>) => update({ office: e.target.value }),
-                placeholder: 'مكتب التوثيق', className: boxCls, style: { ...boxStyle, textAlign: 'right' as const },
+                placeholder: 'مكتب التوثيق', className: cls, style: { ...boxStyle, textAlign: 'right' as const },
             }),
         )
     );
