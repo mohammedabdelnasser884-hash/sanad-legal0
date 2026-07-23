@@ -17,7 +17,7 @@ import DocsSection from './case-detail/DocsSection';
 import TimelineSection from './case-detail/TimelineSection';
 import PdfViewerModal from '@/shared/modals/PdfViewerModal';
 import { useCaseDetailActions } from './hooks/useCaseDetailActions';
-import type { CaseDocWithUrl } from './hooks/useCaseDetailActions';
+import type { CaseDocWithUrl, CasePartyRow } from './hooks/useCaseDetailActions';
 import type { MappedCase } from '../../hooks/useAppData';
 import type { ClientRow, ProfileRow } from '../../types';
 import type { CaseFormSubmitData } from './hooks/useCaseActions';
@@ -52,10 +52,22 @@ interface CaseDetailViewProps {
     onDelete?: (caseId: string) => void | Promise<void>;
     onEdit?: (caseId: string, form: CaseFormSubmitData) => void | Promise<void>;
     onLinkClient?: (caseId: string, clientId: string) => void | Promise<void>;
+    // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 4): زرار "فك الربط" جوه
+    // EditCaseModal — بيصفّر client_id بس (handleUnlinkClient في App.tsx).
+    onUnlinkClient?: (caseId: string) => void | Promise<void>;
     // ⚡ CHANGED (خطة توحيد إنشاء الموكل، Phase 1): مبقتش بترجع نتيجة تكرار
     // ولا async — مجرد فتح لموديل "إنشاء موكل جديد" الموحّد (NewClientModal)
     // مليان ببيانات المدعي. شوف App.tsx (handleOpenCreateClientForCase).
-    onCreateAndLinkClient?: (caseId: string, plaintiffName: string, plaintiffNationalId?: string | null, plaintiffPoa?: string | null) => void;
+    onCreateAndLinkClient?: (caseId: string, plaintiffName: string, plaintiffNationalId?: string | null, plaintiffPoa?: string | null, plaintiffAddress?: string | null) => void;
+    // ⚡ NEW (خطة تعدد الأطراف، مرحلة 13.1 — 23 يوليو 2026): زرار "إنشاء
+    // موكل" لطرف بعينه من أطراف القضية (case_parties) — نفس فكرة
+    // onCreateAndLinkClient فوق، بس بيستقبل صف الطرف نفسه بدل بيانات
+    // المدعي المفردة، عشان يدعم أكتر من طرف عليه ⭐ في نفس القضية. آخر
+    // باراميتر onAfterLink بيتنادى بعد نجاح الربط عشان caseParties هنا
+    // (useCaseDetailActions) تتحدّث فورًا (الزرار/الوسم يختفي/يتغير من
+    // غير ما نستنى إعادة فتح الشاشة) — شوف handleOpenCreateClientForParty
+    // في App.tsx (نفس الدالة المستخدمة في wizard الجلسة المستقلة، 7.2).
+    onCreateAndLinkClientForParty?: (caseId: string, party: CasePartyRow, isPrimaryParty: boolean, onAfterLink: () => void) => void;
     onNotify?: (msg: string) => void | Promise<void>;
     initialTab?: string;
     profile?: ProfileRow | null;
@@ -64,12 +76,19 @@ interface CaseDetailViewProps {
     // زرار "حفظ التعديلات" أثناء الحفظ — نفس savingCase المستخدمة في
     // NewCaseModal.
     savingCase?: boolean;
+    // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 2): زرار "✏️ عدّل من
+    // ملف الموكل" جوه EditCaseModal بيستخدم الكولباك ده لفتح تفاصيل
+    // الموكل الحقيقي (نفس آلية فتح تفاصيل الموكل الموجودة بالفعل).
+    onOpenClientProfile?: (client: ClientRow) => void;
 }
 
-function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDelete, onEdit, onLinkClient, onCreateAndLinkClient, onNotify, initialTab='timeline', profile=null, country=null, savingCase=false}: CaseDetailViewProps){
+function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDelete, onEdit, onLinkClient, onUnlinkClient, onCreateAndLinkClient, onCreateAndLinkClientForParty, onNotify, initialTab='timeline', profile=null, country=null, savingCase=false, onOpenClientProfile}: CaseDetailViewProps){
     const [activeSection, setActiveSection] = useState(initialTab);
     const [showEditCase, setShowEditCase] = useState(false);
     const [linkingClient, setLinkingClient] = useState(false);
+    // ⚡ NEW: نفس نمط linkingClient — بيقفل زرار "فك الربط" جوه InfoSection
+    // أثناء التنفيذ.
+    const [unlinkingClient, setUnlinkingClient] = useState(false);
     const [confirmDeleteCase, setConfirmDeleteCase] = useState(false);
     const [docSearch, setDocSearch] = useState('');
     const [viewingDoc, setViewingDoc] = useState<CaseDocWithUrl | null>(null);
@@ -83,6 +102,9 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
     const actions = useCaseDetailActions(caseData, onUpdate, onDelete, onNotify, undefined, client, profile);
     const {
       sessions, notes, docs, loadingSessions,
+      // ⚡ NEW (مرحلة 8): أطراف القضية الكاملة (case_parties) — بتتمرر
+      // لـ InfoSection عشان تعرض القايمة كاملة بدل عمودي plaintiff/defendant.
+      caseParties,
       showAddSession, setShowAddSession,
       editingNoteId, setEditingNoteId, editingNoteText, setEditingNoteText,
       editingSession, setEditingSession,
@@ -183,6 +205,8 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
                 onSave: (form: CaseFormSubmitData) => { onEdit?.(caseData.id, form); setShowEditCase(false); },
                 countryCourts: COUNTRY_CONFIGS[country as string]?.courts,
                 countryCaseTypes: COUNTRY_CONFIGS[country as string]?.caseTypes,
+                linkedClient: client,
+                onOpenClientProfile: client ? () => { setShowEditCase(false); onOpenClientProfile?.(client); } : undefined,
             })
         ),
 
@@ -446,6 +470,7 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
             // ═══ البيانات ═══
             activeSection === 'info' && React.createElement(InfoSection, {
                 caseData, client, sessions, notes, docs, clients, linkingClient,
+                caseParties,
                 onLinkClient: async (clientId: string) => {
                     if (!onLinkClient) return;
                     setLinkingClient(true);
@@ -453,8 +478,21 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
                     finally { setLinkingClient(false); }
                 },
                 onCreateAndLinkClient: onCreateAndLinkClient
-                    ? () => onCreateAndLinkClient(caseData.id, caseData.plaintiff || '', caseData.plaintiff_national_id, caseData.plaintiff_power_of_attorney)
+                    ? () => onCreateAndLinkClient(caseData.id, caseData.plaintiff || '', caseData.plaintiff_national_id, caseData.plaintiff_power_of_attorney, caseData.plaintiff_address)
                     : undefined,
+                // ⚡ NEW (مرحلة 13.1): onAfterLink بتنادي fetchSessions تاني —
+                // caseParties (وبالتبعية الوسم/الزرار الخاص بالطرف ده) بتتحدّث
+                // فورًا من غير ما نستنى إعادة فتح تفاصيل القضية.
+                onCreateAndLinkClientForParty: onCreateAndLinkClientForParty
+                    ? (party: CasePartyRow, isPrimaryParty: boolean) =>
+                        onCreateAndLinkClientForParty(caseData.id, party, isPrimaryParty, () => fetchSessions())
+                    : undefined,
+                unlinkingClient,
+                onUnlinkClient: onUnlinkClient ? async () => {
+                    setUnlinkingClient(true);
+                    try { await onUnlinkClient(caseData.id); }
+                    finally { setUnlinkingClient(false); }
+                } : undefined,
             }),
 
             // ═══ المراجعة (نواقص الملف) — Rule-based بدون AI، المرحلة 1 من خطة المساعد الذكي ═══
