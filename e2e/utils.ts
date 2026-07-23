@@ -37,12 +37,21 @@ export async function createCase(page: Page, title: string): Promise<void> {
   await page.getByTestId('nav-cases').click();
   await page.getByTestId('new-case-button').click();
   await page.getByTestId('new-case-title').fill(title);
+  // ⚡ CHANGED (خطة "تطوير أطراف الدعوى" — مرحلة 4، 23 يوليو 2026): حقول
+  // كل طرف بقت جوه نموذج فرعي منفصل (PartySubform) بيتفتح من كارت مطوي
+  // (party-side-card-<side>)، مش ظاهرة مفتوحة دايمًا زي الشكل القديم —
+  // لازم نفتح كارت الجهة، نملأ، ونقفل (زرار "حفظ والعودة") قبل ما ننتقل
+  // للجهة التانية أو نضغط حفظ القضية.
+  await page.getByTestId('party-side-card-plaintiff').click();
   await page.getByTestId('new-case-plaintiff-0-star').click();
   await page.getByTestId('new-case-plaintiff-0-name').fill('موكل اختبار E2E');
   await page.getByTestId('new-case-plaintiff-0-capacity').fill('مدعي');
   await page.getByTestId('new-case-plaintiff-0-national-id').fill('12345678901234');
+  await page.getByTestId('new-case-plaintiff-subform-save').click();
+  await page.getByTestId('party-side-card-defendant').click();
   await page.getByTestId('new-case-defendant-0-name').fill('خصم اختبار E2E');
   await page.getByTestId('new-case-defendant-0-capacity').fill('مدعى عليه');
+  await page.getByTestId('new-case-defendant-subform-save').click();
   await page.getByTestId('new-case-save').click();
 
   const card = page.getByTestId('case-card').filter({ hasText: title });
