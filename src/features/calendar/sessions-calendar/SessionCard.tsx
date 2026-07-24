@@ -34,6 +34,11 @@ function SessionCard({ s, cases, clients, onOpenCase, onOpenStandalone, onGoogle
     const isStandalone = !s.case_id;
     const plaintiff = linkedCase?.plaintiff || s.plaintiff;
     const defendant = linkedCase?.defendant || s.defendant;
+    // ⚡ NEW (24 يوليو، خطة سد فجوات عرض الأطراف — مرحلة 2): نفس ترتيب
+    // fallback الاسم المفرد بالضبط، بس للمسمى القانوني. فاضي (الحالة الغالبة)
+    // يعني PartiesLine بترجع لعرض الاسم المفرد زي ما هي بدون أي تغيير.
+    const plaintiffLegalTitle = linkedCase?.plaintiff_legal_title || s.plaintiff_legal_title;
+    const defendantLegalTitle = linkedCase?.defendant_legal_title || s.defendant_legal_title;
     const caseType  = linkedCase?.type  || linkedCase?.case_type || s.case_type;
     const caseTitle = linkedCase?.title || s.title || s.description;
     const caseNumberRaw = linkedCase?.number || linkedCase?.case_number_official || s.case_number;
@@ -53,10 +58,12 @@ function SessionCard({ s, cases, clients, onOpenCase, onOpenStandalone, onGoogle
     if (caseType) numberLine = numberLine ? `${numberLine} - ${caseType}` : caseType;
 
     // السطر الثاني: المدعي ضد المدعى عليه (أو نص بديل)
+    const displayPlaintiff = plaintiffLegalTitle || plaintiff;
+    const displayDefendant = defendantLegalTitle || defendant;
     const partiesFallback = !numberLine ? caseTitle : null;
-    const partiesText = (plaintiff && defendant)
-        ? plaintiff + ' ضد ' + defendant
-        : (plaintiff || defendant || partiesFallback || caseTitle || '— جلسة مستقلة —');
+    const partiesText = (displayPlaintiff && displayDefendant)
+        ? displayPlaintiff + ' ضد ' + displayDefendant
+        : (displayPlaintiff || displayDefendant || partiesFallback || caseTitle || '— جلسة مستقلة —');
 
     // السطر الثالث: اسم/موضوع الدعوى (تعويض / طرد / ريع...)
     const titleLine = (caseTitle && caseTitle !== partiesText) ? caseTitle : null;
@@ -119,7 +126,9 @@ function SessionCard({ s, cases, clients, onOpenCase, onOpenStandalone, onGoogle
 
             // سطر الأطراف
             React.createElement(PartiesLine, {
-                plaintiff, defendant, fallback: partiesFallback || caseTitle || '— جلسة مستقلة —',
+                plaintiff, defendant,
+                plaintiffLegalTitle, defendantLegalTitle,
+                fallback: partiesFallback || caseTitle || '— جلسة مستقلة —',
                 className: "text-[13px] font-bold text-white" + (numberLine ? " mt-0.5" : "")
             }),
 
