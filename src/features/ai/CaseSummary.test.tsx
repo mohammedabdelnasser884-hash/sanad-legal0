@@ -9,15 +9,21 @@ import type { MappedCase, MappedClient } from '../../hooks/useAppData';
 // (missingCritical على type/court/number) كان موجود من المرحلة 3 من غير
 // أي تست — هنا أول تغطية فعلية له.
 // CaseSummary.tsx بتعمل Promise.all على case_sessions/case_documents/
-// case_fees في useEffect (إحصائيات غير حرجة، مش جزء من الـ validation)،
-// فبنعمل mock بسيط لـ db يرجّع نتيجة فاضية عشان الـ effect يخلص من غير
-// ما يأثر على تست الـ validation نفسها.
+// case_fees/case_parties في useEffect (إحصائيات وقائمة أطراف غير حرجة،
+// مش جزء من الـ validation)، فبنعمل mock بسيط لـ db يرجّع نتيجة فاضية
+// عشان الـ effect يخلص من غير ما يأثر على تست الـ validation نفسها.
 // ══════════════════════════════════════════════════════════════════
 afterEach(() => { cleanup(); });
 
 const from = vi.fn((table: string) => {
   if (table === 'case_fees') {
     return { select: vi.fn(() => ({ eq: vi.fn(() => ({ is: vi.fn(() => ({ maybeSingle: vi.fn(() => Promise.resolve({ data: null, error: null })) })) })) })) };
+  }
+  // 🆕 (خطة سد فجوات عرض الأطراف — مرحلة 3-ب): case_parties بتتنادى بـ
+  // .select('*').eq('case_id', id).order('sort_order', ...) — مختلف عن
+  // فرع count/head العام تحت، فمحتاج فرع خاص بيه يدعم .order().
+  if (table === 'case_parties') {
+    return { select: vi.fn(() => ({ eq: vi.fn(() => ({ order: vi.fn(() => Promise.resolve({ data: [], error: null })) })) })) };
   }
   return { select: vi.fn(() => ({ eq: vi.fn(() => Promise.resolve({ count: 0, data: null, error: null })) })) };
 });
