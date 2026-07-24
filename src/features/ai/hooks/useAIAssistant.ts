@@ -40,12 +40,15 @@ export function useAIAssistant(cases: MappedCase[], clients: ClientRow[], profil
     useEffect(() => {
         if (!selectedCase) { setSelectedCaseParties([]); return; }
         let cancelled = false;
-        db.from('case_parties').select('*').eq('case_id', selectedCase.id).order('sort_order', { ascending: true })
-            .then(({ data, error }) => {
+        (async () => {
+            try {
+                const { data, error } = await db.from('case_parties').select('*').eq('case_id', selectedCase.id).order('sort_order', { ascending: true });
                 if (cancelled) return;
                 setSelectedCaseParties(error ? [] : ((data as unknown as CasePartyRow[]) || []));
-            })
-            .catch(() => { if (!cancelled) setSelectedCaseParties([]); });
+            } catch {
+                if (!cancelled) setSelectedCaseParties([]);
+            }
+        })();
         return () => { cancelled = true; };
     }, [selectedCase]);
 
