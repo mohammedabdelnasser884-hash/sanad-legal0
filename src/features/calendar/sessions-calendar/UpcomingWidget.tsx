@@ -33,7 +33,7 @@ function UpcomingWidget({ cases, clients, onOpenCase }: UpcomingWidgetProps) {
 
     useEffect(() => {
         db.from('case_sessions')
-          .select('id,session_date,session_time,session_floor,session_hall,case_id,client_id,description,result,next_action,title,case_number,court,case_type,plaintiff,defendant,cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
+          .select('id,session_date,session_time,session_floor,session_hall,case_id,client_id,description,result,next_action,title,case_number,court,case_type,plaintiff,defendant,cases(id,title,plaintiff,defendant,plaintiff_legal_title,defendant_legal_title,court_name,case_type,case_number_official,client_id)')
           .gte('session_date', todayStr)
           .order('session_date', { ascending: true })
           .limit(200)
