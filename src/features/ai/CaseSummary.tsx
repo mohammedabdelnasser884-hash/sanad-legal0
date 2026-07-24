@@ -7,6 +7,8 @@ import {
 } from '../../shared/ui/TaskResultKit';
 import type { MappedCase, MappedClient } from '../../hooks/useAppData';
 import type { LegalArticle, AIMessage } from './hooks/aiAssistantTypes';
+import type { CasePartyRow } from '../cases/hooks/useCaseDetailActions';
+import { buildFullPartiesText } from '../../shared/parties/partyDisplay';
 
 // ─────────────────────────────────────────────────────────
 //  CaseSummary — أول بند في المرحلة 3 من خطة المساعد الذكي
@@ -36,16 +38,27 @@ interface FeeRow {
 
 const isFilled = (v: string | null | undefined) => !!v && v.trim() !== '' && v !== '—';
 
-function buildCaseContextText(c: MappedCase, client: MappedClient | null, counts: CaseCounts | null, fee: FeeRow | null): string {
+function buildCaseContextText(c: MappedCase, client: MappedClient | null, counts: CaseCounts | null, fee: FeeRow | null, caseParties: CasePartyRow[]): string {
   const remaining = fee && fee.total_fees != null && fee.paid_fees != null ? fee.total_fees - fee.paid_fees : null;
+  // 🆕 (24 يوليو، خطة سد فجوات عرض الأطراف — مرحلة 3-ب): قائمة كاملة لو
+  // الجهة فيها شخصان فأكثر، بدل السطر المفرد (مرحلة 3-أ). الحالة الغالبة
+  // (شخص واحد) صفر تغيير.
+  const plaintiffParties = caseParties.filter((p) => p.side === 'plaintiff');
+  const defendantParties = caseParties.filter((p) => p.side === 'defendant');
+  const plaintiffLine = plaintiffParties.length >= 2
+    ? `المدعي/الطاعن (${plaintiffParties.length} أشخاص):\n${buildFullPartiesText(plaintiffParties)}`
+    : `المدعي/الطاعن: ${c.plaintiff_legal_title || c.plaintiff || '—'}${c.plaintiff_role ? ' (' + c.plaintiff_role + ')' : ''}`;
+  const defendantLine = defendantParties.length >= 2
+    ? `المدعى عليه (${defendantParties.length} أشخاص):\n${buildFullPartiesText(defendantParties)}`
+    : `المدعى عليه: ${c.defendant_legal_title || c.defendant || '—'}${c.defendant_role ? ' (' + c.defendant_role + ')' : ''}`;
   const lines = [
     `عنوان القضية: ${c.title || '—'}`,
     `رقم القيد: ${c.number || '—'} / ${c.year || '—'}`,
     `نوع القضية: ${c.type || '—'}`,
     `المحكمة: ${c.court || '—'}${c.court_level ? ' — ' + c.court_level : ''}`,
     `حالة القضية: ${c.status || '—'}`,
-    `المدعي/الطاعن: ${c.plaintiff || '—'}${c.plaintiff_role ? ' (' + c.plaintiff_role + ')' : ''}`,
-    `المدعى عليه: ${c.defendant || '—'}${c.defendant_role ? ' (' + c.defendant_role + ')' : ''}`,
+    plaintiffLine,
+    defendantLine,
     client ? `الموكل: ${client.full_name}` : 'الموكل: غير مرتبط',
     counts ? `عدد الجلسات المسجّلة: ${counts.sessions} — عدد المستندات المرفوعة: ${counts.documents}` : '',
     remaining !== null ? `المتبقي من الأتعاب: ${remaining.toLocaleString('ar-EG')}` : '',
@@ -68,6 +81,10 @@ function CaseSummary({ cases, clients, retrieveLegalArticles, buildLegalContextB
   const [summary, setSummary] = useState('');
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 🆕 (خطة سد فجوات عرض الأطراف — مرحلة 3-ب): فتش مستقل لـ case_parties
+  // الخاصة بالقضية المختارة هنا (نفس منطق CaseDataExtract.tsx — كل مكون
+  // عنده selectedCase خاص بيه، مش نفس selectedCase في useAIAssistant).
+  const [caseParties, setCaseParties] = useState<CasePartyRow[]>([]);
 
   const selectedCase = cases.find((c) => c.id === selectedId) || null;
   const client = selectedCase ? clients.find((cl) => cl.id === selectedCase.client_id) || null : null;
@@ -78,16 +95,18 @@ function CaseSummary({ cases, clients, retrieveLegalArticles, buildLegalContextB
   useEffect(() => {
     setSummary('');
     setError(null);
-    if (!selectedCase) { setCounts(null); setFee(null); return; }
+    if (!selectedCase) { setCounts(null); setFee(null); setCaseParties([]); return; }
     let cancelled = false;
     Promise.all([
       db.from('case_sessions').select('id', { count: 'exact', head: true }).eq('case_id', selectedCase.id),
       db.from('case_documents').select('id', { count: 'exact', head: true }).eq('case_id', selectedCase.id),
       db.from('case_fees').select('total_fees,paid_fees').eq('case_id', selectedCase.id).is('deleted_at', null).maybeSingle(),
-    ]).then(([sessRes, docRes, feeRes]) => {
+      db.from('case_parties').select('*').eq('case_id', selectedCase.id).order('sort_order', { ascending: true }),
+    ]).then(([sessRes, docRes, feeRes, partiesRes]) => {
       if (cancelled) return;
       setCounts({ sessions: sessRes.count || 0, documents: docRes.count || 0 });
       setFee((feeRes.data || null) as unknown as FeeRow | null);
+      setCaseParties(partiesRes.error ? [] : ((partiesRes.data as unknown as CasePartyRow[]) || []));
     }).catch(() => { /* مش حرج — التلخيص هيشتغل حتى من غير الإحصائيات دي */ });
     return () => { cancelled = true; };
   }, [selectedCase?.id]);
@@ -108,7 +127,7 @@ function CaseSummary({ cases, clients, retrieveLegalArticles, buildLegalContextB
     setError(null);
     setSummary('');
     try {
-      const contextText = buildCaseContextText(selectedCase, client, counts, fee);
+      const contextText = buildCaseContextText(selectedCase, client, counts, fee, caseParties);
       const retrievalQuery = [selectedCase.type, selectedCase.court].filter(Boolean).join(' — ');
       const retrieved = retrievalQuery ? await retrieveLegalArticles(retrievalQuery) : [];
       const legalContextBlock = buildLegalContextBlock(retrieved, true);
