@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { COUNTRY_CONFIGS } from '../../../constants';
+import { db } from '../../../supabaseClient';
 import type { ClientRow, ProfileRow } from '../../../types';
 import type { MappedCase } from '../../../hooks/useAppData';
+import type { CasePartyRow } from '../../cases/hooks/useCaseDetailActions';
 import { GROQ_MODELS, DOC_TEMPLATES, colorMap } from './aiAssistantTypes';
 import { useAIApiKey } from './useAIApiKey';
 import { useAILegalEngine } from './useAILegalEngine';
@@ -27,6 +29,26 @@ export function useAIAssistant(cases: MappedCase[], clients: ClientRow[], profil
 
     const activeCfg = COUNTRY_CONFIGS[country||'SA'];
 
+    // 🆕 (خطة "سد فجوات عرض الأطراف" — مرحلة 3-ب، 24 يوليو 2026): فتش مستقل
+    // لصفوف case_parties الخاصة بالقضية المختارة حاليًا في شاشة الـAI —
+    // القرار كان فتش مستقل (لا اعتماد على تمرير caseParties من CaseDetailView)
+    // لأن مساعد الذكاء الاصطناعي بيتفتح كعنصر عام من CommandDock (App.tsx)،
+    // مش متداخل جوّه CaseDetailView، فمفيش caseParties جاهزة أصلًا تتمرر منه.
+    // فشل الاستعلام (مشكلة اتصال) بيرجّع array فاضية = فولباك كامل لسلوك
+    // ما قبل المرحلة دي (الاسم المفرد/المسمى القانوني بس، بلا قائمة كاملة).
+    const [selectedCaseParties, setSelectedCaseParties] = useState<CasePartyRow[]>([]);
+    useEffect(() => {
+        if (!selectedCase) { setSelectedCaseParties([]); return; }
+        let cancelled = false;
+        db.from('case_parties').select('*').eq('case_id', selectedCase.id).order('sort_order', { ascending: true })
+            .then(({ data, error }) => {
+                if (cancelled) return;
+                setSelectedCaseParties(error ? [] : ((data as unknown as CasePartyRow[]) || []));
+            })
+            .catch(() => { if (!cancelled) setSelectedCaseParties([]); });
+        return () => { cancelled = true; };
+    }, [selectedCase?.id]);
+
     const { buildLegalContextBlock, retrieveLegalArticles, callAI } = useAILegalEngine(profile, activeCfg, today, selectedModel);
 
     const { input, setInput, loading, setLoading, sendMessage } = useAIChat({
@@ -42,6 +64,7 @@ export function useAIAssistant(cases: MappedCase[], clients: ClientRow[], profil
     } = useAIDocumentGenerator({
         profile, activeCfg, today, selectedCase, hasKey, setShowKeyInput,
         retrieveLegalArticles, buildLegalContextBlock, callAI,
+        caseParties: selectedCaseParties,
     });
 
     useEffect(()=>{
@@ -55,7 +78,7 @@ export function useAIAssistant(cases: MappedCase[], clients: ClientRow[], profil
     messages, setMessages, input, setInput, loading, setLoading,
     topics, setTopics, activeTopicId, setActiveTopicId,
     showTopics, setShowTopics, newTopic, deleteTopic,
-    selectedCase, setSelectedCase,
+    selectedCase, setSelectedCase, selectedCaseParties,
     docType, setDocType, docFields, sf,
     generatedDoc, setGeneratedDoc, generatingDoc,
     copied, copyDoc, printDoc, downloadPDF, generateDocument,
