@@ -34,7 +34,7 @@ function MissedTab({ cases, clients, onOpenCase, onOpenReminders, onOpenStandalo
         // جلسات فات تاريخها وليس فيها result ولا next_action (لم تُحدَّث)
         Promise.all([
             db.from('case_sessions')
-              .select('id,session_date,session_time,session_floor,session_hall,case_id,client_id,description,result,next_action,title,case_number,court,case_type,plaintiff,defendant,circuit_number,plaintiff_role,defendant_role,cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
+              .select('id,session_date,session_time,session_floor,session_hall,case_id,client_id,description,result,next_action,title,case_number,court,case_type,plaintiff,defendant,circuit_number,plaintiff_role,defendant_role,plaintiff_legal_title,defendant_legal_title,cases(id,title,plaintiff,defendant,plaintiff_legal_title,defendant_legal_title,court_name,case_type,case_number_official,client_id)')
               .lt('session_date', todayStr)
               .order('session_date', { ascending: false })
               .limit(50)
