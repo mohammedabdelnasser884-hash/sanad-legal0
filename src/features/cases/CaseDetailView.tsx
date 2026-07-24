@@ -544,7 +544,7 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
             }),
 
             // ═══ المراجعة (نواقص الملف) — Rule-based بدون AI، المرحلة 1 من خطة المساعد الذكي ═══
-            activeSection === 'checklist' && React.createElement(ChecklistSection, { caseData, client, sessions, notes, docs, onGoToTab: setActiveSection })
+            activeSection === 'checklist' && React.createElement(ChecklistSection, { caseData, client, sessions, notes, docs, caseParties, onGoToTab: setActiveSection })
         ),
 
         // ── مودال تأكيد حذف الجلسة ──
