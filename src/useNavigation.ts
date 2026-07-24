@@ -109,6 +109,12 @@ const nestedModalStack: NestedModalCloseFn[] = [];
  * الـ history يفضلوا متزامنين حتى لو المستخدم قفل بزرار مش بزر الرجوع.
  */
 export function registerNestedModal(onClose: NestedModalCloseFn): () => void {
+  // ⚡ FIX (24 يوليو 2026 — باج إغلاق المودال الرئيسي بالغلط): بنسجّل
+  // الحالة والمسار اللي كانوا موجودين *قبل* دفع الـentry بتاعة النموذج
+  // الفرعي، عشان لو القفل حصل يدويًا (زرار حفظ/إغلاق) نقدر نرجعلهم
+  // بـreplaceState من غير أي navigation فعلي — راجع تعليق الفانكشن تحت.
+  const previousState = window.history.state as unknown;
+  const previousUrl = window.location.pathname + window.location.search + window.location.hash;
   window.history.pushState({ type: 'nested' }, '', window.location.pathname);
   nestedModalStack.push(onClose);
   let active = true;
@@ -118,10 +124,15 @@ export function registerNestedModal(onClose: NestedModalCloseFn): () => void {
     const idx = nestedModalStack.lastIndexOf(onClose);
     if (idx !== -1) nestedModalStack.splice(idx, 1);
     // لو الـ entry اللي إحنا ضفناها لسه هي الحالية (يعني ده قفل يدوي، مش
-    // نتيجة إن المستخدم دعس رجوع بالفعل وonPop تحت هو اللي قفلنا) — نرجع
-    // نمسحها من الـ history عشان الـ stack يفضل متوازن.
+    // نتيجة إن المستخدم دعس رجوع بالفعل وonPop تحت هو اللي قفلنا) — بنرجّع
+    // الحالة اللي كانت قبل الفتح بـreplaceState (مش history.back()).
+    // ⚠️ history.back() بيطلق popstate حقيقي، وonPop الرئيسي وقتها بيلاقي
+    // nestedModalStack فاضية بالفعل (لأنها اتشالت منها فوق) فيفترض غلط إن
+    // ده رجوع للمودال الرئيسي نفسه ويقفله هو كمان — ده أصل الباج اللي كان
+    // بيقفل مودال "تقييد قضية" كله لما نقفل كارت طرف بزرار "حفظ والعودة".
+    // replaceState بيوازن الـstack من غير أي navigation ولا أي popstate.
     if ((window.history.state as { type?: string } | null)?.type === 'nested') {
-      window.history.back();
+      window.history.replaceState(previousState, '', previousUrl);
     }
   };
 }
