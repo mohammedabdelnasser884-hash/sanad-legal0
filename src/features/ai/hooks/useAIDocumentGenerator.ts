@@ -6,6 +6,8 @@ import { PDF_FONT_FAMILY, PDF_FONT_LINK } from '../../../shared/lib/pdf';
 import type { CountryConfig } from '../../../constants';
 import type { ProfileRow } from '../../../types';
 import type { MappedCase } from '../../../hooks/useAppData';
+import type { CasePartyRow } from '../../cases/hooks/useCaseDetailActions';
+import { buildFullPartiesText } from '../../../shared/parties/partyDisplay';
 import { DOC_TEMPLATES } from './aiAssistantTypes';
 import type { AIDocFields, AIMessage, LegalArticle } from './aiAssistantTypes';
 
@@ -14,6 +16,14 @@ import type { AIDocFields, AIMessage, LegalArticle } from './aiAssistantTypes';
 //  docType/docFields/generatedDoc/generatingDoc/copied/sf +
 //  generateDocument + copyDoc/printDoc/downloadPDF.
 //  صفر تغيير في المنطق أو الصياغة (بما في ذلك تعليقات escapeHtml الأمنية).
+//
+//  🆕 (خطة "سد فجوات عرض الأطراف" — مرحلة 3-ب، 24 يوليو 2026): باراميتر
+//  caseParties جديد — لو فيه جهة (مدعي/مدعى عليه) بشخصين فأكثر، بتتضاف
+//  قائمة كاملة بأسماء وصفات كل شخص لنص الـprompt المرسل للـAI (قسم
+//  "بيانات المستند"/caseInfo)، عشان مستندات زي التوكيل/صحيفة الدعوى
+//  تسمّي كل وارث/شريك بالاسم بدل الاكتفاء بالمسمى الجامع ("ورثة المرحوم..").
+//  docFields.plaintiff/defendant (سطر الترويسة المختصر) فاضلين زي ما هم —
+//  دي إضافة معلومة للـAI بس، مش تغيير في حقول الفورم نفسها.
 // ─────────────────────────────────────────────────────────
 interface UseAIDocumentGeneratorParams {
     profile: ProfileRow | null;
@@ -25,11 +35,12 @@ interface UseAIDocumentGeneratorParams {
     retrieveLegalArticles: (query: string) => Promise<LegalArticle[]>;
     buildLegalContextBlock: (articles: LegalArticle[] | null | undefined, forDocument?: boolean) => string;
     callAI: (prompt: string | null, history: AIMessage[] | null, legalContextBlock?: string) => Promise<string>;
+    caseParties?: CasePartyRow[];
 }
 
 export function useAIDocumentGenerator({
     profile, activeCfg, today, selectedCase, hasKey, setShowKeyInput,
-    retrieveLegalArticles, buildLegalContextBlock, callAI,
+    retrieveLegalArticles, buildLegalContextBlock, callAI, caseParties = [],
 }: UseAIDocumentGeneratorParams) {
     const [docType, setDocType] = useState('مذكرة_دفاع');
     const [docFields, setDocFields] = useState<AIDocFields>({
@@ -64,6 +75,21 @@ export function useAIDocumentGenerator({
         const caseInfo = selectedCase
             ? `القضية: ${selectedCase.title}\nالمحكمة: ${selectedCase.court}\nالنوع: ${selectedCase.type}`
             : '';
+        // 🆕 (مرحلة 3-ب): قائمة كاملة بأسماء وصفات كل شخص لجهة فيها أكتر من
+        // شخص (ورثة/شركاء) — الحالة الغالبة (طرف واحد لكل جهة) بترجع نص
+        // فاضي فمفيش أي إضافة على caseInfo القديم.
+        const partiesDetailBlock = (['plaintiff', 'defendant'] as const)
+            .map((side) => {
+                const sideParties = caseParties.filter((p) => p.side === side);
+                if (sideParties.length < 2) return '';
+                const list = buildFullPartiesText(sideParties);
+                if (!list) return '';
+                const sideLabel = side === 'plaintiff' ? 'المدعي/الطاعن' : 'المدعى عليه';
+                return `قائمة كاملة بأشخاص طرف ${sideLabel} (لازم ذكر كل شخص منهم بالاسم صراحةً في المستند، مش المسمى الجامع بس):\n${list}`;
+            })
+            .filter(Boolean)
+            .join('\n\n');
+        const caseInfoWithParties = partiesDetailBlock ? `${caseInfo}\n\n${partiesDetailBlock}` : caseInfo;
         const isMemo = docType === 'مذكرة_دفاع';
         const memoHeader = `سَنَد
 المحامي: ${docFields.lawyerName||profile?.full_name||'المحامي'}
@@ -100,10 +126,9 @@ ${memoHeader}
 ${activeCfg.closing}
 المحامي / ${docFields.lawyerName||profile?.full_name||'المحامي'}
 التاريخ: ${today}
-${caseInfo}
-
+${caseInfoWithParties}
 تعليمات الصياغة: لا تُعد كتابة الترويسة أو بيانات القضية — ابدأ من "أولاً — الوقائع:" مباشرةً. لا تضع عناوين بين ** **. العناوين تُكتب هكذا: "أولاً — الوقائع:" فقط.`
-        : ('أنشئ '+(DOC_TEMPLATES[docType]?.label||'')+' قانونية كاملة ورسمية باللغة العربية بالصياغة الرسمية المعتمدة في '+activeCfg.name+' وفق '+activeCfg.legalSystem+'\n\nترويسة المستند:\n'+activeCfg.docHeader+'\n'+activeCfg.greeting+'\n\nبيانات المستند:\n'+(docType==='توكيل_رسمي'?('الموكِّل: '+docFields.plaintiff+'\nالموكَّل (المحامي): '+(docFields.lawyerName||profile?.full_name||'المحامي')+'\nموضوع التوكيل: '+docFields.subject+'\nرقم القضية: '+(docFields.caseNumber||'—')+'\nالمحكمة: '+(docFields.court||selectedCase?.court||'—')):('الموكل: '+docFields.plaintiff+(docFields.plaintiffRole?' (بصفته: '+docFields.plaintiffRole+')':'')+'\nالخصم: '+docFields.defendant+(docFields.defendantRole?' (بصفته: '+docFields.defendantRole+')':'')+'\nرقم القضية: '+(docFields.caseNumber||selectedCase?.number||'—')+'\nالمحكمة: '+(docFields.court||selectedCase?.court||activeCfg.courts[0]||'—')+'\nموضوع '+(DOC_TEMPLATES[docType]?.label||'')+': '+docFields.subject+'\nالوقائع والأسانيد: '+docFields.facts+'\nالطلبات: '+docFields.claims))+'\n\n'+caseInfo+'\n\nتعليمات الصياغة القانونية الاحترافية:\n١. ابدأ بـ '+(activeCfg.name==='المملكة العربية السعودية'?'البسملة ثم ':'')+'المقدمة الرسمية المعتمدة في '+activeCfg.name+'\n٢. في صلب الوثيقة، استشهد صراحةً بنصوص المواد القانونية حرفياً مع ذكر: اسم القانون + رقمه + سنته\n٣. أضف أي إسناد قضائي ذي صلة من محاكم '+activeCfg.name+' مع: رقم الطعن والسنة والمبدأ\n٤. الطلبات الختامية تكون محددة وقانونية\n٥. اختم بـ "'+activeCfg.closing+'" ثم توقيع المحامي والتاريخ\n٦. اكتب الوثيقة فقط — لا تضف أي شرح أو تعليق خارجها');
+        : ('أنشئ '+(DOC_TEMPLATES[docType]?.label||'')+' قانونية كاملة ورسمية باللغة العربية بالصياغة الرسمية المعتمدة في '+activeCfg.name+' وفق '+activeCfg.legalSystem+'\n\nترويسة المستند:\n'+activeCfg.docHeader+'\n'+activeCfg.greeting+'\n\nبيانات المستند:\n'+(docType==='توكيل_رسمي'?('الموكِّل: '+docFields.plaintiff+'\nالموكَّل (المحامي): '+(docFields.lawyerName||profile?.full_name||'المحامي')+'\nموضوع التوكيل: '+docFields.subject+'\nرقم القضية: '+(docFields.caseNumber||'—')+'\nالمحكمة: '+(docFields.court||selectedCase?.court||'—')):('الموكل: '+docFields.plaintiff+(docFields.plaintiffRole?' (بصفته: '+docFields.plaintiffRole+')':'')+'\nالخصم: '+docFields.defendant+(docFields.defendantRole?' (بصفته: '+docFields.defendantRole+')':'')+'\nرقم القضية: '+(docFields.caseNumber||selectedCase?.number||'—')+'\nالمحكمة: '+(docFields.court||selectedCase?.court||activeCfg.courts[0]||'—')+'\nموضوع '+(DOC_TEMPLATES[docType]?.label||'')+': '+docFields.subject+'\nالوقائع والأسانيد: '+docFields.facts+'\nالطلبات: '+docFields.claims))+'\n\n'+caseInfoWithParties+'\n\nتعليمات الصياغة القانونية الاحترافية:\n١. ابدأ بـ '+(activeCfg.name==='المملكة العربية السعودية'?'البسملة ثم ':'')+'المقدمة الرسمية المعتمدة في '+activeCfg.name+'\n٢. في صلب الوثيقة، استشهد صراحةً بنصوص المواد القانونية حرفياً مع ذكر: اسم القانون + رقمه + سنته\n٣. أضف أي إسناد قضائي ذي صلة من محاكم '+activeCfg.name+' مع: رقم الطعن والسنة والمبدأ\n٤. الطلبات الختامية تكون محددة وقانونية\n٥. اختم بـ "'+activeCfg.closing+'" ثم توقيع المحامي والتاريخ\n٦. اكتب الوثيقة فقط — لا تضف أي شرح أو تعليق خارجها');
         try {
             const retrievalQuery = [docFields.subject, docFields.facts, docFields.claims].filter(Boolean).join(' — ');
             const retrieved = retrievalQuery ? await retrieveLegalArticles(retrievalQuery) : [];
