@@ -4,6 +4,8 @@ import { formatArDate } from '../../shared/ui/arabicLocale';
 import { CasePicker, EmptyState, SectionCard, InfoRow, CopyButton, ErrorState } from '../../shared/ui/TaskResultKit';
 import { recordError } from '../../systemHealth';
 import type { MappedCase, MappedClient } from '../../hooks/useAppData';
+import type { CasePartyRow } from '../cases/hooks/useCaseDetailActions';
+import { buildFullPartiesText } from '../../shared/parties/partyDisplay';
 
 // ─────────────────────────────────────────────────────────
 //  CaseDataExtract — المرحلة 1 من خطة المساعد الذكي
@@ -25,7 +27,18 @@ interface CaseCounts {
 
 const val = (v: string | number | null | undefined) => (v !== null && v !== undefined && String(v).trim() !== '' ? String(v) : '—');
 
-function buildSummaryText(c: MappedCase, client: MappedClient | null, counts: CaseCounts | null): string {
+function buildSummaryText(c: MappedCase, client: MappedClient | null, counts: CaseCounts | null, caseParties: CasePartyRow[]): string {
+  // 🆕 (24 يوليو، خطة سد فجوات عرض الأطراف — مرحلة 3-ب): لو جهة معينة فيها
+  // شخصان فأكثر، نستبدل السطر المفرد بقائمة كاملة (كل شخص باسمه وصفته).
+  // الحالة الغالبة (شخص واحد لكل جهة) صفر تغيير عن سطر المرحلة 3-أ.
+  const plaintiffParties = caseParties.filter((p) => p.side === 'plaintiff');
+  const defendantParties = caseParties.filter((p) => p.side === 'defendant');
+  const plaintiffLine = plaintiffParties.length >= 2
+    ? `المدعي/الطاعن (${plaintiffParties.length} أشخاص):\n${buildFullPartiesText(plaintiffParties)}`
+    : `المدعي/الطاعن: ${val(c.plaintiff_legal_title || c.plaintiff)}${c.plaintiff_role ? ' (' + c.plaintiff_role + ')' : ''}`;
+  const defendantLine = defendantParties.length >= 2
+    ? `المدعى عليه (${defendantParties.length} أشخاص):\n${buildFullPartiesText(defendantParties)}`
+    : `المدعى عليه: ${val(c.defendant_legal_title || c.defendant)}${c.defendant_role ? ' (' + c.defendant_role + ')' : ''}`;
   const lines = [
     `القضية: ${val(c.title)}`,
     `رقم القيد: ${val(c.number)} — سنة ${val(c.year)}`,
@@ -33,8 +46,8 @@ function buildSummaryText(c: MappedCase, client: MappedClient | null, counts: Ca
     `المحكمة: ${val(c.court)}${c.court_level ? ' — ' + c.court_level : ''}`,
     c.circuit_number ? `الدائرة: ${c.circuit_number}` : '',
     `الحالة: ${val(c.status)}`,
-    `المدعي/الطاعن: ${val(c.plaintiff)}${c.plaintiff_role ? ' (' + c.plaintiff_role + ')' : ''}`,
-    `المدعى عليه: ${val(c.defendant)}${c.defendant_role ? ' (' + c.defendant_role + ')' : ''}`,
+    plaintiffLine,
+    defendantLine,
     client ? `الموكل: ${client.full_name}${client.phone ? ' — ' + client.phone : ''}` : '',
     counts ? `عدد الجلسات المسجّلة: ${counts.sessions} — عدد المستندات: ${counts.documents}` : '',
   ].filter(Boolean);
@@ -47,21 +60,28 @@ function CaseDataExtract({ cases, clients }: CaseDataExtractProps) {
   const [loadingCounts, setLoadingCounts] = useState(false);
   const [countsError, setCountsError] = useState<string | null>(null);
   const [retryTick, setRetryTick] = useState(0);
+  // 🆕 (خطة سد فجوات عرض الأطراف — مرحلة 3-ب): فتش مستقل لـ case_parties
+  // الخاصة بالقضية المختارة هنا (CaseDataExtract عنده selectedCase خاص بيه،
+  // مش نفس selectedCase المشترك في useAIAssistant). فشل الاستعلام = array
+  // فاضية = فولباك كامل لعرض المسمى القانوني/الاسم المفرد بس (مرحلة 3-أ).
+  const [caseParties, setCaseParties] = useState<CasePartyRow[]>([]);
 
   const selectedCase = cases.find((c) => c.id === selectedId) || null;
   const client = selectedCase ? clients.find((cl) => cl.id === selectedCase.client_id) || null : null;
 
   useEffect(() => {
-    if (!selectedCase) { setCounts(null); setCountsError(null); return; }
+    if (!selectedCase) { setCounts(null); setCountsError(null); setCaseParties([]); return; }
     let cancelled = false;
     setLoadingCounts(true);
     setCountsError(null);
     Promise.all([
       db.from('case_sessions').select('id', { count: 'exact', head: true }).eq('case_id', selectedCase.id),
       db.from('case_documents').select('id', { count: 'exact', head: true }).eq('case_id', selectedCase.id),
-    ]).then(([sessRes, docRes]) => {
+      db.from('case_parties').select('*').eq('case_id', selectedCase.id).order('sort_order', { ascending: true }),
+    ]).then(([sessRes, docRes, partiesRes]) => {
       if (cancelled) return;
       setCounts({ sessions: sessRes.count || 0, documents: docRes.count || 0 });
+      setCaseParties(partiesRes.error ? [] : ((partiesRes.data as unknown as CasePartyRow[]) || []));
       setLoadingCounts(false);
     }).catch((e) => {
       if (cancelled) return;
@@ -108,10 +128,29 @@ function CaseDataExtract({ cases, clients }: CaseDataExtractProps) {
 
             // ── الأطراف ──
             React.createElement(SectionCard, { title: 'الأطراف' },
-              React.createElement(InfoRow, { label: 'المدعي / الطاعن', value: val(selectedCase.plaintiff) }),
-              React.createElement(InfoRow, { label: 'صفته', value: val(selectedCase.plaintiff_role) }),
-              React.createElement(InfoRow, { label: 'المدعى عليه', value: val(selectedCase.defendant) }),
-              React.createElement(InfoRow, { label: 'صفته', value: val(selectedCase.defendant_role) }),
+              (() => {
+                const plaintiffParties = caseParties.filter((p) => p.side === 'plaintiff');
+                const defendantParties = caseParties.filter((p) => p.side === 'defendant');
+                const multiPersonBlock = (label: string, count: number, text: string | null) =>
+                  React.createElement('div', { className: 'py-2 border-b border-white/5 last:border-b-0' },
+                    React.createElement('p', { className: 'text-[10px] font-bold text-slate-500 mb-1' }, `${label} (${count} أشخاص)`),
+                    React.createElement('p', { className: 'text-xs font-black text-white whitespace-pre-line leading-relaxed' }, text || '—')
+                  );
+                return React.createElement(React.Fragment, null,
+                  plaintiffParties.length >= 2
+                    ? multiPersonBlock('المدعي/الطاعن', plaintiffParties.length, buildFullPartiesText(plaintiffParties))
+                    : React.createElement(React.Fragment, null,
+                        React.createElement(InfoRow, { label: 'المدعي / الطاعن', value: val(selectedCase.plaintiff_legal_title || selectedCase.plaintiff) }),
+                        React.createElement(InfoRow, { label: 'صفته', value: val(selectedCase.plaintiff_role) }),
+                      ),
+                  defendantParties.length >= 2
+                    ? multiPersonBlock('المدعى عليه', defendantParties.length, buildFullPartiesText(defendantParties))
+                    : React.createElement(React.Fragment, null,
+                        React.createElement(InfoRow, { label: 'المدعى عليه', value: val(selectedCase.defendant_legal_title || selectedCase.defendant) }),
+                        React.createElement(InfoRow, { label: 'صفته', value: val(selectedCase.defendant_role) }),
+                      ),
+                );
+              })()
             ),
 
             // ── الموكل ──
@@ -138,7 +177,7 @@ function CaseDataExtract({ cases, clients }: CaseDataExtractProps) {
 
             // ── نسخ البيانات ──
             React.createElement(CopyButton, {
-              getText: () => (selectedCase ? buildSummaryText(selectedCase, client, counts) : ''),
+              getText: () => (selectedCase ? buildSummaryText(selectedCase, client, counts, caseParties) : ''),
               idleLabel: '📋 نسخ بيانات القضية',
               copiedLabel: 'اتنسخت البيانات',
             }),
