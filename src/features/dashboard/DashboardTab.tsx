@@ -99,6 +99,11 @@ function DashboardTab({
 
         const displayPlaintiff = linkedCase?.plaintiff || (Array.isArray(s.cases) ? s.cases[0]?.plaintiff : s.cases?.plaintiff) || (isStandalone ? s.plaintiff : null);
         const displayDefendant = linkedCase?.defendant || (Array.isArray(s.cases) ? s.cases[0]?.defendant : s.cases?.defendant) || (isStandalone ? s.defendant : null);
+        // ⚡ NEW (24 يوليو، خطة سد فجوات عرض الأطراف — مرحلة 2): نفس ترتيب
+        // fallback بيانات الأطراف بالضبط بس للمسمى القانوني. فاضي (الحالة
+        // الغالبة) = PartiesLine بترجع لعرض الاسم المفرد زي ما هي.
+        const displayPlaintiffLegalTitle = linkedCase?.plaintiff_legal_title || (Array.isArray(s.cases) ? s.cases[0]?.plaintiff_legal_title : s.cases?.plaintiff_legal_title) || (isStandalone ? s.plaintiff_legal_title : null);
+        const displayDefendantLegalTitle = linkedCase?.defendant_legal_title || (Array.isArray(s.cases) ? s.cases[0]?.defendant_legal_title : s.cases?.defendant_legal_title) || (isStandalone ? s.defendant_legal_title : null);
         const displayTitle     = linkedCase?.title || (Array.isArray(s.cases) ? s.cases[0]?.title : s.cases?.title) || (isStandalone ? (s.title || s.case_number || null) : null);
         const displayCourt     = linkedCase?.court_name || linkedCase?.court || (Array.isArray(s.cases) ? s.cases[0]?.court_name : s.cases?.court_name) || (isStandalone ? s.court : null);
         const fallbackLabel    = displayTitle || linkedCase?.title || (isStandalone ? '🗓 جلسة مستقلة' : linkedCase?.number || '— جلسة —');
@@ -123,6 +128,7 @@ function DashboardTab({
                     React.createElement('div',{className:'flex items-center justify-between gap-1'},
                         React.createElement(PartiesLine,{
                             plaintiff: displayPlaintiff, defendant: displayDefendant,
+                            plaintiffLegalTitle: displayPlaintiffLegalTitle, defendantLegalTitle: displayDefendantLegalTitle,
                             fallback: fallbackLabel,
                             className: 'text-[11px] font-black text-white leading-tight flex-1 truncate'
                         }),
