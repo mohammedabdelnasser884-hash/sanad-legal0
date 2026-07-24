@@ -38,6 +38,31 @@ export function summarizePartySide(persons: PartyPersonLike[]): PartySideSummary
     };
 }
 
+// بيبني نص قائمة كاملة (مش ملخص) بكل أشخاص الجهة مسمّاة بالاسم والصفة —
+// لاستخدامات محتاجة كل شخص بالاسم صراحةً (توليد مستندات قانونية بالـAI،
+// عرض تفصيلي)، عكس formatPartySideLine اللي بيختصر لعرض مضغوط.
+// بيرجع null لو مفيش أي شخص مسمّى خالص في الجهة دي.
+//   - طرف شخص واحد: "الاسم (الصفة)" أو "الاسم" لو مفيش صفة — نفس شكل
+//     العرض المفرد القديم بالحرف.
+//   - طرف متعدد الأشخاص: كل شخص على سطر مرقّم "١. الاسم (الصفة)".
+// خطة "سد فجوات عرض الأطراف" — مرحلة 3-ب (24 يوليو 2026).
+export function buildFullPartiesText(persons: PartyPersonLike[]): string | null {
+    const named = persons.filter((p) => p.name && p.name.trim());
+    if (named.length === 0) return null;
+    if (named.length === 1) {
+        const p = named[0];
+        const cap = (p.capacity || '').trim();
+        return cap ? `${p.name!.trim()} (${cap})` : p.name!.trim();
+    }
+    return named
+        .map((p, i) => {
+            const cap = (p.capacity || '').trim();
+            const name = p.name!.trim();
+            return `${i + 1}. ${cap ? `${name} (${cap})` : name}`;
+        })
+        .join('\n');
+}
+
 // بيبني نص سطر واحد جاهز للعرض المختصر (بطاقة/هيدر) من ملخص الجهة + مسماها
 // القانوني (لو موجود ومتعدد الأشخاص):
 //   - طرف شخص واحد (الحالة الغالبة): "الاسم" — بلا أي تغيير عن الشكل القديم.
