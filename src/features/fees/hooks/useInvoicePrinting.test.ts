@@ -61,6 +61,7 @@ const cases: MappedCase[] = [{
   plaintiff: null, plaintiff_role: null, defendant: null, defendant_role: null, year: 2026, updated_at: null, court_floor: null,
   court_hall: null, session_hall: null, secretary_hall: null, secretary_name: null, session_time: null, secretary_mobile: null,
   plaintiff_national_id: null, plaintiff_power_of_attorney: null, defendant_national_id: null, plaintiff_address: null,
+  plaintiff_legal_title: null, defendant_legal_title: null,
 }];
 
 const clients: ClientRow[] = [{ id: 'client-1', full_name: 'أحمد محمد' } as ClientRow];
