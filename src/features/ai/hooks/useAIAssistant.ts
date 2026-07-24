@@ -47,7 +47,7 @@ export function useAIAssistant(cases: MappedCase[], clients: ClientRow[], profil
             })
             .catch(() => { if (!cancelled) setSelectedCaseParties([]); });
         return () => { cancelled = true; };
-    }, [selectedCase?.id]);
+    }, [selectedCase]);
 
     const { buildLegalContextBlock, retrieveLegalArticles, callAI } = useAILegalEngine(profile, activeCfg, today, selectedModel);
 
