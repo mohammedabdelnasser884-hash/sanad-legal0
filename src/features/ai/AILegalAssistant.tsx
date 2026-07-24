@@ -88,9 +88,12 @@ function AILegalAssistant({onClose, cases, clients, profile, country}: AILegalAs
         sf('caseNumber', c.number || '');
         sf('court', c.court || '');
         sf('subject', c.title || '');
-        sf('plaintiff', c.plaintiff || '');
+        // ⚡ NEW (24 يوليو، خطة سد فجوات عرض الأطراف — مرحلة 3-أ): لو الطرف
+        // فيه أكتر من شخص ومكتوب له مسمى قانوني، يُستخدم بدل الاسم المفرد
+        // في تعبئة حقول توليد المستند. الحالة الغالبة (فاضي) صفر تغيير.
+        sf('plaintiff', c.plaintiff_legal_title || c.plaintiff || '');
         sf('plaintiffRole', c.plaintiff_role || '');
-        sf('defendant', c.defendant || '');
+        sf('defendant', c.defendant_legal_title || c.defendant || '');
         sf('defendantRole', c.defendant_role || '');
     };
 
