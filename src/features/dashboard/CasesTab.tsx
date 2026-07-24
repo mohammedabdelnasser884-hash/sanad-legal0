@@ -128,9 +128,18 @@ function CasesTab({ cases, casesFilter, setCasesFilter, casesPage, setCasesPage,
                         }, fmtCaseNum(c.number))
                     ),
                     React.createElement('div', { className: "flex items-center gap-1.5 mt-0.5 flex-wrap" },
-                        (c.plaintiff || c.defendant) && React.createElement('span', { className: "text-[10px] text-slate-300 truncate max-w-[160px]" },
-                            (c.plaintiff || '—') + ' ضد ' + (c.defendant || '—')
-                        ),
+                        // ⚡ NEW (24 يوليو، خطة سد فجوات عرض الأطراف — مرحلة 1): لو الطرف
+                        // فيه أكتر من شخص ومكتوب له مسمى قانوني (plaintiff_legal_title/
+                        // defendant_legal_title، موجودان جاهزين في MappedCase بلا أي
+                        // استعلام إضافي)، يُستخدم بدل الاسم المفرد. الحالة الغالبة (طرف
+                        // واحد، الحقلان فاضيان) صفر تغيير عن السطر القديم.
+                        (() => {
+                            const displayPlaintiff = c.plaintiff_legal_title || c.plaintiff;
+                            const displayDefendant = c.defendant_legal_title || c.defendant;
+                            return (displayPlaintiff || displayDefendant) && React.createElement('span', { className: "text-[10px] text-slate-300 truncate max-w-[160px]" },
+                                (displayPlaintiff || '—') + ' ضد ' + (displayDefendant || '—')
+                            );
+                        })(),
                         c.court && c.court !== '—' && React.createElement('span', { className: "text-[9px] text-slate-500 shrink-0" }, '· ' + c.court),
                         c.type && React.createElement('span', {
                             className: "text-[8px] font-bold px-1.5 py-0.5 rounded-full shrink-0",
