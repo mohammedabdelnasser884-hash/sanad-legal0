@@ -1,13 +1,22 @@
 import React from 'react';
 import type { MappedCase, MappedClient } from '../../../hooks/useAppData';
 import type { CaseSessionRow, CaseNoteRow } from '../../../types';
-import type { CaseDocWithUrl } from '../hooks/useCaseDetailActions';
+import type { CaseDocWithUrl, CasePartyRow } from '../hooks/useCaseDetailActions';
+import { validateParties, type PartyLegalTitles } from '../../../shared/lib/casePartiesValidation';
+import type { PartyFieldValue } from '../../../shared/parties/partyTypes';
 
 // ─────────────────────────────────────────────────────────
 //  ChecklistSection — المرحلة 1 من خطة المساعد الذكي
 //  ("مراجعة نواقص الملف"، sanad-ai-assistant-plan-6.md، قسم 4.1).
 //  Rule-based بالكامل — صفر استدعاء AI، صفر تكلفة، بيانات القضية
 //  الموجودة فعليًا في الصفحة (caseData/client/sessions/docs) بس.
+//
+//  🆕 تحديث (مرحلة 4 من خطة "سد فجوات عرض الأطراف" — 24 يوليو 2026):
+//  بند "اكتمال بيانات الطرفين" بقى بيفحص case_parties (لو موجودة) عبر
+//  validateParties الجاهزة بدل فحص عمودي plaintiff/defendant القدامى
+//  بس — بيغطي نقص الاسم/الصفة/الرقم القومي/المسمى القانوني لأي شخص
+//  إضافي تحت الطرف، مش الشخص الأساسي بس. فولباك القضايا القديمة (بدون
+//  أي صف case_parties) فاضل زي ما هو بالحرف — صفر تغيير.
 // ─────────────────────────────────────────────────────────
 
 interface ChecklistSectionProps {
@@ -16,6 +25,7 @@ interface ChecklistSectionProps {
   sessions: CaseSessionRow[];
   notes: CaseNoteRow[];
   docs: CaseDocWithUrl[];
+  caseParties?: CasePartyRow[];
   onGoToTab?: (tab: string) => void;
 }
 
@@ -33,14 +43,75 @@ interface ChecklistItem {
 
 const isFilled = (v: string | null | undefined) => !!v && v.trim() !== '' && v !== '—';
 
+// نفس تحويلة toField الموجودة في EditCaseModal.tsx/StandaloneSessionDetailModal.tsx
+// (CasePartyRow من الداتابيز → PartyFieldValue اللي بتتوقعه validateParties).
+const toPartyField = (row: CasePartyRow): PartyFieldValue => ({
+  id: row.id,
+  side: row.side,
+  is_client: row.is_client,
+  name: row.name || '',
+  capacity: row.capacity || '',
+  national_id: row.national_id || '',
+  address: row.address || '',
+  power_of_attorney: row.power_of_attorney || '',
+  client_id: row.client_id || null,
+});
+
+// فحص جهة واحدة (مدعي/مدعى عليه) باستخدام نتيجة validateParties العامة —
+// ok=false لو مفيش أي صف على الجهة دي أصلًا، أو لو فيه خطأ (اسم/صفة/رقم
+// قومي) على أي طرف تابع للجهة دي، أو لو الجهة فيها شخصان فأكثر والمسمى
+// القانوني الجامع فاضي.
+function sidePartiesOk(
+  side: 'plaintiff' | 'defendant',
+  partyFields: PartyFieldValue[],
+  legalTitles: PartyLegalTitles,
+  validationErrors: { partyId: string }[]
+): boolean {
+  const sideParties = partyFields.filter((p) => p.side === side);
+  if (sideParties.length === 0) return false;
+  const sidePartyIds = new Set(sideParties.map((p) => p.id));
+  const hasFieldError = validationErrors.some((e) => sidePartyIds.has(e.partyId));
+  const legalTitleMissing = sideParties.length >= 2 && !legalTitles[side].trim();
+  return !hasFieldError && !legalTitleMissing;
+}
+
 function buildChecklist(
   caseData: MappedCase,
   client: MappedClient | null,
   sessions: CaseSessionRow[],
-  docs: CaseDocWithUrl[]
+  docs: CaseDocWithUrl[],
+  caseParties: CasePartyRow[]
 ): ChecklistItem[] {
   const todayStr = new Date().toISOString().slice(0, 10);
   const hasUpcomingSession = sessions.some((s) => s.session_date && s.session_date >= todayStr);
+
+  // لو القضية دخل عليها بيانات فعليًا من فورم الأطراف الجديد (case_parties
+  // مش فاضية)، الفحص يتحول للقائمة الحقيقية عبر validateParties — بيغطي
+  // نقص الرقم القومي/المسمى القانوني لأي شخص إضافي، مش الشخص الأساسي بس.
+  // القضايا القديمة (caseParties فاضية) بتاخد نفس الفحص القديم بالحرف.
+  let plaintiffOk: boolean;
+  let plaintiffHint: string;
+  let defendantOk: boolean;
+  let defendantHint: string;
+
+  if (caseParties.length > 0) {
+    const partyFields = caseParties.map(toPartyField);
+    const legalTitles: PartyLegalTitles = {
+      plaintiff: caseData.plaintiff_legal_title || '',
+      defendant: caseData.defendant_legal_title || '',
+    };
+    const { errors } = validateParties(partyFields, legalTitles);
+
+    plaintiffOk = sidePartiesOk('plaintiff', partyFields, legalTitles, errors);
+    defendantOk = sidePartiesOk('defendant', partyFields, legalTitles, errors);
+    plaintiffHint = 'بيانات طرف المدعي/الطاعن ناقصة (اسم/صفة/رقم قومي لأحد الأشخاص، أو المسمى القانوني الجامع)';
+    defendantHint = 'بيانات طرف المدعى عليه/المطعون ضده ناقصة (اسم/صفة/رقم قومي لأحد الأشخاص، أو المسمى القانوني الجامع)';
+  } else {
+    plaintiffOk = isFilled(caseData.plaintiff);
+    plaintiffHint = 'طرف الدعوى الأول (المدعي/الطاعن) غير مسجّل';
+    defendantOk = isFilled(caseData.defendant);
+    defendantHint = 'طرف الدعوى الثاني (المدعى عليه/المطعون ضده) غير مسجّل';
+  }
 
   return [
     {
@@ -70,17 +141,17 @@ function buildChecklist(
     {
       id: 'plaintiff',
       label: 'اسم المدعي / الطاعن',
-      ok: isFilled(caseData.plaintiff),
+      ok: plaintiffOk,
       severity: 'critical',
-      hint: 'طرف الدعوى الأول (المدعي/الطاعن) غير مسجّل',
+      hint: plaintiffHint,
       goTo: 'info',
     },
     {
       id: 'defendant',
       label: 'اسم المدعى عليه / المطعون ضده',
-      ok: isFilled(caseData.defendant),
+      ok: defendantOk,
       severity: 'critical',
-      hint: 'طرف الدعوى الثاني (المدعى عليه/المطعون ضده) غير مسجّل',
+      hint: defendantHint,
       goTo: 'info',
     },
     {
@@ -131,8 +202,8 @@ const severityStyle: Record<Severity, { badge: string; dot: string }> = {
   warning: { badge: 'bg-amber-500/15 text-amber-400 border-amber-500/30', dot: 'bg-amber-500' },
 };
 
-function ChecklistSection({ caseData, client, sessions, docs, onGoToTab }: ChecklistSectionProps) {
-  const items = buildChecklist(caseData, client, sessions, docs);
+function ChecklistSection({ caseData, client, sessions, docs, caseParties = [], onGoToTab }: ChecklistSectionProps) {
+  const items = buildChecklist(caseData, client, sessions, docs, caseParties);
   const missing = items.filter((i) => !i.ok);
   const missingCritical = missing.filter((i) => i.severity === 'critical');
   const total = items.length;
