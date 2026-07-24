@@ -94,7 +94,7 @@ function UpcomingSessionsList({db, cases, clients, onOpenCase}: UpcomingSessions
 
     const fetchSessions = () => {
         db.from('case_sessions')
-          .select('id,session_date,session_time,session_floor,session_hall,case_id,client_id,description,result,next_action,cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
+          .select('id,session_date,session_time,session_floor,session_hall,case_id,client_id,description,result,next_action,cases(id,title,plaintiff,defendant,plaintiff_legal_title,defendant_legal_title,court_name,case_type,case_number_official,client_id)')
           .gte('session_date', todayStr)
           .lte('session_date', endStr)
           .order('session_date',{ascending:true})
@@ -213,7 +213,7 @@ function UpcomingSessionsList({db, cases, clients, onOpenCase}: UpcomingSessions
                                 React.createElement('div',{className:"flex-1 p-3 space-y-1"},
                                     React.createElement('div',{className:"flex items-start justify-between gap-2"},
                                         React.createElement('p',{className:"text-[11px] font-black text-white leading-tight flex-1"},
-                                            (linkedCase?.title)||(s as unknown as {title?: string}).title||((linkedCase?.plaintiff&&linkedCase?.defendant)?linkedCase.plaintiff+' ضد '+linkedCase.defendant:null)||s.description||'— جلسة مستقلة —'
+                                            (linkedCase?.title)||(s as unknown as {title?: string}).title||((linkedCase?.plaintiff&&linkedCase?.defendant)?(linkedCase.plaintiff_legal_title||linkedCase.plaintiff)+' ضد '+(linkedCase.defendant_legal_title||linkedCase.defendant):null)||s.description||'— جلسة مستقلة —'
                                         ),
                                         isLatest
                                             ? React.createElement('span',{
