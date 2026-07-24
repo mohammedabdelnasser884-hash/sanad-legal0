@@ -33,6 +33,10 @@ export interface CalendarSessionRow {
     circuit_number: string | null;
     plaintiff_role: string | null;
     defendant_role: string | null;
+    // ⚡ NEW (24 يوليو، خطة سد فجوات عرض الأطراف — مرحلة 2): موجودان بالفعل
+    // على case_sessions من تقرير المسمى القانوني (للجلسات المستقلة).
+    plaintiff_legal_title: string | null;
+    defendant_legal_title: string | null;
     cases: SessionCaseEmbed | SessionCaseEmbed[] | null;
 }
 
@@ -66,7 +70,7 @@ function CalendarTab({ cases, clients, onOpenCase, onOpenStandalone, refreshKey 
         const mm   = String(viewMonth+1).padStart(2,'0');
         const last = new Date(viewYear, viewMonth+1, 0).getDate();
         db.from('case_sessions')
-          .select('id,session_date,case_id,client_id,description,result,next_action,session_time,session_floor,session_hall,title,case_number,court,case_type,plaintiff,defendant,circuit_number,plaintiff_role,defendant_role,cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
+          .select('id,session_date,case_id,client_id,description,result,next_action,session_time,session_floor,session_hall,title,case_number,court,case_type,plaintiff,defendant,circuit_number,plaintiff_role,defendant_role,plaintiff_legal_title,defendant_legal_title,cases(id,title,plaintiff,defendant,plaintiff_legal_title,defendant_legal_title,court_name,case_type,case_number_official,client_id)')
           .gte('session_date', `${viewYear}-${mm}-01`)
           .lte('session_date', `${viewYear}-${mm}-${String(last).padStart(2,'0')}`)
           .then(({ data }) => {
@@ -121,7 +125,7 @@ function CalendarTab({ cases, clients, onOpenCase, onOpenStandalone, refreshKey 
             // أيقونة الربط بتقويم الهاتف
             React.createElement('button', {
                 onClick: () => {
-                    db.from('case_sessions').select('id,session_date,case_id,client_id,description,result,next_action,title,case_number,court,case_type,plaintiff,defendant,cases(id,title,plaintiff,defendant,court_name,case_type,case_number_official,client_id)')
+                    db.from('case_sessions').select('id,session_date,case_id,client_id,description,result,next_action,title,case_number,court,case_type,plaintiff,defendant,cases(id,title,plaintiff,defendant,plaintiff_legal_title,defendant_legal_title,court_name,case_type,case_number_official,client_id)')
                       .then(({ data }) => {
                           const sessions = (data || []) as unknown as CalendarSessionRow[];
                           if (!sessions.length) { toast('لا توجد جلسات', true); return; }
