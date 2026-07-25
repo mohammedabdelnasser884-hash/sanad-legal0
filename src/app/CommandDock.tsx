@@ -80,6 +80,7 @@ function CommandDock({
             // الجلسات
             React.createElement('button', {
                 onClick: () => { setSessionsInitialTab(null); setTab('calendar'); setShowMore(false); },
+                'data-testid': 'nav-calendar',
                 className: 'flex flex-col items-center justify-center gap-[3px] flex-1 h-[50px] rounded-[18px] transition-all duration-200 active:scale-90 relative',
                 style: tab === 'calendar' ? { background: 'rgba(212,175,55,0.1)' } : {}
             },
@@ -91,6 +92,7 @@ function CommandDock({
             React.createElement('div', { className: 'relative flex flex-col items-center justify-center px-2 flex-shrink-0' },
                 React.createElement('button', {
                     onClick: () => { setShowAI(true); setShowMore(false); },
+                    'data-testid': 'nav-ai-center',
                     className: 'w-[48px] h-[48px] rounded-[16px] flex items-center justify-center active:scale-90 transition-transform relative overflow-hidden',
                     style: { background: 'linear-gradient(135deg,#c9922a,#D4AF37,#E8C84A)', boxShadow: '0 4px 24px rgba(212,175,55,0.55), 0 0 0 1px rgba(212,175,55,0.3)', animation: 'pulseGlow 3s ease-in-out infinite' }
                 }, React.createElement(I.AI, { cls: 'w-6 h-6 text-[#070d1a]' })),
@@ -110,6 +112,7 @@ function CommandDock({
             // المهام
             React.createElement('button', {
                 onClick: () => { setRemindersInitialFilter(null); setTab('reminders'); setShowMore(false); },
+                'data-testid': 'nav-reminders',
                 className: 'flex flex-col items-center justify-center gap-[3px] flex-1 h-[50px] rounded-[18px] transition-all duration-200 active:scale-90 relative',
                 style: tab === 'reminders' ? { background: 'rgba(212,175,55,0.1)' } : {}
             },
