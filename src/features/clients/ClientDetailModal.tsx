@@ -45,7 +45,7 @@ function ClientDetailModal({client:c, cases, onClose, onDelete, onEdit, onOpenCa
             React.createElement('div',{className:"relative p-6 pb-4"},
                 React.createElement('div',{className:"w-10 h-1 bg-white/20 rounded-full mx-auto mb-5"}),
                 React.createElement('div',{className:"flex items-center justify-between mb-4"},
-                    React.createElement('button',{onClick:onClose,className:"w-8 h-8 rounded-xl bg-white/5 flex items-center justify-center text-slate-400 hover:text-white transition-colors"},"✕"),
+                    React.createElement('button',{onClick:onClose,'data-testid':'client-detail-close',className:"w-8 h-8 rounded-xl bg-white/5 flex items-center justify-center text-slate-400 hover:text-white transition-colors"},"✕"),
                     React.createElement('div',{className:"flex items-center gap-2"},
                         React.createElement('button',{
                             onClick:()=>setShowEditClient(true),
