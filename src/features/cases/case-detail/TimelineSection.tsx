@@ -119,7 +119,7 @@ function TimelineSection({
                                         ? React.createElement('div', {className: "flex-1 bg-premium-card border border-premium-gold/30 rounded-2xl p-4 space-y-3 slide-up"},
                                             React.createElement('h4', {className: "text-xs font-black text-premium-gold"}, "✏️ تعديل الجلسة"),
                                             React.createElement('div',{className:"grid grid-cols-2 gap-2"},
-                                                React.createElement(DatePicker, {label:"تاريخ الجلسة", value:editingSession.date, onChange:(v: string) =>setEditingSession((p: EditingSessionForm | null) =>({...(p as EditingSessionForm),date:v}))}),
+                                                React.createElement(DatePicker, {label:"تاريخ الجلسة", value:editingSession.date, onChange:(v: string) =>setEditingSession((p: EditingSessionForm | null) =>({...(p as EditingSessionForm),date:v})), testId:'session-edit-date-trigger', dayTestId:'session-edit-date-day'}),
                                                 React.createElement('div',null,
                                                     React.createElement('label',{className:"block text-[10px] font-bold text-slate-400 mb-1.5"},"وقت الجلسة"),
                                                     React.createElement('div',{className:"flex gap-1"},
@@ -135,15 +135,16 @@ function TimelineSection({
                                                 React.createElement(Inp,{label:"الطابق",value:editingSession.location_floor,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>setEditingSession((p: EditingSessionForm | null) =>({...(p as EditingSessionForm),location_floor:e.target.value})),placeholder:"الطابق"}),
                                                 React.createElement(Inp,{label:"رقم القاعة",value:editingSession.location_hall,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>setEditingSession((p: EditingSessionForm | null) =>({...(p as EditingSessionForm),location_hall:e.target.value})),placeholder:"القاعة"})
                                             ),
-                                            React.createElement(Inp, {label:"ما جرى", value:editingSession.description, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>setEditingSession((p: EditingSessionForm | null) =>({...(p as EditingSessionForm),description:e.target.value})), placeholder:"ملخص ما دار..."}),
+                                            React.createElement(Inp, {label:"ما جرى", value:editingSession.description, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>setEditingSession((p: EditingSessionForm | null) =>({...(p as EditingSessionForm),description:e.target.value})), placeholder:"ملخص ما دار...", 'data-testid':'session-edit-description'}),
                                             React.createElement(Inp, {label:"النتيجة", value:editingSession.result, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>setEditingSession((p: EditingSessionForm | null) =>({...(p as EditingSessionForm),result:e.target.value})), placeholder:"قرار المحكمة..."}),
                                             React.createElement(Inp, {label:"الإجراء القادم", value:editingSession.next_action, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>setEditingSession((p: EditingSessionForm | null) =>({...(p as EditingSessionForm),next_action:e.target.value})), placeholder:"ما المطلوب؟"}),
                                             React.createElement('div', {className: "flex gap-2"},
                                                 React.createElement('button', {
                                                     onClick: () => { handleUpdateSession(s.id, editingSession); setEditingSession(null); },
+                                                    'data-testid': 'session-edit-save',
                                                     className: "flex-1 py-2.5 bg-gradient-to-tr from-premium-gold to-amber-200 text-premium-bg rounded-xl text-xs font-black flex items-center justify-center gap-1 active:scale-95"
                                                 }, React.createElement(I.Check), "حفظ"),
-                                                React.createElement('button', {onClick:()=>setEditingSession(null), className:"px-4 py-2.5 bg-white/5 text-slate-400 rounded-xl text-xs font-bold active:scale-95"}, "إلغاء")
+                                                React.createElement('button', {onClick:()=>setEditingSession(null), 'data-testid':'session-edit-cancel', className:"px-4 py-2.5 bg-white/5 text-slate-400 rounded-xl text-xs font-bold active:scale-95"}, "إلغاء")
                                             )
                                           )
                                         : React.createElement('div', {
@@ -179,12 +180,14 @@ function TimelineSection({
                                                     i !== 0 && React.createElement(React.Fragment, null,
                                                         React.createElement('button', {
                                                             onClick: (e: React.MouseEvent) => { e.stopPropagation(); setEditingSession({id:s.id, date:s.session_date||'', time_period:s.session_time||'صباحي', location_floor:s.session_floor||'', location_hall:s.session_hall||'', description:s.description||'', result:s.result||'', next_action:s.next_action||''}); },
+                                                            'data-testid': 'session-edit-trigger',
                                                             className: "w-6 h-6 rounded-lg bg-white/5 flex items-center justify-center text-slate-500 hover:text-premium-gold active:scale-90 transition-all"
                                                         }, React.createElement(I.Edit)),
                                                         deletingSessionId === s.id
                                                         ? React.createElement('div', {className:"w-6 h-6 flex items-center justify-center"}, React.createElement(I.Spin))
                                                         : React.createElement('button', {
                                                             onClick: (e: React.MouseEvent) => { e.stopPropagation(); setConfirmDeleteSession({id: s.id, date: s.session_date || '—'}); },
+                                                            'data-testid': 'session-delete-trigger',
                                                             className: "w-6 h-6 rounded-lg bg-rose-500/10 flex items-center justify-center text-rose-400 hover:bg-rose-500/20 active:scale-90 transition-all"
                                                         }, React.createElement(I.Trash))
                                                     )
