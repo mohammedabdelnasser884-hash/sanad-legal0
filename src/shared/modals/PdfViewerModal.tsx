@@ -13,6 +13,7 @@ function PdfViewerModal({doc, onClose}: PdfViewerModalProps){
     const isImg = /\.(jpg|jpeg|png|gif|webp)$/i.test((doc.original_name || doc.file_name) as string);
 
     return React.createElement('div',{
+        'data-testid':'pdf-viewer-modal',
         className:"fixed inset-0 z-[70] bg-black/95 flex flex-col fade-in",
         onClick:(e: React.MouseEvent<HTMLDivElement>) =>{if(e.target===e.currentTarget)onClose();}
     },
@@ -29,6 +30,7 @@ function PdfViewerModal({doc, onClose}: PdfViewerModalProps){
                 },React.createElement(I.Download)),
                 React.createElement('button',{
                     onClick:onClose,
+                    'data-testid':'pdf-viewer-close',
                     className:"w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-all active:scale-90"
                 },React.createElement(I.X))
             )
