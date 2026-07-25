@@ -79,15 +79,25 @@ export function useAdminUsers(fetchLawyers: () => void, profile?: ProfileRow | n
   };
 
   // ── حذف مستخدم ──
+  // ⚠️ FIX: كان بيحذف صف profiles بس (db.from('profiles').delete()) وبيسيب
+  // حساب auth.users معلّق ببيانات دخول شغالة. دلوقتي بيستدعي admin-actions
+  // (action: delete_user) اللي بيحذف حساب Auth أولاً وبعدين صف البروفايل.
   const handleDeleteUser = async (user: ProfileRow) => {
     setSaving(true);
-    const { error } = await db.from('profiles').delete().eq('id', user.id);
+    try {
+      await callAdminAction({
+        action: 'delete_user',
+        profile_id: user.id,
+        user_id: user.user_id || null,
+      });
+      toast('✅ تم حذف المستخدم');
+      logActivity(db, 'حذف مستخدم', { userName: _userName, entity_type: 'user', entity_id: user.id, details: user.full_name || null });
+      setConfirmDelete(null);
+      fetchLawyers();
+    } catch (e) {
+      showErrorToast('admin_delete_user', e, 'تعذّر حذف المستخدم. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'حذف مستخدم');
+    }
     setSaving(false);
-    if (error) { toast('❌ حدث خطأ، يرجى المحاولة مرة أخرى', true); return; }
-    toast('✅ تم حذف المستخدم');
-    logActivity(db, 'حذف مستخدم', { userName: _userName, entity_type: 'user', entity_id: user.id, details: user.full_name || null });
-    setConfirmDelete(null);
-    fetchLawyers();
   };
 
   // ── تفعيل/تعطيل مستخدم سريع ──
