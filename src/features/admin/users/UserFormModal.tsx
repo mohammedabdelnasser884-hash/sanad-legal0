@@ -64,12 +64,14 @@ function UserFormModal({ onClose, onSave, loading, title = 'إضافة مستخ�
                 React.createElement(Inp, {
                     label: "الاسم الكامل", value: form.full_name,
                     onChange: (e: React.ChangeEvent<HTMLInputElement>) => s('full_name', e.target.value),
-                    placeholder: "الأستاذ / محمد أحمد", required: true
+                    placeholder: "الأستاذ / محمد أحمد", required: true,
+                    'data-testid': 'admin-user-full_name'
                 }),
                 React.createElement(Inp, {
                     label: "البريد الإلكتروني", type: "email", value: form.email,
                     onChange: (e: React.ChangeEvent<HTMLInputElement>) => s('email', e.target.value),
-                    placeholder: "lawyer@firm.com", required: true
+                    placeholder: "lawyer@firm.com", required: true,
+                    'data-testid': 'admin-user-email'
                 }),
                 React.createElement('div', null,
                     React.createElement('label', { className: "block text-[10px] font-bold text-slate-400 mb-1.5" },
@@ -82,7 +84,8 @@ function UserFormModal({ onClose, onSave, loading, title = 'إضافة مستخ�
                             onChange: (e: React.ChangeEvent<HTMLInputElement>) => s('password', e.target.value),
                             placeholder: "8 أحرف على الأقل",
                             className: "w-full p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600 pl-10",
-                            style: { fontFamily: 'Cairo,sans-serif' }
+                            style: { fontFamily: 'Cairo,sans-serif' },
+                            'data-testid': 'admin-user-password'
                         }),
                         React.createElement('button', {
                             type: "button", onClick: () => setShowPass(!showPass),
@@ -98,6 +101,7 @@ function UserFormModal({ onClose, onSave, loading, title = 'إضافة مستخ�
                             return React.createElement('button', {
                                 key: role, type: "button",
                                 onClick: () => s('role', role),
+                                'data-testid': 'admin-user-role-' + role,
                                 className: `py-2.5 rounded-xl text-[11px] font-black border transition-all ${form.role === role ? `${rc.bg} ${rc.color} ${rc.border}` : 'bg-white/5 text-slate-500 border-white/10'}`
                             }, rc.label);
                         })
@@ -106,6 +110,7 @@ function UserFormModal({ onClose, onSave, loading, title = 'إضافة مستخ�
                 React.createElement('button', {
                     disabled: loading,
                     onClick: submit,
+                    'data-testid': 'admin-user-submit',
                     className: "w-full py-3.5 bg-gradient-to-tr from-premium-gold to-[#E8C97A] text-premium-bg rounded-xl font-black text-sm shadow-md flex items-center justify-center gap-2 disabled:opacity-60 active:scale-95 transition-transform mt-2"
                 }, loading ? React.createElement(I.Spin) : React.createElement(I.Users), loading ? 'جاري الإنشاء...' : 'إنشاء الحساب وإضافته لسَنَد')
             )
