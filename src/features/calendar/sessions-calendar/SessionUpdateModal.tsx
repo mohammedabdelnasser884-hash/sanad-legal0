@@ -145,7 +145,8 @@ function SessionUpdateModal({ session, caseData, db, onClose, onDone, onNotify, 
         },
             React.createElement('div', {
                 className: "w-full max-w-lg bg-premium-bg border border-premium-gold/20 rounded-t-3xl p-5 space-y-4 slide-up",
-                style: { maxHeight: '90vh', overflowY: 'auto' }
+                style: { maxHeight: '90vh', overflowY: 'auto' },
+                'data-testid': 'session-update-modal',
             },
                 // Handle bar
                 React.createElement('div', { className: "w-10 h-1 bg-white/15 rounded-full mx-auto mb-1" }),
@@ -178,7 +179,8 @@ function SessionUpdateModal({ session, caseData, db, onClose, onDone, onNotify, 
                         placeholder: "اكتب ملخص ما جرى في الجلسة...",
                         rows: 3,
                         className: "w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-premium-gold/40 resize-none font-medium leading-relaxed",
-                        style: { direction: 'rtl' }
+                        style: { direction: 'rtl' },
+                        'data-testid': 'session-update-what-happened',
                     })
                 ),
 
@@ -194,7 +196,9 @@ function SessionUpdateModal({ session, caseData, db, onClose, onDone, onNotify, 
                     label: "📅 تاريخ الجلسة القادمة",
                     value: nextDate,
                     onChange: (v: string) => setNextDate(v),
-                    required: true
+                    required: true,
+                    testId: 'session-update-next-date-trigger',
+                    dayTestId: 'session-update-next-date-day',
                 }),
 
                 // الحقل 3: المطلوب في الجلسة القادمة
@@ -208,7 +212,8 @@ function SessionUpdateModal({ session, caseData, db, onClose, onDone, onNotify, 
                         placeholder: "ما المطلوب تنفيذه أو تحضيره قبل الجلسة القادمة؟",
                         rows: 2,
                         className: "w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-premium-gold/40 resize-none font-medium leading-relaxed",
-                        style: { direction: 'rtl' }
+                        style: { direction: 'rtl' },
+                        'data-testid': 'session-update-next-required',
                     })
                 ),
 
@@ -217,6 +222,7 @@ function SessionUpdateModal({ session, caseData, db, onClose, onDone, onNotify, 
                     React.createElement('button', {
                         onClick: handleSave,
                         disabled: saving || !nextDate,
+                        'data-testid': 'session-update-save',
                         className: "flex-1 py-3 bg-gradient-to-tr from-premium-gold to-amber-200 text-premium-bg rounded-2xl text-xs font-black flex items-center justify-center gap-1.5 active:scale-95 transition-all disabled:opacity-50"
                     },
                         saving
@@ -226,6 +232,7 @@ function SessionUpdateModal({ session, caseData, db, onClose, onDone, onNotify, 
                     ),
                     React.createElement('button', {
                         onClick: onClose,
+                        'data-testid': 'session-update-cancel',
                         className: "px-4 py-3 bg-white/5 text-slate-400 rounded-2xl text-xs font-bold active:scale-95"
                     }, "إلغاء")
                 )
