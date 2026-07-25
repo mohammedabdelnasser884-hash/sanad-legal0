@@ -63,7 +63,8 @@ function ChangePasswordModal({ user, onSave, onClose, saving }: ChangePasswordMo
             onChange:(e: React.ChangeEvent<HTMLInputElement>) =>setNewPass(e.target.value),
             placeholder:"8+ أحرف على الأقل",
             className:"w-full p-2.5 text-xs rounded-xl border border-white/10 bg-white/5 text-white placeholder-slate-600",
-            style:{fontFamily:'Cairo,sans-serif'}
+            style:{fontFamily:'Cairo,sans-serif'},
+            'data-testid':'admin-changepass-new'
           }),
           React.createElement('button',{
             type:'button', onClick:()=>setShowPass((s: boolean) =>!s),
@@ -93,7 +94,8 @@ function ChangePasswordModal({ user, onSave, onClose, saving }: ChangePasswordMo
             onChange:(e: React.ChangeEvent<HTMLInputElement>) =>setConfirmPass(e.target.value),
             placeholder:"أعد كتابة كلمة المرور",
             className:`w-full p-2.5 text-xs rounded-xl border bg-white/5 text-white placeholder-slate-600 ${confirmPass&&!isValid?'border-red-500/50':'border-white/10'}`,
-            style:{fontFamily:'Cairo,sans-serif'}
+            style:{fontFamily:'Cairo,sans-serif'},
+            'data-testid':'admin-changepass-confirm'
           })
         ),
         confirmPass && !isValid && React.createElement('p',{className:"text-[9px] text-red-400 mt-1"},
@@ -108,6 +110,7 @@ function ChangePasswordModal({ user, onSave, onClose, saving }: ChangePasswordMo
         ),
         React.createElement('button',{
           onClick:()=>setForceChange((s: boolean) =>!s),
+          'data-testid':'admin-changepass-force',
           className:`w-12 h-6 rounded-full transition-all relative ${forceChange?'bg-[#C9A84C]':'bg-slate-600'}`
         },
           React.createElement('div',{
@@ -120,6 +123,7 @@ function ChangePasswordModal({ user, onSave, onClose, saving }: ChangePasswordMo
       React.createElement('button',{
         onClick:()=>onSave({userId:user.user_id||user.id, newPassword:newPass, forceChange}),
         disabled:saving||!isValid,
+        'data-testid':'admin-changepass-save',
         className:"w-full py-3 rounded-xl text-xs font-black text-premium-bg bg-gradient-to-tr from-[#C9A84C] to-[#E8C97A] shadow-lg active:scale-95 transition-transform disabled:opacity-50"
       },saving?'جاري التحديث...':'تحديث كلمة المرور')
     )
