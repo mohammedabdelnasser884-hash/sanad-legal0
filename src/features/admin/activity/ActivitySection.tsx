@@ -43,6 +43,7 @@ function ActivitySection({
           onChange: (e: React.ChangeEvent<HTMLInputElement>) => handleActivitySearchChange(e.target.value),
           maxLength: 100,
           placeholder:"🔍 بحث في السجلات...",
+          'data-testid': 'admin-activity-search',
           className:"w-full p-2.5 pr-4 text-xs rounded-xl border border-white/10 bg-premium-card text-white placeholder-slate-500",
           style:{fontFamily:'Cairo,sans-serif'}
         }),
@@ -59,6 +60,7 @@ function ActivitySection({
         React.createElement('select',{
           value: activityFilters.action,
           onChange: (e: React.ChangeEvent<HTMLSelectElement>) => { setActivityFilters((f: ActivityFilters) =>({...f,action:e.target.value})); setActivityPage(0); },
+          'data-testid': 'admin-activity-filter-action',
           className:"flex-1 p-2 text-[10px] rounded-xl border border-white/10 bg-premium-card text-white",
           style:{fontFamily:'Cairo,sans-serif'}
         },
@@ -80,6 +82,7 @@ function ActivitySection({
         React.createElement('select',{
           value: activityFilters.user_id,
           onChange: (e: React.ChangeEvent<HTMLSelectElement>) => { setActivityFilters((f: ActivityFilters) =>({...f,user_id:e.target.value})); setActivityPage(0); },
+          'data-testid': 'admin-activity-filter-user',
           className:"flex-1 p-2 text-[10px] rounded-xl border border-white/10 bg-premium-card text-white",
           style:{fontFamily:'Cairo,sans-serif'}
         },
@@ -94,6 +97,7 @@ function ActivitySection({
           type:'date',
           value: activityFilters.from,
           onChange: (e: React.ChangeEvent<HTMLInputElement>) => { setActivityFilters((f: ActivityFilters) =>({...f,from:e.target.value})); setActivityPage(0); },
+          'data-testid': 'admin-activity-filter-from',
           className:"flex-1 p-2 text-[10px] rounded-xl border border-white/10 bg-premium-card text-white",
           style:{fontFamily:'Cairo,sans-serif'}
         }),
@@ -102,6 +106,7 @@ function ActivitySection({
           type:'date',
           value: activityFilters.to,
           onChange: (e: React.ChangeEvent<HTMLInputElement>) => { setActivityFilters((f: ActivityFilters) =>({...f,to:e.target.value})); setActivityPage(0); },
+          'data-testid': 'admin-activity-filter-to',
           className:"flex-1 p-2 text-[10px] rounded-xl border border-white/10 bg-premium-card text-white",
           style:{fontFamily:'Cairo,sans-serif'}
         }),
@@ -109,6 +114,7 @@ function ActivitySection({
         (activityFilters.action || activityFilters.user_id || activityFilters.from || activityFilters.to) &&
         React.createElement('button',{
           onClick:()=>{ setActivityFilters({search:activityFilters.search, user_id:'', action:'', from:'', to:''}); setActivityPage(0); },
+          'data-testid': 'admin-activity-filter-clear',
           className:"shrink-0 px-2 py-2 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[9px] font-bold active:scale-95"
         },"مسح")
       ),
@@ -128,6 +134,7 @@ function ActivitySection({
 
         : activityLog.length === 0
         ? React.createElement('div',{
+            'data-testid': 'admin-activity-empty',
             className:"bg-premium-card border border-white/5 rounded-xl p-8 text-center space-y-3"
           },
             React.createElement('div',{className:"w-10 h-10 rounded-xl bg-slate-500/10 flex items-center justify-center mx-auto"},
@@ -156,6 +163,7 @@ function ActivitySection({
 
               return React.createElement('div',{
                 key:log.id||i,
+                'data-testid': 'admin-activity-entry',
                 className:`bg-premium-card border ${s.border} rounded-xl p-2.5 space-y-1.5`
               },
                 // ── صف 1: الأيقونة + نوع الإجراء + المنفذ + التوقيت ──
@@ -197,6 +205,7 @@ function ActivitySection({
               React.createElement('button',{
                 onClick:()=>setActivityPage((p: number) =>Math.max(0,p-1)),
                 disabled:activityPage===0,
+                'data-testid': 'admin-activity-page-prev',
                 className:"flex items-center gap-1 px-3 py-1.5 rounded-xl text-[10px] font-bold bg-white/8 text-slate-300 disabled:opacity-30 active:scale-95 transition-transform"
               }, React.createElement(I.ChevronRight,{className:"w-3 h-3"}), "السابق"),
               React.createElement('p',{className:"text-[10px] text-slate-500"},
@@ -204,6 +213,7 @@ function ActivitySection({
               React.createElement('button',{
                 onClick:()=>setActivityPage((p: number) =>p+1),
                 disabled:(activityPage+1)*ACTIVITY_PAGE_SIZE>=activityTotal,
+                'data-testid': 'admin-activity-page-next',
                 className:"flex items-center gap-1 px-3 py-1.5 rounded-xl text-[10px] font-bold bg-white/8 text-slate-300 disabled:opacity-30 active:scale-95 transition-transform"
               }, "التالي", React.createElement(I.ChevronLeft,{className:"w-3 h-3"}))
             )
