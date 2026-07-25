@@ -4,6 +4,37 @@ import type { ProfileRow } from '../../../types';
 import type { CountryConfig } from '../../../constants';
 import type { AIMessage, LegalArticle } from './aiAssistantTypes';
 
+// شكل خطأ استدعاء edge function (duck-typing — نفس النمط المستخدم في
+// useAdminLegalLibrary.ts::getFnErrorMessage — context ممكن يكون Response
+// حقيقي فيه json()/text())
+interface EdgeFunctionError {
+  message?: string;
+  context?: {
+    json?: () => Promise<{ error?: string } | null>;
+    text?: () => Promise<string>;
+  };
+}
+
+// ── استخراج رسالة الخطأ الحقيقية من Edge Function ──
+// 🆕 إصلاح: ai-chat بترجّع رسائلها العربية المقصودة (السقف اليومي، الجلسة
+// منتهية، الحساب معطل...) بـ HTTP status غير 2xx، فـ supabase-js كان بيرجّع
+// error.message عام بالإنجليزي ("Edge Function returned a non-2xx status
+// code") بدل الرسالة الحقيقية جوه جسم الاستجابة. نفس نمط getFnErrorMessage.
+const getFnErrorMessage = async (error: EdgeFunctionError | null | undefined): Promise<string> => {
+    if (!error) return '';
+    try {
+        if (error.context && typeof error.context.json === 'function') {
+            const body = await error.context.json();
+            if (body?.error) return body.error;
+        }
+        if (error.context && typeof error.context.text === 'function') {
+            const text = await error.context.text();
+            if (text) return text;
+        }
+    } catch (_) { /* تجاهل */ }
+    return error?.message || 'تعذر الاتصال بالمساعد القانوني';
+};
+
 // ─────────────────────────────────────────────────────────
 //  useAILegalEngine — منقول حرفيًا من useAIAssistant.ts (دفعة 3):
 //  SYSTEM_PROMPT + buildLegalContextBlock + retrieveLegalArticles
@@ -94,7 +125,7 @@ ${list}
                 model: selectedModel,
             },
         });
-        if (error) throw new Error(error.message || 'تعذر الاتصال بالمساعد القانوني');
+        if (error) throw new Error(await getFnErrorMessage(error as EdgeFunctionError));
         if (data?.error) throw new Error(data.error);
         return data?.content || 'لم يتم الحصول على رد.';
     };
