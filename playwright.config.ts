@@ -10,6 +10,12 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   reporter: 'list',
+  // تنظيف تلقائي لبيانات E2E بعد كل تشغيل (تقرير المرحلة 4، "الخطوة
+  // الجاية") — globalSetup بيسجّل وقت البداية، globalTeardown بيمسح كل
+  // صف اتعمل بعده وعليه علامة "اختبار E2E". لو SUPABASE_SERVICE_ROLE_KEY
+  // مش متضبط (تشغيل محلي عادي)، الـteardown بيتخطى نفسه من غير ما يفشل.
+  globalSetup: './e2e/global-setup',
+  globalTeardown: './e2e/global-teardown',
   use: {
     baseURL: 'http://localhost:5173',
     trace: 'retain-on-failure',
