@@ -249,7 +249,8 @@ function ArchiveTab({cases, clients, nav}: ArchiveTabProps){
         React.createElement('input',{
             ref:fileInputRef, type:'file',
             accept:'image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt',
-            onChange:handleFileSelect, style:{display:'none'}
+            onChange:handleFileSelect, style:{display:'none'},
+            'data-testid':'archive-file-input'
         }),
 
         // ─ هيدر ─
@@ -260,6 +261,7 @@ function ArchiveTab({cases, clients, nav}: ArchiveTabProps){
             ),
             React.createElement('button',{
                 onClick:()=>fileInputRef.current&&fileInputRef.current.click(),
+                'data-testid':'archive-upload-toggle',
                 className:"flex items-center bg-gradient-to-tr from-purple-600 to-purple-400 text-white px-3 py-2 rounded-xl text-xs font-black shadow-lg gap-1 active:scale-95 transition-transform"
             },React.createElement(I.Plus),"رفع مستند")
         ),
@@ -274,11 +276,11 @@ function ArchiveTab({cases, clients, nav}: ArchiveTabProps){
                 ),
                 React.createElement('button',{onClick:()=>{setShowForm(false);setPendingFile(null);if(fileInputRef.current)fileInputRef.current.value='';},className:"text-slate-500 hover:text-white"},React.createElement(I.X))
             ),
-            React.createElement(Inp,{label:"اسم / وصف المستند",value:docLabel,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>setDocLabel(e.target.value),placeholder:"مذكرة دفاع — جلسة 15 يونيو"}),
+            React.createElement(Inp,{label:"اسم / وصف المستند",value:docLabel,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>setDocLabel(e.target.value),placeholder:"مذكرة دفاع — جلسة 15 يونيو",'data-testid':'archive-doc-label-input'}),
             React.createElement(Sel,{label:"تصنيف المستند",value:docCategory,onChange:(e: React.ChangeEvent<HTMLSelectElement>) =>setDocCategory(e.target.value),options:['مذكرة دفاع','صحيفة دعوى','حكم قضائي','عقد','توكيل','مستند رسمي','صورة','أخرى']}),
             cases.length>0&&React.createElement(Sel,{label:"ربط بقضية (اختياري)",value:docCaseId,onChange:(e: React.ChangeEvent<HTMLSelectElement>) =>setDocCaseId(e.target.value),options:[{value:'',label:'— غير مرتبط بقضية —'},...cases.map((c: MappedCase) =>({value:c.id,label:c.title}))]}),
             React.createElement('div',{className:"flex gap-2"},
-                React.createElement('button',{onClick:handleUpload,disabled:uploadingDoc,className:"flex-1 py-2.5 bg-gradient-to-tr from-purple-600 to-purple-400 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 disabled:opacity-50 active:scale-95"},uploadingDoc?React.createElement(React.Fragment,null,React.createElement(I.Spin),"جاري الرفع..."):React.createElement(React.Fragment,null,"☁️ رفع في نظام سند")),
+                React.createElement('button',{onClick:handleUpload,disabled:uploadingDoc,'data-testid':'archive-upload-submit',className:"flex-1 py-2.5 bg-gradient-to-tr from-purple-600 to-purple-400 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 disabled:opacity-50 active:scale-95"},uploadingDoc?React.createElement(React.Fragment,null,React.createElement(I.Spin),"جاري الرفع..."):React.createElement(React.Fragment,null,"☁️ رفع في نظام سند")),
                 React.createElement('button',{onClick:()=>{setShowForm(false);setPendingFile(null);if(fileInputRef.current)fileInputRef.current.value='';},className:"px-4 py-2.5 bg-white/5 text-slate-400 rounded-xl text-xs font-bold"},"إلغاء")
             )
         ),
@@ -293,7 +295,8 @@ function ArchiveTab({cases, clients, nav}: ArchiveTabProps){
                     maxLength:100,
                     placeholder:"ابحث في المستندات والتصنيفات...",
                     className:"w-full p-3 pr-10 text-xs rounded-xl border border-white/10 bg-premium-card text-white placeholder-slate-500 transition-colors",
-                    style:{fontFamily:'Cairo,sans-serif'}
+                    style:{fontFamily:'Cairo,sans-serif'},
+                    'data-testid':'archive-search-input'
                 }),
                 searchQ&&React.createElement('button',{onClick:()=>handleSearchChange(''),className:"absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"},React.createElement(I.X))
             ),
@@ -328,7 +331,7 @@ function ArchiveTab({cases, clients, nav}: ArchiveTabProps){
         loading && docs.length === 0
             ? React.createElement('div',{className:"flex items-center justify-center py-16 gap-2 text-slate-500 text-xs"},React.createElement(I.Spin),"جاري تحميل الأرشيف...")
             : docsTotal === 0
-                ? React.createElement('div',{className:"text-center py-16 space-y-4"},
+                ? React.createElement('div',{className:"text-center py-16 space-y-4",'data-testid':'archive-empty'},
                     React.createElement('div',{className:"w-20 h-20 rounded-2xl bg-purple-500/10 flex items-center justify-center text-4xl mx-auto"},"🗄"),
                     React.createElement('p',{className:"text-white font-black text-sm"},searchQ||filterCat!=='الكل'?"لا توجد نتائج":"الأرشيف فارغ"),
                     searchQ||filterCat!=='الكل'
@@ -340,7 +343,7 @@ function ArchiveTab({cases, clients, nav}: ArchiveTabProps){
                         const {emoji, bg, canPreview} = getDocMeta(doc);
                         const linkedCase   = cases.find((c: MappedCase) => c.id === doc.case_id);
                         const catColor     = catColors[doc.category as string] || 'text-slate-400 bg-white/5';
-                        return React.createElement('div',{key:doc.id,className:"bg-premium-card border border-white/5 rounded-xl px-3 py-2.5 flex items-center gap-2.5 hover:border-purple-500/20 transition-all"},
+                        return React.createElement('div',{key:doc.id,'data-testid':'archive-doc-card',className:"bg-premium-card border border-white/5 rounded-xl px-3 py-2.5 flex items-center gap-2.5 hover:border-purple-500/20 transition-all"},
                             React.createElement('div',{className:`w-9 h-9 rounded-lg border flex items-center justify-center text-lg shrink-0 ${canPreview?'cursor-pointer active:scale-90':''} ${bg}`,onClick:()=>canPreview&&setViewingDoc(doc)},emoji),
                             React.createElement('div',{className:"flex-1 min-w-0"},
                                 React.createElement('p',{className:"text-[11px] font-black text-white leading-tight truncate"},doc.file_name),
