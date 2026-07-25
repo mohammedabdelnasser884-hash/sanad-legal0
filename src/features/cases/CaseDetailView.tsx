@@ -364,6 +364,7 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
                     // زر تعديل
                     React.createElement('button', {
                         onClick: () => setShowEditCase(true),
+                        'data-testid': 'edit-case-trigger',
                         className: "w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-premium-gold hover:border-premium-gold/30 active:scale-90 transition-all"
                     }, React.createElement(I.Edit)),
                     // زر حذف
@@ -564,10 +565,12 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
                             await handleDeleteSession(id);
                             setDeletingSessionId(null);
                         },
+                        'data-testid': 'confirm-delete-session-yes',
                         className: "flex-1 py-3 bg-rose-500 text-white rounded-xl text-xs font-black active:scale-95 transition-all"
                     }, "نعم، احذف"),
                     React.createElement('button', {
                         onClick: () => setConfirmDeleteSession(null),
+                        'data-testid': 'confirm-delete-session-cancel',
                         className: "flex-1 py-3 bg-white/5 text-slate-300 rounded-xl text-xs font-black active:scale-95 transition-all"
                     }, "إلغاء")
                 )
@@ -593,10 +596,12 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
                             await handleDeleteNote(id);
                             setDeletingNoteId(null);
                         },
+                        'data-testid': 'note-delete-confirm',
                         className: "flex-1 py-3 bg-rose-500 text-white rounded-xl text-xs font-black active:scale-95 transition-all"
                     }, "نعم، احذف"),
                     React.createElement('button', {
                         onClick: () => setConfirmDeleteNote(null),
+                        'data-testid': 'note-delete-cancel',
                         className: "flex-1 py-3 bg-white/5 text-slate-300 rounded-xl text-xs font-black active:scale-95 transition-all"
                     }, "إلغاء")
                 )
@@ -613,6 +618,7 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
                 ),
                 React.createElement('div', {className: "flex gap-3"},
                     React.createElement('button', {
+                        'data-testid': 'doc-delete-confirm',
                         onClick: async () => {
                             const doc = confirmDeleteDoc;
                             setConfirmDeleteDoc(null);
@@ -621,6 +627,7 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
                         className: "flex-1 py-3 bg-rose-500 text-white rounded-xl text-xs font-black active:scale-95 transition-all"
                     }, "نعم، احذف"),
                     React.createElement('button', {
+                        'data-testid': 'doc-delete-cancel',
                         onClick: () => setConfirmDeleteDoc(null),
                         className: "flex-1 py-3 bg-white/5 text-slate-300 rounded-xl text-xs font-black active:scale-95 transition-all"
                     }, "إلغاء")
