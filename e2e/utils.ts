@@ -90,10 +90,22 @@ export async function openAdminArchiveTab(
   page: Page,
   tab: 'cases' | 'clients' | 'fees' = 'cases'
 ): Promise<void> {
+  await closeAdminSectionIfOpen(page);
   await page.getByTestId('nav-more-toggle').click();
   await page.getByTestId('nav-more-admin').click();
   await page.getByTestId('admin-section-archive').click();
   await page.getByTestId('archive-tab-' + tab).click();
+}
+
+// قسم الإدارة الفرعي (زي "المستخدمين") بيتفتح كـ overlay بملء الشاشة بـ z-[60]،
+// وده بيغطي الدوك السفلي (z-50) كامل — فلو قسم فاضل مفتوح من نداء سابق (زي
+// createTestUser اللي بيفتح "المستخدمين" ومايقفلوش)، أي محاولة تانية تدوس
+// nav-more-toggle هتتحجب. الهيلبر ده بيقفل أي قسم مفتوح الأول لو موجود.
+async function closeAdminSectionIfOpen(page: Page): Promise<void> {
+  const backButton = page.getByTestId('admin-section-back');
+  if (await backButton.isVisible().catch(() => false)) {
+    await backButton.click();
+  }
 }
 
 // المرحلة 6 (الأدمن) — هيلبر عام لفتح أي قسم فرعي في لوحة الإدارة (nav-more-toggle →
@@ -103,6 +115,7 @@ export async function openAdminSection(
   page: Page,
   sectionId: 'users' | 'portal' | 'activity' | 'sessions' | 'security' | 'backup' | 'office' | 'legal_library' | 'archive'
 ): Promise<void> {
+  await closeAdminSectionIfOpen(page);
   await page.getByTestId('nav-more-toggle').click();
   await page.getByTestId('nav-more-admin').click();
   await page.getByTestId('admin-section-' + sectionId).click();
