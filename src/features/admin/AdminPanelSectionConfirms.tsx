@@ -67,11 +67,13 @@ export function AdminPanelSectionConfirms(props: AdminPanelSectionConfirmsProps)
         React.createElement('div', { className: "grid grid-cols-2 gap-2" },
           React.createElement('button', {
             onClick: () => setConfirmSignOut(null),
+            'data-testid': 'admin-security-signout-cancel',
             className: "py-2.5 rounded-xl text-xs font-black bg-white/8 text-slate-300 active:scale-95 transition-transform"
           }, "إلغاء"),
           React.createElement('button', {
             onClick: () => handleSignOutAllDevices(confirmSignOut),
             disabled: saving,
+            'data-testid': 'admin-security-signout-confirm',
             className: "py-2.5 rounded-xl text-xs font-black bg-red-500 text-white active:scale-95 transition-transform disabled:opacity-50"
           }, saving ? 'جاري...' : 'تسجيل خروج')
         )
@@ -103,11 +105,13 @@ export function AdminPanelSectionConfirms(props: AdminPanelSectionConfirmsProps)
         React.createElement('div', { className: "grid grid-cols-2 gap-2" },
           React.createElement('button', {
             onClick: () => setConfirmLock(null),
+            'data-testid': 'admin-security-lock-cancel',
             className: "py-2.5 rounded-xl text-xs font-black bg-white/8 text-slate-300 active:scale-95 transition-transform"
           }, "إلغاء"),
           React.createElement('button', {
             onClick: () => handleToggleLock(confirmLock),
             disabled: saving,
+            'data-testid': 'admin-security-lock-confirm',
             className: `py-2.5 rounded-xl text-xs font-black text-white active:scale-95 transition-transform disabled:opacity-50 ${confirmLock.is_locked ? 'bg-[#C9A84C]' : 'bg-red-500'}`
           }, saving ? 'جاري...' : (confirmLock.is_locked ? 'فتح الحساب' : 'قفل الحساب'))
         )
@@ -147,6 +151,7 @@ export function AdminPanelSectionConfirms(props: AdminPanelSectionConfirmsProps)
             type: 'text', value: restoreConfirmText,
             onChange: (e: React.ChangeEvent<HTMLInputElement>) => setRestoreConfirmText(e.target.value),
             placeholder: 'استعادة',
+            'data-testid': 'admin-backup-restore-confirm-input',
             className: 'w-full p-2 text-center text-xs rounded-xl border border-red-500/30 bg-red-500/5 text-white placeholder-slate-600',
             style: { fontFamily: 'Cairo,sans-serif' }
           })
@@ -163,11 +168,13 @@ export function AdminPanelSectionConfirms(props: AdminPanelSectionConfirmsProps)
         React.createElement('div', { className: "grid grid-cols-2 gap-2" },
           React.createElement('button', {
             onClick: () => { setConfirmRestore(null); setRestoreConfirmText(''); },
+            'data-testid': 'admin-backup-restore-cancel',
             className: "py-2.5 rounded-xl text-xs font-black bg-white/8 text-slate-300 active:scale-95 transition-transform"
           }, "إلغاء"),
           React.createElement('button', {
             onClick: () => handleRestoreBackup(confirmRestore),
             disabled: restoringBackup || restoreConfirmText.trim() !== 'استعادة',
+            'data-testid': 'admin-backup-restore-confirm-button',
             className: "py-2.5 rounded-xl text-xs font-black bg-[#C9A84C] text-white active:scale-95 transition-transform disabled:opacity-50 flex items-center justify-center gap-1"
           },
             restoringBackup ? React.createElement(React.Fragment, null, React.createElement(I.Spin), "جاري الاستعادة...")
@@ -198,11 +205,13 @@ export function AdminPanelSectionConfirms(props: AdminPanelSectionConfirmsProps)
         React.createElement('div', { className: "grid grid-cols-2 gap-2" },
           React.createElement('button', {
             onClick: () => setConfirmTerminateAll(false),
+            'data-testid': 'admin-sessions-terminateall-cancel',
             className: "py-2.5 rounded-xl text-xs font-black bg-white/8 text-slate-300 active:scale-95 transition-transform"
           }, "إلغاء"),
           React.createElement('button', {
             onClick: handleTerminateAllSessions,
             disabled: terminatingAll,
+            'data-testid': 'admin-sessions-terminateall-confirm',
             className: "py-2.5 rounded-xl text-xs font-black bg-red-500 text-white active:scale-95 transition-transform disabled:opacity-50 flex items-center justify-center gap-1"
           }, terminatingAll
             ? React.createElement(React.Fragment, null, React.createElement(I.Spin), "جاري الإنهاء...")
