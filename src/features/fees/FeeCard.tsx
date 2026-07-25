@@ -89,6 +89,7 @@ function FeeCard({
                         // ─ مودال التفاصيل الكاملة ─
                         detailsFor===fee.id && createPortal(React.createElement('div',{
                             className:"fixed inset-0 z-[70] flex items-end justify-center bg-black/80 backdrop-blur-sm",
+                            'data-testid':'fee-detail-modal',
                             onClick:(e: React.MouseEvent<HTMLDivElement>) => { if(e.target===e.currentTarget) setDetailsFor(null); }
                         },
                         React.createElement('div',{
@@ -98,7 +99,7 @@ function FeeCard({
                                 React.createElement('div',{className:"px-4 pt-4 pb-2"},
                                     React.createElement('div',{className:"flex items-center justify-between"},
                                         React.createElement('p',{className:"text-[10px] text-slate-500 font-black"},"📋 تفاصيل الأتعاب"),
-                                        React.createElement('button',{onClick:()=>setDetailsFor(null),className:"w-7 h-7 rounded-lg bg-white/5 text-slate-400 text-xs active:scale-90"},"✕")
+                                        React.createElement('button',{onClick:()=>setDetailsFor(null),'data-testid':'fee-detail-close',className:"w-7 h-7 rounded-lg bg-white/5 text-slate-400 text-xs active:scale-90"},"✕")
                                     )
                                 ),
                                 React.createElement('div',{className:"pb-4"},
@@ -130,7 +131,7 @@ function FeeCard({
                                     React.createElement('p',{className:"text-[8px] text-slate-500"},"المدفوع")
                                 ),
                                 React.createElement('div',{className:"bg-rose-500/8 rounded-xl p-2"},
-                                    React.createElement('p',{className:`text-[10px] font-black ${rem>0?'text-rose-400':'text-emerald-400'}`},fmt(rem)),
+                                    React.createElement('p',{'data-testid':'fee-remaining-value',className:`text-[10px] font-black ${rem>0?'text-rose-400':'text-emerald-400'}`},fmt(rem)),
                                     React.createElement('p',{className:"text-[8px] text-slate-500"},"المتبقي")
                                 )
                             ),
@@ -142,6 +143,7 @@ function FeeCard({
                                 React.createElement('div',{className:"flex gap-1"},
                                     React.createElement('button',{
                                         onClick:()=>setExpandedPayments((p: Record<string, boolean>) =>({...p,[fee.id]:!p[fee.id]})),
+                                        'data-testid':'payments-history-toggle',
                                         className:"flex-1 flex items-center justify-between text-[10px] font-black text-blue-400 bg-blue-500/8 border border-blue-500/15 rounded-xl px-3 py-2 active:scale-98"
                                     },
                                         React.createElement('span',null,"🗓 سجل الدفعات ("+feePayments.length+")"),
@@ -159,9 +161,9 @@ function FeeCard({
                                 ),
                                 showPays && React.createElement('div',{className:"space-y-1 pt-1"},
                                     feePayments.map((p: FeePaymentRow)=>
-                                        React.createElement('div',{key:p.id,className:"flex items-center justify-between bg-white/3 rounded-xl px-3 py-2 gap-2"},
+                                        React.createElement('div',{key:p.id,'data-testid':'payment-row',className:"flex items-center justify-between bg-white/3 rounded-xl px-3 py-2 gap-2"},
                                             React.createElement('div',{className:"flex-1"},
-                                                React.createElement('p',{className:"text-[10px] font-black text-emerald-400"},fmt(p.amount)+" "+currency),
+                                                React.createElement('p',{'data-testid':'payment-row-amount',className:"text-[10px] font-black text-emerald-400"},fmt(p.amount)+" "+currency),
                                                 React.createElement('p',{className:"text-[9px] text-slate-500"},fmtDate(p.payment_date)),
                                                 p.received_by && React.createElement('p',{className:"text-[9px] text-blue-400 mt-0.5"},"👤 استلم: "+p.received_by),
                                                 p.notes && React.createElement('p',{className:"text-[9px] text-slate-400 mt-0.5"},"📝 "+p.notes)
@@ -205,10 +207,12 @@ function FeeCard({
                                                             notes: p.notes||fee.notes||''
                                                         });
                                                     },
+                                                    'data-testid':'payment-invoice-trigger',
                                                     className:"w-7 h-7 rounded-lg bg-amber-500/15 border border-amber-500/25 flex items-center justify-center text-amber-400 text-sm active:scale-90 disabled:opacity-40"
                                                 },invoiceLoadingFor===p.id?React.createElement(I.Spin):"🧾"),
                                                 React.createElement('button',{
                                                     onClick:()=>setConfirmDeletePay({payId:p.id,fee,amount:p.amount||0,payDate:p.payment_date}),
+                                                    'data-testid':'payment-delete-trigger',
                                                     className:"w-6 h-6 rounded-lg bg-rose-500/10 flex items-center justify-center text-rose-400 text-[10px] active:scale-90"
                                                 },"✕")
                                             )
@@ -226,6 +230,7 @@ function FeeCard({
                                         React.createElement('select',{
                                             value: payClientName==='__manual__' ? '__manual__' : (payClientName||''),
                                             onChange:(e: React.ChangeEvent<HTMLSelectElement>) =>setPayClientName(e.target.value),
+                                            'data-testid':'pay-client-select',
                                             className:"w-full p-2.5 text-xs rounded-xl border border-white/10 bg-premium-bg text-white",
                                             style:{fontFamily:'Cairo,sans-serif',colorScheme:'dark'}
                                         },
@@ -238,6 +243,7 @@ function FeeCard({
                                             value:payClientNameText||'',
                                             onChange:(e: React.ChangeEvent<HTMLInputElement>) =>setPayClientNameText(e.target.value),
                                             placeholder:"اكتب اسم الموكل...",
+                                            'data-testid':'pay-client-name-text',
                                             className:"w-full p-2.5 text-xs rounded-xl border border-premium-gold/30 bg-premium-bg text-white placeholder-slate-600",
                                             style:{fontFamily:'Cairo,sans-serif'},
                                             autoFocus:true
@@ -246,23 +252,27 @@ function FeeCard({
                                     React.createElement('input',{
                                         type:"number",value:payAmount,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>setPayAmount(e.target.value),
                                         placeholder:"المبلغ...",
+                                        'data-testid':'pay-amount',
                                         className:"w-full p-2.5 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600",
                                         style:{fontFamily:'Cairo,sans-serif'}
                                     }),
                                     React.createElement('input',{
                                         type:"date",value:payDate,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>setPayDate(e.target.value),
+                                        'data-testid':'pay-date',
                                         className:"w-full p-2.5 text-xs rounded-xl border border-white/10 bg-premium-bg text-white",
                                         style:{fontFamily:'Cairo,sans-serif',colorScheme:'dark'}
                                     }),
                                     React.createElement('input',{
                                         type:"text",value:payReceiver,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>setPayReceiver(e.target.value),
                                         placeholder:"اسم المستلم من المكتب...",
+                                        'data-testid':'pay-receiver',
                                         className:"w-full p-2.5 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600",
                                         style:{fontFamily:'Cairo,sans-serif'}
                                     }),
                                     React.createElement('textarea',{
                                         value:payNote,onChange:(e: React.ChangeEvent<HTMLTextAreaElement>) =>setPayNote(e.target.value),
                                         placeholder:"ملاحظات الدفعة...",rows:2,
+                                        'data-testid':'pay-note',
                                         className:"w-full p-2.5 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600 resize-none",
                                         style:{fontFamily:'Cairo,sans-serif'}
                                     }),
@@ -270,17 +280,20 @@ function FeeCard({
                                         React.createElement('button',{
                                             onClick:()=>handleAddPayment(fee),
                                             disabled: payingFeeId === fee.id,
+                                            'data-testid':'confirm-add-payment',
                                             className:"flex-1 py-2 bg-emerald-500 text-white rounded-xl text-xs font-black active:scale-95 disabled:opacity-50"
                                         }, payingFeeId === fee.id ? "... جارِ التسجيل" : "✅ تسجيل"),
-                                        React.createElement('button',{onClick:()=>{setAddPaymentFor(null);setPayDate('');setPayAmount('');setPayNote('');setPayReceiver('');setPayClientName('');setPayClientNameText('');},className:"px-3 py-2 bg-white/5 text-slate-400 rounded-xl text-xs active:scale-95"},"✕")
+                                        React.createElement('button',{onClick:()=>{setAddPaymentFor(null);setPayDate('');setPayAmount('');setPayNote('');setPayReceiver('');setPayClientName('');setPayClientNameText('');},'data-testid':'cancel-add-payment',className:"px-3 py-2 bg-white/5 text-slate-400 rounded-xl text-xs active:scale-95"},"✕")
                                     )
                                   )
                                 : React.createElement('div',{className:"flex gap-2"},
                                     !isFullyPaid && React.createElement('button',{
                                         onClick:()=>{setAddPaymentFor(fee.id);setPayAmount('');},
+                                        'data-testid':'add-payment-trigger',
                                         className:"flex-1 py-2 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 rounded-xl text-xs font-black flex items-center justify-center gap-1 active:scale-95"
                                     },"➕ تسجيل دفعة"),
                                     React.createElement('button',{
+                                        'data-testid':'edit-fee-trigger',
                                         onClick:()=>{
                                             // BUG-07 FIX: كان بيخمّن "هل ده موكل مسجّل؟" بمطابقة fee.client_name
                                             // نصياً مع clients.full_name — ممكن يغلط لو فيه اسمين متطابقين أو
@@ -305,6 +318,7 @@ function FeeCard({
                                     },React.createElement(I.Edit)),
                                     React.createElement('button',{
                                         onClick:()=>setConfirmDeleteFee(fee),
+                                        'data-testid':'delete-fee-trigger',
                                         className:"w-8 h-8 rounded-xl bg-rose-500/10 flex items-center justify-center text-rose-400 hover:bg-rose-500/20 active:scale-90"
                                     },React.createElement(I.Trash))
                                   )
