@@ -194,6 +194,7 @@ function FeesTab({cases, clients, showSummaryModal, setShowSummaryModal, country
         // ─ زر الملخص المالي (بقى هنا مكان شريط البحث القديم) ─
         React.createElement('button',{
             onClick:()=>setShowSummaryModal(true),
+            'data-testid':'fees-summary-open',
             className:"w-full flex items-center justify-center gap-1.5 py-2.5 rounded-2xl bg-premium-gold/10 border border-premium-gold/25 text-premium-gold text-xs font-black active:scale-95 transition-all hover:bg-premium-gold/15"
         },"📊 الملخص المالي الإجمالي"),
 
@@ -257,7 +258,7 @@ function FeesTab({cases, clients, showSummaryModal, setShowSummaryModal, country
                     ),
                     React.createElement(Inp,{label:"المستلم من المكتب",value:form.receiver,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>setForm((p) =>({...p,receiver:e.target.value})),placeholder:"اسم المحامي أو الموظف المستلم"}),
                     React.createElement(Inp,{label:"إجمالي الأتعاب",type:"number",value:form.total,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>setForm((p) =>({...p,total:e.target.value})),placeholder:"0",'data-testid':'fee-total'}),
-                    React.createElement(Inp,{label:"المبلغ المدفوع",type:"number",value:form.paid,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>setForm((p) =>({...p,paid:e.target.value})),placeholder:"0"}),
+                    React.createElement(Inp,{label:"المبلغ المدفوع",type:"number",value:form.paid,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>setForm((p) =>({...p,paid:e.target.value})),placeholder:"0",'data-testid':'fee-paid'}),
                     React.createElement('div',{className:"space-y-1"},
                         React.createElement('label',{className:"text-[10px] text-slate-400 font-bold"},"تاريخ الدفعة"),
                         React.createElement('input',{
@@ -324,6 +325,8 @@ function FeesTab({cases, clients, showSummaryModal, setShowSummaryModal, country
             itemType:"الأتعاب",
             loading:false,
             choiceTestId:"archive-confirm-choice",
+            inputTestId:"fee-delete-confirm-input",
+            confirmTestId:"fee-delete-confirm-button",
             deleteConsequences: [
                 'سيُحذف نهائيًا سجل الأتعاب وكل الدفعات المسجلة عليه.',
                 'الفاتورة الصادرة (لو موجودة) تفضل محفوظة بسجلها المالي كامل — بس رابطها بالأتعاب بيتصفّر.',
@@ -341,6 +344,9 @@ function FeesTab({cases, clients, showSummaryModal, setShowSummaryModal, country
             itemType:"الدفعة",
             mode:"delete",
             loading:false,
+            inputTestId:"confirm-delete-payment-input",
+            confirmTestId:"confirm-delete-payment-yes",
+            cancelTestId:"confirm-delete-payment-cancel",
             onConfirm:()=>{ handleDeletePayment(confirmDeletePay.payId, confirmDeletePay.fee); setConfirmDeletePay(null); },
             onCancel:()=>setConfirmDeletePay(null)
         }), document.body),
