@@ -381,6 +381,7 @@ function App() {
                     React.createElement('h3', { className: 'text-xl font-black text-white' }, '📅 الجلسات'),
                     React.createElement('button', {
                         onClick: () => setShowNewSessionModal(true),
+                        'data-testid': 'calendar-new-session-button',
                         className: 'flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-black text-premium-bg transition-all active:scale-95',
                         style: { background: 'linear-gradient(135deg,#d4af37,#f0c040)' }
                     }, React.createElement('span', { className: 'text-sm' }, '⚡'), 'إضافة جلسة')
