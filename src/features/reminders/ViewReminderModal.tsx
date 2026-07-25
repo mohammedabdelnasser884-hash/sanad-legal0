@@ -23,6 +23,7 @@ function ViewReminderModal({
   viewTarget, setViewTarget, handleToggleDone, setEditTarget, setEditForm, setConfirmDeleteTarget,
 }: ViewReminderModalProps) {
   return viewTarget && createPortal(React.createElement('div',{
+        'data-testid':'view-reminder-modal',
         className:"fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm",
         onClick: () => setViewTarget(null)
     },
@@ -43,6 +44,7 @@ function ViewReminderModal({
                 ),
                 React.createElement('button',{
                     onClick:()=>setViewTarget(null),
+                    'data-testid':'view-reminder-close',
                     className:"w-8 h-8 rounded-xl bg-white/5 flex items-center justify-center text-slate-400 shrink-0"
                 },"✕")
             ),
