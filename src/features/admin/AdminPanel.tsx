@@ -593,14 +593,17 @@ export default function AdminPanel({ profile, lawyers, clients, fetchLawyers, co
           ),
           section === 'users' && React.createElement('button',{
             onClick:()=>setShowAddUser(true),
+            'data-testid': 'admin-user-new-button',
             className:"flex items-center gap-1 bg-gradient-to-tr from-[#C9A84C] to-[#C9A84C]/80 text-white px-3 py-2 rounded-xl text-xs font-black active:scale-95 transition-transform"
           }, React.createElement(I.Plus), "مستخدم جديد"),
           section === 'portal' && React.createElement('button',{
             onClick:()=>setShowAddPortalUser(true),
+            'data-testid': 'admin-portal-new-button',
             className:"flex items-center gap-1 bg-gradient-to-tr from-[#C9A84C] to-[#E8C97A] text-white px-3 py-2 rounded-xl text-xs font-black active:scale-95 transition-transform"
           }, React.createElement(I.Plus), "وصول جديد"),
           section === 'legal_library' && React.createElement('button',{
             onClick:()=>{ setEditingLaw(null); setShowLawModal(true); },
+            'data-testid': 'admin-law-new-button',
             className:"flex items-center gap-1 bg-gradient-to-tr from-teal-500 to-teal-400 text-white px-3 py-2 rounded-xl text-xs font-black active:scale-95 transition-transform"
           }, React.createElement(I.Plus), "قانون جديد")
         )
