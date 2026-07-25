@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { db } from '../../supabaseClient';
 import { logActivity } from '../../shared/lib/dataAccess';
 import { recordError } from '../../systemHealth';
+import { getEdgeFunctionErrorMessage, looksArabicUserMessage, type EdgeFunctionError } from '../../shared/lib/edgeFunctionErrors';
 import { I, SanadMark } from '../../constants';
 
 import { Inp } from '@/shared/ui/Inp';
@@ -44,8 +45,22 @@ function LoginScreen({onLogin}: LoginScreenProps){
             setLoading(false);
             if(data?.error){
                 setErr(data.error);
+            } else if (error) {
+                // 🆕 إصلاح: office-login بترجّع كل رسائلها المهمة (قفل
+                // brute-force، بيانات دخول خاطئة، حساب معطّل/مقفول، اشتراك
+                // متوقف/انتهت فترته التجريبية) بـHTTP status غير 2xx —
+                // قبل كده كانت كل الحالات دي ضايعة خلف الرسالة العامة
+                // "تحقق من اتصال الإنترنت". نستخرج الرسالة الحقيقية ونعرضها
+                // بس لو فعلاً عربية (مش نص تقني خام زي "Failed to fetch").
+                const serverMessage = await getEdgeFunctionErrorMessage(error as EdgeFunctionError);
+                if (looksArabicUserMessage(serverMessage)) {
+                    setErr(serverMessage as string);
+                } else {
+                    recordError('office_login', error?.message);
+                    setErr('تعذّر تسجيل الدخول. تحقق من اتصال الإنترنت وحاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.');
+                }
             } else {
-                recordError('office_login', error?.message);
+                recordError('office_login', 'رد فاضي من office-login من غير access_token');
                 setErr('تعذّر تسجيل الدخول. تحقق من اتصال الإنترنت وحاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.');
             }
             return;
