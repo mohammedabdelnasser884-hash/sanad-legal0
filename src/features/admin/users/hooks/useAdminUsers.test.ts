@@ -7,11 +7,14 @@ import type { ProfileRow } from '../../../../types';
 // Mock db (supabaseClient) — بيغطي الاستخدامات الفعلية في useAdminUsers.ts
 // (اتأكدت منها بقراءة الكود، مفيش تخمين):
 //   - db.from('profiles').update({...}).eq('id', x)   [handleEditUser, toggleUserActive, handleToggleLock]
-//   - db.from('profiles').delete().eq('id', x)          [handleDeleteUser]
-// handleAddUser/handleChangePassword/handleSignOutAllDevices بيعدّوا عن
-// طريق callAdminAction فقط (من نفس ملف supabaseClient). toggleUserActive
-// كمان بتستخدم callAdminAction (action:'force_signout') جوه try/catch
-// منفصل — الفشل فيها ما بيوقفش باقي العملية (FIX موثّق في تعليق الكود نفسه).
+// handleAddUser/handleDeleteUser/handleChangePassword/handleSignOutAllDevices
+// بيعدّوا عن طريق callAdminAction فقط (من نفس ملف supabaseClient) — مفيش
+// db.from('profiles').delete() في handleDeleteUser (كان كده قبل كده، اتصلح:
+// كان بيحذف صف profiles بس وبيسيب حساب auth.users معلّق، دلوقتي بيستدعي
+// admin-actions action=delete_user اللي بيحذف Auth أولاً وبعدين profiles).
+// toggleUserActive كمان بتستخدم callAdminAction (action:'force_signout')
+// جوه try/catch منفصل — الفشل فيها ما بيوقفش باقي العملية (FIX موثّق في
+// تعليق الكود نفسه).
 // ══════════════════════════════════════════════════════════════════
 type Result = { error?: { message?: string } | null };
 
@@ -174,28 +177,34 @@ describe('useAdminUsers', () => {
   });
 
   describe('handleDeleteUser', () => {
-    it('نجاح → delete بالـ id الصحيح، توست، logActivity، setConfirmDelete(null)، fetchLawyers', async () => {
+    it('نجاح → callAdminAction بـ action:delete_user (profile_id + user_id)، توست، logActivity، setConfirmDelete(null)، fetchLawyers', async () => {
+      callAdminAction.mockResolvedValue({ ok: true });
       const fetchLawyers = vi.fn();
       const { result } = setup(fetchLawyers);
       act(() => { result.current.setConfirmDelete(TARGET_USER); });
 
       await act(async () => { await result.current.handleDeleteUser(TARGET_USER); });
 
-      expect(mockDb.deleteSpy).toHaveBeenCalledWith('id', 'u1');
+      expect(callAdminAction).toHaveBeenCalledWith({ action: 'delete_user', profile_id: 'u1', user_id: 'auth-u1' });
       expect(toast).toHaveBeenCalledWith('✅ تم حذف المستخدم');
       expect(logActivity).toHaveBeenCalledWith(expect.anything(), 'حذف مستخدم', expect.objectContaining({ entity_id: 'u1', details: 'محمد المحامي' }));
       expect(result.current.confirmDelete).toBeNull();
       expect(fetchLawyers).toHaveBeenCalledTimes(1);
     });
 
-    it('فشل → توست فشل، من غير logActivity/fetchLawyers', async () => {
-      mockDb.setResult('profiles:delete', { error: { message: 'db error' } });
+    it('🆕 فشل → الرسالة الموحدة تتعرض للمستخدم عبر showErrorToast، والخام يتسجل عبر recordError فقط، من غير logActivity/fetchLawyers/setConfirmDelete', async () => {
+      callAdminAction.mockRejectedValue(new Error('delete failed'));
       const fetchLawyers = vi.fn();
       const { result } = setup(fetchLawyers);
+      act(() => { result.current.setConfirmDelete(TARGET_USER); });
+
       await act(async () => { await result.current.handleDeleteUser(TARGET_USER); });
-      expect(toast).toHaveBeenCalledWith('❌ حدث خطأ، يرجى المحاولة مرة أخرى', true);
+
+      expect(toast).toHaveBeenCalledWith('❌ تعذّر حذف المستخدم. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', true);
+      expect(recordError).toHaveBeenCalledWith('admin_delete_user', 'delete failed', expect.objectContaining({ label: 'حذف مستخدم' }));
       expect(logActivity).not.toHaveBeenCalled();
       expect(fetchLawyers).not.toHaveBeenCalled();
+      expect(result.current.confirmDelete).not.toBeNull();
     });
   });
 
