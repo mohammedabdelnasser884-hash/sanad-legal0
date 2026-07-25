@@ -38,7 +38,7 @@ function UniversalSearchModal({ cases, clients, onClose, onOpenCase, onOpenClien
         highlight, fmtNum,
     } = useUniversalSearch();
 
-    return React.createElement('div', { className: 'fixed inset-0 z-[60] bg-black/90 backdrop-blur-md flex flex-col fade-in' },
+    return React.createElement('div', { 'data-testid': 'universal-search-modal', className: 'fixed inset-0 z-[60] bg-black/90 backdrop-blur-md flex flex-col fade-in' },
         // ⚠️ viewingDoc هنا شكله SearchDocResult (نتيجة بحث جزئية، مش صف case_documents
         // كامل) بينما PdfViewerModal بيتوقع doc: CaseDocumentRow. PdfViewerModal فعليًا
         // بيقرا بس original_name/file_name من الكائن ده (نفس الحقول الموجودة هنا)، فالكاست
@@ -56,6 +56,7 @@ function UniversalSearchModal({ cases, clients, onClose, onOpenCase, onOpenClien
                     ),
                     React.createElement('input', {
                         ref: inputRef,
+                        'data-testid': 'universal-search-input',
                         type: 'text', value: q,
                         onChange: (e: React.ChangeEvent<HTMLInputElement>) => { setQ(e.target.value); setActiveFilter('all'); },
                         maxLength: 100,
@@ -66,6 +67,7 @@ function UniversalSearchModal({ cases, clients, onClose, onOpenCase, onOpenClien
                 ),
                 React.createElement('button', {
                     onClick: onClose,
+                    'data-testid': 'universal-search-close',
                     className: 'w-10 h-10 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-white shrink-0 active:scale-90'
                 }, React.createElement(I.X))
             ),
@@ -122,6 +124,7 @@ function UniversalSearchModal({ cases, clients, onClose, onOpenCase, onOpenClien
                 matchedCases.map((c: SearchCaseResult) =>
                     React.createElement('div', {
                         key: c.id,
+                        'data-testid': 'universal-search-case-result',
                         onClick: () => { onOpenCase(c); onClose(); },
                         className: 'bg-premium-card border border-white/5 rounded-xl px-3 py-2.5 active:scale-[0.98] transition-all cursor-pointer hover:border-premium-gold/20'
                     },
