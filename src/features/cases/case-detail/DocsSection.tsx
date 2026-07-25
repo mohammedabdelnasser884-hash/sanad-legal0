@@ -36,6 +36,7 @@ function DocsSection({
 
                 // hidden file input
                 React.createElement('input', {
+                    'data-testid': 'doc-file-input',
                     ref: fileInputRef,
                     type: 'file',
                     accept: 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt',
@@ -45,6 +46,7 @@ function DocsSection({
 
                 // زر الرفع
                 !showDocForm && React.createElement('button', {
+                    'data-testid': 'doc-upload-toggle',
                     onClick: () => fileInputRef.current && fileInputRef.current.click(),
                     className: "w-full py-4 border-2 border-dashed border-purple-500/30 rounded-2xl flex flex-col items-center justify-center gap-2 text-purple-400 hover:bg-purple-500/5 transition-all active:scale-[0.98]"
                 },
@@ -73,12 +75,14 @@ function DocsSection({
                             React.createElement('p', {className: "text-[9px] text-slate-500"}, (pendingFile.size / 1024 / 1024).toFixed(2) + ' MB')
                         ),
                         React.createElement('button', {
+                            'data-testid': 'doc-form-cancel-x',
                             onClick: () => { setShowDocForm(false); setPendingFile(null); if(fileInputRef.current) fileInputRef.current.value=''; },
                             className: "text-slate-500 hover:text-white text-sm"
                         }, "✕")
                     ),
                     // اسم المستند
                     React.createElement(Inp, {
+                        'data-testid': 'doc-label-input',
                         label: "اسم / وصف المستند",
                         value: docLabel,
                         onChange: (e: React.ChangeEvent<HTMLInputElement>) => setDocLabel(e.target.value),
@@ -86,6 +90,7 @@ function DocsSection({
                     }),
                     // التصنيف
                     React.createElement(Sel, {
+                        testId: 'doc-category-select',
                         label: "تصنيف المستند",
                         value: docCategory,
                         onChange: (e: React.ChangeEvent<HTMLSelectElement>) => setDocCategory(e.target.value),
@@ -93,6 +98,7 @@ function DocsSection({
                     }),
                     React.createElement('div', {className: "flex gap-2"},
                         React.createElement('button', {
+                            'data-testid': 'doc-upload-submit',
                             onClick: handleUploadDoc,
                             disabled: uploadingDoc,
                             className: "flex-1 py-2.5 bg-gradient-to-tr from-purple-600 to-purple-400 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 disabled:opacity-50 active:scale-95 transition-all"
@@ -101,6 +107,7 @@ function DocsSection({
                             : React.createElement(React.Fragment, null, "☁️ رفع المستند")
                         ),
                         React.createElement('button', {
+                            'data-testid': 'doc-form-cancel',
                             onClick: () => { setShowDocForm(false); setPendingFile(null); if(fileInputRef.current) fileInputRef.current.value=''; },
                             className: "px-4 py-2.5 bg-white/5 text-slate-400 rounded-xl text-xs font-bold active:scale-95"
                         }, "إلغاء")
@@ -111,6 +118,7 @@ function DocsSection({
                 docs.length > 0 && !showDocForm && React.createElement('div', {className: "relative"},
                     React.createElement('span', {className: "absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none text-xs"}, "🔍"),
                     React.createElement('input', {
+                        'data-testid': 'doc-search-input',
                         type: "text", value: docSearch,
                         onChange: (e: React.ChangeEvent<HTMLInputElement>) => setDocSearch(e.target.value),
                         placeholder: "ابحث في مستندات هذه القضية...",
@@ -118,6 +126,7 @@ function DocsSection({
                         style: {fontFamily: 'Cairo,sans-serif'}
                     }),
                     docSearch && React.createElement('button', {
+                        'data-testid': 'doc-search-clear',
                         onClick: () => setDocSearch(''),
                         className: "absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white text-xs"
                     }, "✕")
@@ -127,7 +136,7 @@ function DocsSection({
                 loadingSessions
                     ? React.createElement('div', {className: "flex items-center justify-center py-12 gap-2 text-slate-500 text-xs"}, React.createElement(I.Spin))
                     : docs.length === 0 && !showDocForm
-                        ? React.createElement('div', {className: "text-center py-14 space-y-3"},
+                        ? React.createElement('div', {'data-testid': 'docs-empty', className: "text-center py-14 space-y-3"},
                             React.createElement('div', {className: "w-16 h-16 rounded-2xl bg-purple-500/10 flex items-center justify-center text-3xl mx-auto"}, "📁"),
                             React.createElement('p', {className: "text-white/60 font-black text-sm"}, "لا توجد مستندات"),
                             React.createElement('p', {className: "text-slate-500 text-xs"}, "ارفع مستندات القضية من الزر أعلاه")
@@ -176,7 +185,7 @@ function DocsSection({
                                     'توكيل': 'text-cyan-400 bg-cyan-500/10',
                                 } as Record<string, string>)[doc.category as string] || 'text-slate-400 bg-white/5';
 
-                                return React.createElement('div', {key: doc.id, className: "bg-premium-card border border-white/5 rounded-2xl overflow-hidden"},
+                                return React.createElement('div', {key: doc.id, 'data-testid': 'doc-card', className: "bg-premium-card border border-white/5 rounded-2xl overflow-hidden"},
                                     // معاينة الصورة لو كانت صورة
                                     isImg && React.createElement('div', {className: "relative"},
                                         React.createElement('img', {
@@ -208,16 +217,19 @@ function DocsSection({
                                         React.createElement('div', {className: "flex flex-col gap-2"},
                                             // عرض
                                             React.createElement('button', {
+                                                'data-testid': 'doc-view-trigger',
                                                 onClick: () => setViewingDoc(doc),
                                                 className: "w-8 h-8 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-400 hover:bg-purple-500/20 transition-all active:scale-90 text-sm"
                                             }, "👁"),
                                             // تحميل / فتح
                                             React.createElement('a', {
+                                                'data-testid': 'doc-open-link',
                                                 href: doc.file_url, target: '_blank', rel: 'noreferrer',
                                                 className: "w-8 h-8 rounded-xl bg-white/5 flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-all text-sm"
                                             }, "↗"),
                                             // حذف
                                             React.createElement('button', {
+                                                'data-testid': 'doc-delete-trigger',
                                                 onClick: () => setConfirmDeleteDoc({ id: doc.id, file_name: doc.file_name, storage_path: doc.storage_path }),
                                                 disabled: deletingDocId === doc.id,
                                                 className: "w-8 h-8 rounded-xl bg-rose-500/5 flex items-center justify-center text-rose-500/50 hover:text-rose-400 hover:bg-rose-500/10 transition-all disabled:opacity-40"
