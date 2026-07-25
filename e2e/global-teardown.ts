@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, unlinkSync } from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // خطوة تنظيف الـCI (تقرير المرحلة 4، "الخطوة الجاية") — الجزء الثاني.
@@ -25,6 +26,9 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 // إلا لو اسمه هو نفسه فيه الماركر واتعمل بعد بداية التستات.
 
 const MARKER = '%اختبار E2E%';
+// ⚠️ FIX: نفس مشكلة global-setup.ts — المشروع ESM ("type": "module")
+// فـ __dirname مش موجود جاهز، لازم يتبني من import.meta.url.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const START_TIME_FILE = path.join(__dirname, '.e2e-start-time');
 const CHUNK_SIZE = 150;
 
