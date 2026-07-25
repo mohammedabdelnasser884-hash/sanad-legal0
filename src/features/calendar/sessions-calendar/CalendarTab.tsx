@@ -165,6 +165,7 @@ function CalendarTab({ cases, clients, onOpenCase, onOpenStandalone, refreshKey 
                     const isSel      = selectedDay === d;
                     return React.createElement('button', {
                         key: d, onClick: () => setSelectedDay(isSel ? null : d),
+                        'data-testid': 'calendar-day',
                         className: `relative aspect-square flex flex-col items-center justify-center gap-0.5 transition-all active:scale-90 ${isSel?'bg-premium-gold/15':'hover:bg-white/5'} ${isConflict?'ring-1 ring-inset ring-red-500/50':''}`
                     },
                         isConflict && React.createElement('div', { className: "absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-red-500" }),
