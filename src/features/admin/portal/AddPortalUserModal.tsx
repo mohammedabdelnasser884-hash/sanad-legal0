@@ -39,7 +39,7 @@ function AddPortalUserModal({ clients, portalAccess, onSave, onClose, saving }: 
           React.createElement('h3',{className:"text-sm font-black text-white"},"إضافة وصول للبوابة"),
           React.createElement('p',{className:"text-[10px] text-slate-500"},"اختر الموكل وحدد رمز PIN")
         ),
-        React.createElement('button',{onClick:onClose,className:"w-8 h-8 rounded-full bg-white/8 flex items-center justify-center text-slate-400"},
+        React.createElement('button',{onClick:onClose,'data-testid':'admin-portal-add-close',className:"w-8 h-8 rounded-full bg-white/8 flex items-center justify-center text-slate-400"},
           React.createElement(I.X))
       ),
 
@@ -49,6 +49,7 @@ function AddPortalUserModal({ clients, portalAccess, onSave, onClose, saving }: 
         React.createElement('input',{
           value:search, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>setSearch(e.target.value),
           placeholder:"ابحث بالاسم أو الهاتف...",
+          'data-testid':'admin-portal-add-search',
           className:"w-full p-2.5 text-xs rounded-xl border border-white/10 bg-white/5 text-white placeholder-slate-600 mb-2",
           style:{fontFamily:'Cairo,sans-serif'}
         }),
@@ -61,6 +62,7 @@ function AddPortalUserModal({ clients, portalAccess, onSave, onClose, saving }: 
                 return React.createElement('button',{
                   key:c.id,
                   onClick:()=>setSelected(c),
+                  'data-testid':'admin-portal-add-client-option',
                   className:`w-full text-right p-2.5 rounded-xl border transition-all flex items-center justify-between ${isSel?'bg-[#C9A84C]/15 border-[#C9A84C]/40':'bg-white/5 border-white/8 active:scale-95'}`
                 },
                   React.createElement('div',null,
@@ -85,11 +87,13 @@ function AddPortalUserModal({ clients, portalAccess, onSave, onClose, saving }: 
             value:pin,
             onChange:(e: React.ChangeEvent<HTMLInputElement>) =>setPin(e.target.value.replace(/\D/,'').slice(0,4)),
             maxLength:4, placeholder:"****",
+            'data-testid':'admin-portal-add-pin',
             className:"flex-1 p-2.5 text-center text-lg tracking-[0.5em] font-black rounded-xl border border-white/10 bg-white/5 text-white",
             style:{fontFamily:'monospace',letterSpacing:'0.5em'}
           }),
           React.createElement('button',{
             onClick:genPin,
+            'data-testid':'admin-portal-add-genpin',
             className:"px-3 py-2 rounded-xl bg-[#C9A84C]/20 text-[#C9A84C] text-xs font-bold border border-[#C9A84C]/30 active:scale-95 transition-transform"
           },"توليد")
         )
@@ -106,6 +110,7 @@ function AddPortalUserModal({ clients, portalAccess, onSave, onClose, saving }: 
           email:selected!.email
         }),
         disabled:saving||!selected||pin.length!==4,
+        'data-testid':'admin-portal-add-submit',
         className:"w-full py-3 rounded-xl text-xs font-black text-premium-bg bg-gradient-to-tr from-premium-gold to-[#E8C97A] shadow-lg active:scale-95 transition-transform disabled:opacity-50"
       },saving?'جاري الحفظ...':'تفعيل الوصول')
     )
