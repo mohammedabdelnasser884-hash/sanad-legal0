@@ -61,6 +61,7 @@ function AppHeader({ profile, setShowMenu, setShowSearch, isAdmin, fetchCases, c
             // أيقونة البحث دايمة ظاهرة
             React.createElement('button',{
                 onClick:()=>setShowSearch(true),
+                'data-testid':'header-search-open',
                 className:"w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center active:scale-95 transition-transform text-slate-400 shrink-0"
             }, React.createElement(I.Search)),
             // أيقونة تحديث البيانات
