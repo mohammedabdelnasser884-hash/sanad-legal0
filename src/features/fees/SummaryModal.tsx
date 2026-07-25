@@ -18,6 +18,7 @@ function SummaryModal({
   grandTotal, grandPaid, grandRemaining, feesByCategory,
 }: SummaryModalProps) {
   return showSummaryModal && createPortal(React.createElement('div',{
+            'data-testid':'fees-summary-modal',
             className:"fixed inset-0 z-[70] flex items-end justify-center bg-black/80 backdrop-blur-sm",
             onClick:(e: React.MouseEvent<HTMLDivElement>) => { if(e.target===e.currentTarget) setShowSummaryModal(false); }
         },
@@ -29,7 +30,7 @@ function SummaryModal({
                 // رأس المودال
                 React.createElement('div',{className:"flex items-center justify-between"},
                     React.createElement('p',{className:"text-sm font-black text-premium-gold"},"💰 الملخص المالي الإجمالي"),
-                    React.createElement('button',{onClick:()=>setShowSummaryModal(false),className:"w-7 h-7 rounded-lg bg-white/5 text-slate-400 text-xs active:scale-90"},"✕")
+                    React.createElement('button',{onClick:()=>setShowSummaryModal(false),'data-testid':'fees-summary-close',className:"w-7 h-7 rounded-lg bg-white/5 text-slate-400 text-xs active:scale-90"},"✕")
                 ),
                 // الأرقام الكبيرة
                 React.createElement('div',{className:"grid grid-cols-3 gap-3 text-center"},
