@@ -18,7 +18,7 @@ function UsersSection({
 }: UsersSectionProps) {
   return React.createElement('div',{className:"space-y-3"},
       lawyers.length === 0
-        ? React.createElement('div',{className:"bg-premium-card border border-white/5 rounded-xl p-10 text-center text-slate-500 text-xs"},"لا يوجد مستخدمون")
+        ? React.createElement('div',{'data-testid':'admin-user-empty',className:"bg-premium-card border border-white/5 rounded-xl p-10 text-center text-slate-500 text-xs"},"لا يوجد مستخدمون")
         : lawyers.map((user) => {
             // permissions أعمدة Json في قاعدة البيانات — نفس الكاست الموثّق
             // المستخدم فعليًا في EditUserModal.tsx لقراءتها كـ Record<string, boolean>.
@@ -27,6 +27,7 @@ function UsersSection({
             const isInactive = user.is_active === false;
             return React.createElement('div',{
               key:user.id,
+              'data-testid':'admin-user-card',
               className:`bg-premium-card border rounded-2xl p-4 transition-all ${isInactive?'border-red-500/20 opacity-60':'border-white/5'}`
             },
               // صف العلوي
@@ -55,22 +56,26 @@ function UsersSection({
                 React.createElement('div',{className:"flex gap-1.5"},
                   React.createElement('button',{
                     onClick:()=>toggleUserActive(user),
+                    'data-testid':'admin-user-toggle-active',
                     className:`w-8 h-8 rounded-xl flex items-center justify-center border transition-all active:scale-90 ${isInactive?'bg-[#C9A84C]/15 border-[#C9A84C]/30 text-[#C9A84C]':'bg-red-500/10 border-red-500/20 text-red-400'}`
                   }, React.createElement(IconToggle,{on:!isInactive})),
 
                   React.createElement('button',{
                     onClick:()=>setChangePassUser(user),
                     title:"تغيير كلمة المرور",
+                    'data-testid':'admin-user-change-password',
                     className:"w-8 h-8 rounded-xl flex items-center justify-center bg-[#C9A84C]/15 border border-[#C9A84C]/30 text-[#C9A84C] active:scale-90 transition-all"
                   }, React.createElement(IconKey)),
 
                   React.createElement('button',{
                     onClick:()=>setEditUser(user),
+                    'data-testid':'admin-user-edit',
                     className:"w-8 h-8 rounded-xl flex items-center justify-center bg-[#C9A84C]/15 border border-[#C9A84C]/30 text-[#C9A84C] active:scale-90 transition-all"
                   }, React.createElement(I.Edit)),
 
                   user.id !== profile?.id && React.createElement('button',{
                     onClick:()=>setConfirmDelete(user),
+                    'data-testid':'admin-user-delete',
                     className:"w-8 h-8 rounded-xl flex items-center justify-center bg-red-500/10 border border-red-500/20 text-red-400 active:scale-90 transition-all"
                   }, React.createElement(I.Trash))
                 )
