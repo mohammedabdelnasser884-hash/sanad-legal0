@@ -27,7 +27,8 @@ function ReminderCard({ r, todayStr, onToggleDone, onView, onEdit, onDelete }: R
     const isToday   = r.due_date === todayStr;
     return React.createElement('div',{
         className:`bg-premium-card border rounded-xl px-3 py-2.5 cursor-pointer active:scale-[0.99] transition-all ${r.done?'opacity-60 border-white/5':isOverdue?'border-rose-500/30':isToday?'border-amber-500/30':'border-white/5'}`,
-        onClick: () => onView(r)
+        onClick: () => onView(r),
+        'data-testid': `reminder-card-${r.id}`
     },
         React.createElement('div',{className:"flex items-center gap-2.5"},
             // زر التأشير
@@ -56,6 +57,7 @@ function ReminderCard({ r, todayStr, onToggleDone, onView, onEdit, onDelete }: R
             React.createElement('div',{className:"flex items-center gap-1 shrink-0"},
                 React.createElement('button',{
                     onClick:(e: React.MouseEvent<HTMLButtonElement>)=>{ e.stopPropagation(); onEdit(r); },
+                    'data-testid': `reminder-edit-btn-${r.id}`,
                     className:"w-6 h-6 rounded-lg bg-white/5 flex items-center justify-center text-slate-400 hover:text-premium-gold hover:bg-white/10 active:scale-90"
                 }, React.createElement(I.Edit,{className:"w-3 h-3"})),
                 React.createElement('button',{
