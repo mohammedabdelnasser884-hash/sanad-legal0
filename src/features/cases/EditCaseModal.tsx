@@ -373,7 +373,7 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
             ),
 
             // ١. موضوع الدعوى
-            React.createElement(Inp, {label:"موضوع الدعوى", value:form.title, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('title',e.target.value), placeholder:"عنوان القضية", required:true}),
+            React.createElement(Inp, {label:"موضوع الدعوى", value:form.title, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('title',e.target.value), placeholder:"عنوان القضية", required:true, 'data-testid':'edit-case-title'}),
 
             // ٢. المحكمة المختصة
             // ⚡ FIX (طلب مباشر من جيمي، 22 يوليو 2026): كان مربع اختيار
@@ -544,6 +544,7 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
             // زر الحفظ
             React.createElement('button', {
                 disabled: saving,
+                'data-testid': 'edit-case-save',
                 onClick: () => {
                     if(saving) return;
                     if(!form.title.trim()){ toast('يرجى إدخال موضوع ومسمى الدعوى', true); return; }
