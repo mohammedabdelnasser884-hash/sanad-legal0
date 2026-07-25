@@ -27,7 +27,7 @@ function SecuritySection({
 
       // ── قائمة المستخدمين مع خيارات الأمان ──
       lawyers.length === 0
-        ? React.createElement('div',{className:"text-center text-slate-500 text-xs py-10"},"لا يوجد مستخدمون")
+        ? React.createElement('div',{className:"text-center text-slate-500 text-xs py-10",'data-testid':'admin-security-empty'},"لا يوجد مستخدمون")
         : lawyers.map((user) => {
             const rc = ROLE_CONFIG[user.role || ''] || ROLE_CONFIG.viewer;
             const isLocked = user.is_locked === true;
@@ -36,6 +36,7 @@ function SecuritySection({
 
             return React.createElement('div',{
               key:user.id,
+              'data-testid':'admin-security-card',
               className:`bg-premium-card border rounded-2xl overflow-hidden ${isLocked?'border-red-500/30':'border-white/5'}`
             },
               // رأس الكارت
@@ -70,6 +71,7 @@ function SecuritySection({
                 // تغيير كلمة المرور
                 React.createElement('button',{
                   onClick:()=>setChangePassUser(user),
+                  'data-testid':'admin-security-changepass',
                   className:"flex flex-col items-center gap-1 py-2.5 bg-premium-card hover:bg-[#C9A84C]/10 transition-colors active:scale-95"
                 },
                   React.createElement(IconKey,{className:"w-3.5 h-3.5 text-[#C9A84C]"}),
@@ -79,6 +81,7 @@ function SecuritySection({
                 // تسجيل خروج من جميع الأجهزة
                 React.createElement('button',{
                   onClick:()=>setConfirmSignOut(user),
+                  'data-testid':'admin-security-signout',
                   className:"flex flex-col items-center gap-1 py-2.5 bg-premium-card hover:bg-[#C9A84C]/10 transition-colors active:scale-95"
                 },
                   React.createElement(IconDevices,{className:"w-3.5 h-3.5 text-[#C9A84C]"}),
@@ -88,6 +91,7 @@ function SecuritySection({
                 // قفل/فتح الحساب
                 React.createElement('button',{
                   onClick:()=>setConfirmLock(user),
+                  'data-testid':'admin-security-lock-toggle',
                   className:`flex flex-col items-center gap-1 py-2.5 bg-premium-card transition-colors active:scale-95 ${isLocked?'hover:bg-[#C9A84C]/10':'hover:bg-red-500/10'}`
                 },
                   React.createElement(IconLockSm,{className:`w-3.5 h-3.5 ${isLocked?'text-[#C9A84C]':'text-red-400'}`}),
