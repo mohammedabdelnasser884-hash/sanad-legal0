@@ -18,6 +18,7 @@
 //   force_signout    { user_id }
 //   change_password  { user_id, new_password, force_change? }
 //   create_lawyer    { email, password, full_name, role, permissions? }
+//   delete_user      { profile_id, user_id }  — بيحذف حساب Auth كمان
 //
 //  الخرج: دايمًا status 200 — { ok:true, ... } أو { error: "..." }
 //  (عشان callAdminAction في supabaseClient.ts تقدر تقرا data.error
@@ -224,6 +225,63 @@ Deno.serve(async (req: Request) => {
       }
 
       return json({ ok: true, user_id: authUser.id });
+    }
+
+    // ── حذف مستخدم نهائيًا (بروفايل + حساب Auth المرتبط) ──
+    // ⚠️ FIX: كان handleDeleteUser في العميل بيحذف صف profiles بس مباشرة
+    // (db.from('profiles').delete()) وبيسيب حساب auth.users معلّق —
+    // يعني بيانات الدخول (البريد/كلمة السر) بتفضل شغالة فعليًا حتى لو
+    // المستخدم مش ظاهر في القايمة، وكل تشغيل تست "حذف نهائي" كان بيراكم
+    // حساب Auth يتيم كمان. دلوقتي العملية اتنقلت هنا عشان تحذف حساب
+    // Auth أولاً (تقفل بيانات الدخول القديمة فورًا)، وبعدين صف البروفايل.
+    if (action === 'delete_user') {
+      const profileId = String(body.profile_id || '');
+      const targetUserId = body.user_id ? String(body.user_id) : null;
+      if (!profileId) return json({ error: 'profile_id مطلوب' });
+      if (targetUserId && targetUserId === callerUser.id) {
+        return json({ error: 'لا يمكنك حذف حسابك الخاص' });
+      }
+
+      if (targetUserId) {
+        const allowed = await authorizeOnTarget(caller, targetUserId);
+        if (!allowed) return json({ error: 'غير مسموح لك بتنفيذ هذا الإجراء' });
+      } else if (caller.is_super_admin !== true) {
+        // بروفايل بلا user_id مرتبط (حالة استثنائية) — نتحقق من نطاق
+        // المكتب مباشرة عن طريق صف البروفايل نفسه بدل authorizeOnTarget
+        const targetRows = await rest(`profiles?id=eq.${profileId}&select=tenant_id&limit=1`);
+        const target = Array.isArray(targetRows) ? targetRows[0] : null;
+        if (!target || caller.role !== 'admin' || target.tenant_id !== caller.tenant_id) {
+          return json({ error: 'غير مسموح لك بتنفيذ هذا الإجراء' });
+        }
+      }
+
+      // بنحذف حساب Auth الأول عمدًا: لو فشل الحذف هنا منكملش (منسيبش
+      // حساب Auth يتيم فعّال بكلمة سر شغالة من غير بروفايل — ده أخطر
+      // بكتير من إبقاء المستخدم في القايمة شوية كمان لحد ما يتعاد المحاولة).
+      if (targetUserId) {
+        const r = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${targetUserId}`, {
+          method: 'DELETE',
+          headers: {
+            apikey: SERVICE_ROLE_KEY,
+            Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+          },
+        });
+        if (!r.ok && r.status !== 404) {
+          const e = await r.json().catch(() => ({}));
+          console.error('[admin-actions:delete_user auth delete]', e.msg || e.message || r.status);
+          return json({ error: 'تعذر حذف حساب الدخول. لم يتم حذف المستخدم، حاول مرة أخرى.' });
+        }
+      }
+
+      try {
+        await rest(`profiles?id=eq.${profileId}`, 'DELETE');
+      } catch (e) {
+        const rawMessage = e instanceof Error ? e.message : String(e);
+        console.error('[admin-actions:delete_user profile delete]', rawMessage);
+        return json({ ok: true, warning: 'تم حذف حساب الدخول لكن تعذر حذف بيانات البروفايل بالكامل. تواصل مع الدعم.' });
+      }
+
+      return json({ ok: true });
     }
 
     return json({ error: 'action غير معروف' });
