@@ -119,7 +119,7 @@ function DeleteConfirmModal({ title, itemName, itemType, onConfirm, onConfirmArc
                     " للتأكيد:"
                 ),
                 React.createElement('div',{className:"bg-rose-500/5 border border-rose-500/20 rounded-xl px-3 py-2"},
-                    React.createElement('p',{className:"text-[11px] font-black text-rose-300 text-center"},itemName)
+                    React.createElement('p',{'data-testid':'delete-confirm-item-name',className:"text-[11px] font-black text-rose-300 text-center"},itemName)
                 ),
                 React.createElement('input',{
                     type:"text",
