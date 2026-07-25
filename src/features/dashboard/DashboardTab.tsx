@@ -111,6 +111,7 @@ function DashboardTab({
         return React.createElement('div',{
             key:s.id,
             onClick: handleClick,
+            'data-testid': 'dashboard-session-card',
             className:'rounded-xl overflow-hidden ' + (handleClick ? 'cursor-pointer active:scale-[0.98] transition-all' : ''),
             style:{background:accentBg, border:'1px solid '+accentBorder}
         },
@@ -159,6 +160,7 @@ function DashboardTab({
         return React.createElement('div',{
             key: r.id,
             onClick: ()=>{ setRemindersInitialFilter(targetFilter); setTab('reminders'); },
+            'data-testid': 'dashboard-task-card',
             className:'rounded-xl overflow-hidden cursor-pointer active:scale-[0.98] transition-all',
             style:{background:accentBg, border:'1px solid '+accentBorder}
         },
@@ -253,6 +255,7 @@ function DashboardTab({
         React.createElement('div',{className:"grid grid-cols-4 gap-2"},
             React.createElement('button',{
                 onClick:()=>setShowNewSessionModal(true),
+                'data-testid':'dashboard-quick-add-session',
                 className:"flex flex-col items-center gap-1.5 py-3 rounded-2xl active:scale-95 transition-all",
                 style:{background:'rgba(56,189,248,0.07)', border:'1px solid rgba(56,189,248,0.20)'}
             },
@@ -263,6 +266,7 @@ function DashboardTab({
             ),
             React.createElement('button',{
                 onClick:()=>setShowCaseModal(true),
+                'data-testid':'dashboard-quick-add-case',
                 className:"flex flex-col items-center gap-1.5 py-3 rounded-2xl active:scale-95 transition-all",
                 style:{background:'rgba(212,175,55,0.09)', border:'1px solid rgba(212,175,55,0.20)'}
             },
@@ -273,6 +277,7 @@ function DashboardTab({
             ),
             React.createElement('button',{
                 onClick:()=>setShowClientModal(true),
+                'data-testid':'dashboard-quick-add-client',
                 className:"flex flex-col items-center gap-1.5 py-3 rounded-2xl active:scale-95 transition-all",
                 style:{background:'rgba(52,211,153,0.07)', border:'1px solid rgba(52,211,153,0.18)'}
             },
@@ -283,6 +288,7 @@ function DashboardTab({
             ),
             React.createElement('button',{
                 onClick:()=>{setSessionsInitialTab(null);setTab('calendar');},
+                'data-testid':'dashboard-quick-calendar',
                 className:"flex flex-col items-center gap-1.5 py-3 rounded-2xl active:scale-95 transition-all",
                 style:{background:'rgba(167,139,250,0.07)', border:'1px solid rgba(167,139,250,0.18)'}
             },
@@ -372,7 +378,8 @@ function DashboardTab({
                     borderInlineStart: todaySessions.length > 0 || upcomingTasks.filter((t: TaskFeedItem) =>t.due_date===fmtDate(new Date())).length > 0
                         ? '4px solid #f87171' : '4px solid #64748b',
                 },
-                onClick:()=>setTodayOpen((o: boolean) =>!o)
+                onClick:()=>setTodayOpen((o: boolean) =>!o),
+                'data-testid':'dashboard-today-toggle'
             },
                 React.createElement('div',{
                     className:"w-7 h-7 rounded-xl flex items-center justify-center text-sm shrink-0",
@@ -427,7 +434,8 @@ function DashboardTab({
                     border:'1px solid rgba(245,158,11,0.18)',
                     borderInlineStart:'4px solid #fbbf24', // ── خط جانبي مميز كهرماني
                 },
-                onClick:()=>setUpcomingOpen((o: boolean) =>!o)
+                onClick:()=>setUpcomingOpen((o: boolean) =>!o),
+                'data-testid':'dashboard-upcoming-toggle'
             },
                 React.createElement('div',{
                     className:"w-7 h-7 rounded-xl flex items-center justify-center text-sm shrink-0",
