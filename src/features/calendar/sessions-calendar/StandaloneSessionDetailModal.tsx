@@ -367,21 +367,22 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
         },
             React.createElement('div', {
                 className: 'w-full max-w-lg rounded-t-3xl overflow-hidden',
-                style: { background: '#0f1623', border: '1px solid rgba(255,255,255,0.08)', maxHeight: '92vh' }
+                style: { background: '#0f1623', border: '1px solid rgba(255,255,255,0.08)', maxHeight: '92vh' },
+                'data-testid': 'edit-standalone-session-modal'
             },
                 React.createElement('div', { className: 'flex items-center justify-between px-5 pt-5 pb-3 border-b border-white/5' },
                     React.createElement('div', { className: 'flex items-center gap-2' },
                         React.createElement('span', { className: 'text-xl' }, '✏️'),
                         React.createElement('h2', { className: 'text-sm font-black text-white' }, 'تعديل الجلسة المستقلة')
                     ),
-                    React.createElement('button', { onClick: onClose, className: 'w-8 h-8 flex items-center justify-center rounded-full bg-white/5 text-slate-400' }, React.createElement(I.X))
+                    React.createElement('button', { onClick: onClose, className: 'w-8 h-8 flex items-center justify-center rounded-full bg-white/5 text-slate-400', 'data-testid': 'edit-standalone-session-close' }, React.createElement(I.X))
                 ),
                 React.createElement('div', {
                     className: 'overflow-y-auto px-5 py-4 space-y-3',
                     style: { maxHeight: 'calc(92vh - 130px)' }
                 },
                     React.createElement(Inp, { label: 'المحكمة', value: form.court, onChange: set('court'), placeholder: 'مثال: محكمة جنوب القاهرة' }),
-                    React.createElement(Inp, { label: 'موضوع الجلسة / عنوان', required: true, value: form.title, onChange: set('title'), placeholder: 'مثال: قضية إيجار' }),
+                    React.createElement(Inp, { label: 'موضوع الجلسة / عنوان', required: true, value: form.title, onChange: set('title'), placeholder: 'مثال: قضية إيجار', 'data-testid': 'edit-standalone-session-title' }),
                     React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
                         React.createElement(Inp, { label: 'رقم القضية', value: form.case_number, onChange: set('case_number'), placeholder: '1234' }),
                         React.createElement(Inp, { label: 'السنة', value: form.case_year, onChange: set('case_year'), placeholder: '2024' })
@@ -394,7 +395,7 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
                     React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
                         React.createElement('div', null,
                             React.createElement('label', { className: 'block text-[10px] font-bold text-slate-400 mb-1.5' }, 'تاريخ الجلسة', React.createElement('span', { className: 'text-rose-400 mr-0.5' }, ' *')),
-                            React.createElement('input', { type: 'date', value: form.session_date, onChange: set('session_date'), className: inputCls, style: inputStyle })
+                            React.createElement('input', { type: 'date', value: form.session_date, onChange: set('session_date'), className: inputCls, style: inputStyle, 'data-testid': 'edit-standalone-session-date' })
                         ),
                         React.createElement(Sel, { label: 'توقيت الجلسة', value: form.session_time, onChange: set('session_time'), options: [{ value: 'صباحي', label: '🌅 صباحي' }, { value: 'مسائي', label: '🌆 مسائي' }] })
                     ),
@@ -426,11 +427,12 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
                     React.createElement('div', { className: 'h-4' })
                 ),
                 React.createElement('div', { className: 'px-5 py-4 border-t border-white/5 flex gap-3' },
-                    React.createElement('button', { onClick: onClose, className: 'flex-1 py-3 rounded-2xl text-xs font-bold text-slate-400 bg-white/5 hover:bg-white/10 transition-all' }, 'إلغاء'),
+                    React.createElement('button', { onClick: onClose, className: 'flex-1 py-3 rounded-2xl text-xs font-bold text-slate-400 bg-white/5 hover:bg-white/10 transition-all', 'data-testid': 'edit-standalone-session-cancel' }, 'إلغاء'),
                     React.createElement('button', {
                         onClick: handleSave, disabled: saving || !form.session_date,
                         className: 'flex-grow-[2] py-3 rounded-2xl text-xs font-black text-premium-bg transition-all disabled:opacity-40',
-                        style: { background: saving ? '#888' : 'linear-gradient(135deg,#d4af37,#f0c040)' }
+                        style: { background: saving ? '#888' : 'linear-gradient(135deg,#d4af37,#f0c040)' },
+                        'data-testid': 'edit-standalone-session-save'
                     }, saving ? '⏳ جاري الحفظ...' : '✅ حفظ التعديلات')
                 )
             )
@@ -509,7 +511,8 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
         },
             React.createElement('div', {
                 className: 'w-full max-w-sm rounded-3xl p-6 space-y-4',
-                style: { background: '#0f1623', border: '1px solid rgba(255,255,255,0.08)' }
+                style: { background: '#0f1623', border: '1px solid rgba(255,255,255,0.08)' },
+                'data-testid': 'link-session-modal'
             },
 
                 // ── Step: idle — الخيارات الأساسية ──
@@ -523,7 +526,8 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                         React.createElement('button', {
                             onClick: handleLinkCase,
                             disabled: linkingCase,
-                            className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2'
+                            className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2',
+                            'data-testid': 'link-session-create-case'
                         },
                             React.createElement('span', null, '⚖️'),
                             React.createElement('span', null, linkingCase ? '⏳ جاري الإنشاء...' : 'إنشاء ملف قضية من هذه البيانات')
@@ -531,14 +535,16 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                         hasPlaintiff && !hasClient && React.createElement('button', {
                             onClick: handleAddClientOnly,
                             disabled: linkingClient,
-                            className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2'
+                            className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2',
+                            'data-testid': 'link-session-add-client-only'
                         },
                             React.createElement('span', null, '👤'),
                             React.createElement('span', null, linkingClient ? '⏳ جاري الإضافة...' : 'إضافة الموكل لقائمة الموكلين فقط')
                         ),
                         !hasClient && React.createElement('button', {
                             onClick: () => setClientStep('searching'),
-                            className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2'
+                            className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2',
+                            'data-testid': 'link-session-search-existing'
                         },
                             React.createElement('span', null, '🔗'),
                             React.createElement('span', null, 'ربط بموكل موجود بالفعل')
@@ -546,7 +552,8 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                     ),
                     React.createElement('button', {
                         onClick: onClose,
-                        className: 'w-full py-2.5 rounded-2xl text-xs font-bold text-slate-500 hover:text-slate-300 transition-all'
+                        className: 'w-full py-2.5 rounded-2xl text-xs font-bold text-slate-500 hover:text-slate-300 transition-all',
+                        'data-testid': 'link-session-idle-close'
                     }, 'إغلاق')
                 ),
 
@@ -562,15 +569,17 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                         onChange: (e: React.ChangeEvent<HTMLInputElement>) => searchExistingClients(e.target.value),
                         placeholder: 'اكتب اسم الموكل...',
                         className: inputCls,
-                        style: inputStyle
+                        style: inputStyle,
+                        'data-testid': 'link-session-client-search'
                     }),
-                    React.createElement('div', { className: 'max-h-48 overflow-y-auto space-y-1.5' },
+                    React.createElement('div', { className: 'max-h-48 overflow-y-auto space-y-1.5', 'data-testid': 'link-session-client-results' },
                         searching && React.createElement('p', { className: 'text-[10px] text-slate-500 text-center py-2' }, '⏳ جاري البحث...'),
                         !searching && clientSearch.trim() && searchResults.length === 0 && React.createElement('p', { className: 'text-[10px] text-slate-500 text-center py-2' }, 'لا توجد نتائج'),
                         !searching && searchResults.map((c) => React.createElement('button', {
                             key: c.id,
                             onClick: () => { setSelectedExistingClient(c); setShowMismatchConfirm(false); setPendingMismatches([]); },
-                            className: `w-full text-right p-2.5 rounded-xl text-[11px] border transition-all ${selectedExistingClient?.id === c.id ? 'border-premium-gold bg-premium-gold/10 text-premium-gold' : 'border-white/10 bg-white/5 text-slate-300'}`
+                            className: `w-full text-right p-2.5 rounded-xl text-[11px] border transition-all ${selectedExistingClient?.id === c.id ? 'border-premium-gold bg-premium-gold/10 text-premium-gold' : 'border-white/10 bg-white/5 text-slate-300'}`,
+                            'data-testid': 'link-session-client-option-' + c.id
                         }, (c.client_name || c.full_name || 'بدون اسم') + (c.national_id ? ' — ' + c.national_id : '')))
                     ),
                     selectedExistingClient && React.createElement('div', { className: 'p-2.5 rounded-xl bg-premium-gold/10 border border-premium-gold/20 text-[11px] text-premium-gold' },
@@ -612,7 +621,8 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                     }, linkingExisting ? '⏳ جاري الربط...' : (showMismatchConfirm ? '✅ نعم، استخدم بيانات الموكل' : '🔗 تأكيد الربط')),
                     React.createElement('button', {
                         onClick: () => { if (showMismatchConfirm) { setShowMismatchConfirm(false); setPendingMismatches([]); } else setClientStep('idle'); },
-                        className: 'w-full py-2.5 rounded-2xl text-xs font-bold text-slate-500 hover:text-slate-300 transition-all'
+                        className: 'w-full py-2.5 rounded-2xl text-xs font-bold text-slate-500 hover:text-slate-300 transition-all',
+                        'data-testid': 'link-session-searching-back'
                     }, showMismatchConfirm ? 'إلغاء' : 'رجوع')
                 ),
 
@@ -633,7 +643,8 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                         React.createElement('button', {
                             onClick: handleLinkExistingClient,
                             disabled: linkingToCase,
-                            className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2'
+                            className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2',
+                            'data-testid': 'link-session-found-link-existing'
                         },
                             React.createElement('span', null, '🔗'),
                             React.createElement('span', null, linkingToCase ? '⏳ جاري الربط...' : 'نعم، ربط بهذا الموكل')
@@ -647,7 +658,8 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                         foundClientMatchType !== 'exact' && React.createElement('button', {
                             onClick: handleAddAndLinkClient,
                             disabled: linkingToCase,
-                            className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2'
+                            className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2',
+                            'data-testid': 'link-session-found-add-and-link'
                         },
                             React.createElement('span', null, '➕'),
                             React.createElement('span', null, 'إضافة موكل جديد وربطه')
@@ -658,7 +670,8 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                     ),
                     React.createElement('button', {
                         onClick: onSkipOrFullClose,
-                        className: 'w-full py-2.5 rounded-2xl text-xs font-bold text-slate-500 hover:text-slate-300 transition-all'
+                        className: 'w-full py-2.5 rounded-2xl text-xs font-bold text-slate-500 hover:text-slate-300 transition-all',
+                        'data-testid': 'link-session-found-skip'
                     }, 'تخطي')
                 ),
 
@@ -679,7 +692,8 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                         React.createElement('button', {
                             onClick: handleAddAndLinkClient,
                             disabled: linkingToCase,
-                            className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2'
+                            className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2',
+                            'data-testid': 'link-session-notfound-add-and-link'
                         },
                             React.createElement('span', null, '➕'),
                             React.createElement('span', null, linkingToCase ? '⏳ جاري الإضافة...' : 'إضافة الموكل وربطه بالقضية')
@@ -687,7 +701,8 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                     ),
                     React.createElement('button', {
                         onClick: onSkipOrFullClose,
-                        className: 'w-full py-2.5 rounded-2xl text-xs font-bold text-slate-500 hover:text-slate-300 transition-all'
+                        className: 'w-full py-2.5 rounded-2xl text-xs font-bold text-slate-500 hover:text-slate-300 transition-all',
+                        'data-testid': 'link-session-notfound-skip'
                     }, 'تخطي')
                 ),
 
@@ -701,7 +716,8 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                     React.createElement('button', {
                         onClick: onFullClose,
                         className: 'w-full py-3 rounded-2xl text-xs font-black text-premium-bg transition-all',
-                        style: { background: 'linear-gradient(135deg,#d4af37,#f0c040)' }
+                        style: { background: 'linear-gradient(135deg,#d4af37,#f0c040)' },
+                        'data-testid': 'link-session-done-close'
                     }, 'إغلاق')
                 )
             )
@@ -848,7 +864,8 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
     },
         React.createElement('div', {
             className: 'w-full max-w-lg rounded-t-3xl overflow-hidden',
-            style: { background: '#0f1623', border: '1px solid rgba(255,255,255,0.08)', maxHeight: '90vh' }
+            style: { background: '#0f1623', border: '1px solid rgba(255,255,255,0.08)', maxHeight: '90vh' },
+            'data-testid': 'standalone-session-detail-modal'
         },
             // ── هيدر ──
             React.createElement('div', { className: 'flex items-center justify-between px-5 pt-5 pb-3 border-b border-white/5' },
@@ -861,7 +878,8 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
                 ),
                 React.createElement('button', {
                     onClick: onClose,
-                    className: 'w-8 h-8 flex items-center justify-center rounded-full bg-white/5 text-slate-400 hover:bg-white/10'
+                    className: 'w-8 h-8 flex items-center justify-center rounded-full bg-white/5 text-slate-400 hover:bg-white/10',
+                    'data-testid': 'standalone-session-detail-header-close'
                 }, React.createElement(I.X))
             ),
 
@@ -899,19 +917,22 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
                                         React.createElement('button', {
                                             disabled: unlinkingClient,
                                             onClick: handleUnlinkClient,
-                                            className: 'flex-1 bg-rose-500 text-white rounded-lg py-1.5 text-[10px] font-black disabled:opacity-60'
+                                            className: 'flex-1 bg-rose-500 text-white rounded-lg py-1.5 text-[10px] font-black disabled:opacity-60',
+                                            'data-testid': 'standalone-session-unlink-confirm'
                                         }, unlinkingClient ? '⏳ جارٍ فك الربط...' : 'نعم، افصل الربط'),
                                         React.createElement('button', {
                                             disabled: unlinkingClient,
                                             onClick: () => setShowUnlinkConfirm(false),
-                                            className: 'flex-1 bg-white/5 border border-white/10 text-slate-300 rounded-lg py-1.5 text-[10px] font-black disabled:opacity-60'
+                                            className: 'flex-1 bg-white/5 border border-white/10 text-slate-300 rounded-lg py-1.5 text-[10px] font-black disabled:opacity-60',
+                                            'data-testid': 'standalone-session-unlink-cancel'
                                         }, 'إلغاء')
                                     )
                                   )
                                 : React.createElement('div', { className: 'flex justify-end mt-1' },
                                     React.createElement('button', {
                                         onClick: () => setShowUnlinkConfirm(true),
-                                        className: 'text-[9px] font-black text-rose-400'
+                                        className: 'text-[9px] font-black text-rose-400',
+                                        'data-testid': 'standalone-session-unlink-trigger'
                                     }, '🔓 فك الربط')
                                   )
                         );
@@ -933,29 +954,34 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
                     onClick: () => setShowUpdate(true),
                     disabled: loadingFull,
                     className: 'w-full py-3 rounded-2xl text-xs font-black text-premium-bg transition-all disabled:opacity-50',
-                    style: { background: 'linear-gradient(135deg,#d4af37,#f0c040)' }
+                    style: { background: 'linear-gradient(135deg,#d4af37,#f0c040)' },
+                    'data-testid': 'standalone-session-update-trigger'
                 }, loadingFull ? '⏳ جاري تحميل بيانات الجلسة...' : '⚡ تحديث الجلسة'),
 
                 // صف الأزرار الصغيرة
                 React.createElement('div', { className: 'flex gap-2' },
                     React.createElement('button', {
                         onClick: onClose,
-                        className: 'flex-1 py-2.5 rounded-2xl text-xs font-bold text-slate-400 bg-white/5 hover:bg-white/10 transition-all'
+                        className: 'flex-1 py-2.5 rounded-2xl text-xs font-bold text-slate-400 bg-white/5 hover:bg-white/10 transition-all',
+                        'data-testid': 'standalone-session-footer-close'
                     }, 'إغلاق'),
                     !hasCase && React.createElement('button', {
                         onClick: () => setShowLink(true),
                         disabled: loadingFull,
-                        className: 'flex-1 py-2.5 rounded-2xl text-xs font-bold text-slate-300 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-50'
+                        className: 'flex-1 py-2.5 rounded-2xl text-xs font-bold text-slate-300 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-50',
+                        'data-testid': 'standalone-session-link-trigger'
                     }, '🔗 ربط'),
                     React.createElement('button', {
                         onClick: () => setShowEdit(true),
                         disabled: loadingFull,
-                        className: 'flex-1 py-2.5 rounded-2xl text-xs font-bold text-slate-300 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-50'
+                        className: 'flex-1 py-2.5 rounded-2xl text-xs font-bold text-slate-300 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-50',
+                        'data-testid': 'standalone-session-edit-trigger'
                     }, '✏️ تعديل'),
                     React.createElement('button', {
                         onClick: () => setShowConfirmDelete(true),
                         disabled: deleting,
-                        className: 'flex-1 py-2.5 rounded-2xl text-xs font-bold text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 transition-all disabled:opacity-40'
+                        className: 'flex-1 py-2.5 rounded-2xl text-xs font-bold text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 transition-all disabled:opacity-40',
+                        'data-testid': 'standalone-session-delete-trigger'
                     }, '🗑 حذف')
                 )
             )
@@ -971,7 +997,10 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
             mode: "delete",
             loading: deleting,
             onConfirm: handleDelete,
-            onCancel: () => setShowConfirmDelete(false)
+            onCancel: () => setShowConfirmDelete(false),
+            inputTestId: 'standalone-session-delete-input',
+            confirmTestId: 'standalone-session-delete-confirm',
+            cancelTestId: 'standalone-session-delete-cancel',
         }), document.body),
         showEdit && React.createElement(EditStandaloneModal, {
             session, db,
