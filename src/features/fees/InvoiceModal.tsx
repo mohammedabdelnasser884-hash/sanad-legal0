@@ -17,6 +17,7 @@ function InvoiceModal({
 }: InvoiceModalProps) {
   return invoiceModal && createPortal(React.createElement('div',{
             className:"fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm px-3",
+            'data-testid':'invoice-modal',
             onClick:()=>{ const fid=invoiceModal?.fee?.id||null; setInvoiceModal(null); setDetailsFor(fid); }
         },
             React.createElement('div',{
@@ -70,7 +71,7 @@ function InvoiceModal({
                     // مبلغ الدفعة (بارز)
                     React.createElement('div',{className:"bg-gradient-to-l from-amber-900/40 to-yellow-900/20 border border-premium-gold/25 rounded-xl p-2.5 text-center"},
                         React.createElement('p',{className:"text-[8px] text-premium-gold/70 mb-0.5"},"💰 مبلغ هذه الدفعة"),
-                        React.createElement('p',{className:"text-xl font-black text-premium-gold"},invoiceModal.amount+" "+currency)
+                        React.createElement('p',{'data-testid':'invoice-amount',className:"text-xl font-black text-premium-gold"},invoiceModal.amount+" "+currency)
                     ),
                     // إجماليات
                     React.createElement('div',{className:"grid grid-cols-3 gap-1"},
@@ -96,6 +97,7 @@ function InvoiceModal({
                         },"🖨️ طباعة الفاتورة"),
                         React.createElement('button',{
                             onClick:()=>{ const fid=invoiceModal?.fee?.id||null; setInvoiceModal(null); setDetailsFor(fid); },
+                            'data-testid':'invoice-modal-close',
                             className:"px-4 py-2.5 bg-white/5 text-slate-400 rounded-xl text-xs active:scale-95"
                         },"رجوع ↩")
                     )
