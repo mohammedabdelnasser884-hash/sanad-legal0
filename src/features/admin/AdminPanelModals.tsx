@@ -125,7 +125,10 @@ export default function AdminPanelModals(props: AdminPanelModalsProps) {
       mode: "delete",
       loading: savingLaw,
       onConfirm: () => handleDeleteLaw(confirmDeleteLaw),
-      onCancel: () => setConfirmDeleteLaw(null)
+      onCancel: () => setConfirmDeleteLaw(null),
+      inputTestId: 'admin-law-delete-input',
+      confirmTestId: 'admin-law-delete-confirm',
+      cancelTestId: 'admin-law-delete-cancel'
     }), document.body),
 
     // تأكيد حذف مستخدم
@@ -136,7 +139,10 @@ export default function AdminPanelModals(props: AdminPanelModalsProps) {
       mode: "delete",
       loading: saving,
       onConfirm: () => handleDeleteUser(confirmDelete),
-      onCancel: () => setConfirmDelete(null)
+      onCancel: () => setConfirmDelete(null),
+      inputTestId: 'admin-user-delete-input',
+      confirmTestId: 'admin-user-delete-confirm',
+      cancelTestId: 'admin-user-delete-cancel'
     }), document.body)
   );
 }
