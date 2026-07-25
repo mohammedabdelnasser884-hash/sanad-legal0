@@ -608,7 +608,7 @@ export default function AdminPanel({ profile, lawyers, clients, fetchLawyers, co
           }, React.createElement(I.Plus), "قانون جديد")
         )
       ),
-      React.createElement('div',{className:"flex-1 overflow-y-auto no-scrollbar px-4 py-4 pb-10 space-y-3"},
+      React.createElement('div',{className:"flex-1 overflow-y-auto no-scrollbar px-4 py-4 pb-32 space-y-3"},
 
     section === 'users' && React.createElement(UsersSection, { lawyers, profile, toggleUserActive, setChangePassUser, setEditUser, setConfirmDelete }),
 
