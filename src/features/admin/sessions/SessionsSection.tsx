@@ -53,6 +53,7 @@ function SessionsSection({
           React.createElement('button',{
             onClick: fetchActiveSessions,
             disabled: loadingSessions,
+            'data-testid': 'admin-sessions-refresh',
             className:"w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center active:scale-90 transition-transform"
           }, loadingSessions ? React.createElement(I.Spin) : React.createElement('svg',{className:"w-4 h-4 text-[#C9A84C]",fill:"none",viewBox:"0 0 24 24",strokeWidth:"2",stroke:"currentColor"},
             React.createElement('path',{strokeLinecap:"round",strokeLinejoin:"round",d:"M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"})
@@ -89,6 +90,7 @@ function SessionsSection({
             React.createElement('span',{className:"text-[9px] text-slate-500"},"تحديث تلقائي كل 30 ثانية"),
             React.createElement('button',{
               onClick:()=>setSessionsAutoRefresh((s: boolean) =>!s),
+              'data-testid':'admin-sessions-autorefresh-toggle',
               className:`w-9 h-5 rounded-full transition-all relative ${sessionsAutoRefresh?'bg-[#C9A84C]':'bg-slate-600'}`
             },
               React.createElement('div',{className:`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all shadow ${sessionsAutoRefresh?'right-0.5':'left-0.5'}`})
@@ -103,6 +105,7 @@ function SessionsSection({
       activeSessions.filter((s: ActiveSession) =>s.profileId!==profile?.id).length > 0 &&
         React.createElement('button',{
           onClick:()=>setConfirmTerminateAll(true),
+          'data-testid':'admin-sessions-terminate-all-button',
           className:"w-full py-2.5 rounded-xl border border-red-500/30 bg-red-500/10 text-[#C9A84C] text-xs font-black flex items-center justify-center gap-2 active:scale-[0.98] transition-all hover:bg-[#C9A84C]/15"
         },
           React.createElement('svg',{className:"w-4 h-4",fill:"none",viewBox:"0 0 24 24",strokeWidth:"2",stroke:"currentColor"},
@@ -120,7 +123,7 @@ function SessionsSection({
 
       // ── لا يوجد جلسات ──
       : activeSessions.length === 0 && !loadingSessions
-        ? React.createElement('div',{className:"bg-premium-card border border-white/5 rounded-xl p-10 text-center space-y-3"},
+        ? React.createElement('div',{'data-testid':'admin-sessions-empty',className:"bg-premium-card border border-white/5 rounded-xl p-10 text-center space-y-3"},
             React.createElement('div',{className:"w-12 h-12 rounded-2xl bg-[#C9A84C]/10 flex items-center justify-center mx-auto text-2xl"},"👥"),
             React.createElement('p',{className:"text-sm font-black text-white"},"لا يوجد نشاط مسجّل بعد"),
             React.createElement('p',{className:"text-[10px] text-slate-500 leading-relaxed max-w-xs mx-auto"},
@@ -153,6 +156,7 @@ function SessionsSection({
 
             return React.createElement('div',{
               key:sess.id,
+              'data-testid':'admin-sessions-card',
               className:`rounded-2xl overflow-hidden transition-all ${
                 isMe ? 'border-[#C9A84C]/30' :
                 isSuspicious ? 'border-red-500/20' :
@@ -240,6 +244,7 @@ function SessionsSection({
                     onClick:()=>handleTerminateSession(sess),
                     disabled:!!terminatingSession,
                     title:"إنهاء الجلسة",
+                    'data-testid':'admin-sessions-terminate',
                     className:`flex-shrink-0 flex flex-col items-center gap-1 px-2.5 py-2 rounded-xl border transition-all active:scale-90 ${
                       isSuspicious
                         ? 'bg-[#C9A84C]/20 border-[#C9A84C]/30 text-[#C9A84C] hover:bg-red-500/30'
