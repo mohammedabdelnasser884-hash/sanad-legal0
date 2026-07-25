@@ -76,6 +76,7 @@ function OfficeSection({
         OFFICE_SUB_TABS.map((t) => React.createElement('button',{
           key:t.id,
           onClick:()=>setSubTab(t.id),
+          'data-testid': 'admin-office-subtab-' + t.id,
           className:`flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-black whitespace-nowrap transition-all ${subTab===t.id?'bg-premium-gold/15 text-premium-gold border border-premium-gold/30':'bg-white/3 text-slate-400 border border-white/5'}`
         },
           React.createElement('span',null,t.icon), t.label
@@ -146,6 +147,7 @@ function OfficeSection({
                 value: officeSettings[f.key] || '',
                 onChange: (e: React.ChangeEvent<HTMLInputElement>) => setOfficeSettings((s: OfficeSettingsForm) =>({...s,[f.key]:e.target.value})),
                 placeholder: f.placeholder,
+                'data-testid': 'admin-office-field-' + f.key,
                 className:"w-full p-2.5 text-xs rounded-xl border border-white/10 bg-white/5 text-white placeholder-slate-600",
                 style:{fontFamily:'Cairo,sans-serif'}
               })
@@ -169,6 +171,7 @@ function OfficeSection({
                 type: f.type || 'text',
                 onChange: (e: React.ChangeEvent<HTMLInputElement>) => setOfficeSettings((s: OfficeSettingsForm) =>({...s,[f.key]:e.target.value})),
                 placeholder: f.placeholder,
+                'data-testid': 'admin-office-field-' + f.key,
                 className:"w-full p-2.5 text-xs rounded-xl border border-white/10 bg-white/5 text-white placeholder-slate-600",
                 style:{fontFamily:'Cairo,sans-serif',direction:f.type==='url'||f.type==='email'||f.type==='tel'?'ltr':'rtl'}
               })
@@ -271,6 +274,7 @@ function OfficeSection({
           React.createElement('button',{
             onClick: handleSaveOfficeSettings,
             disabled: savingOffice || !officeSettings.name?.trim(),
+            'data-testid': 'admin-office-save',
             className:"w-full py-3.5 rounded-xl text-sm font-black text-premium-bg bg-gradient-to-tr from-[#C9A84C] to-[#E8C97A] shadow-lg active:scale-95 transition-transform disabled:opacity-50 flex items-center justify-center gap-2"
           },
             savingOffice
