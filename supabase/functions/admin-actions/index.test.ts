@@ -31,6 +31,13 @@ interface FetchState {
   createAuthUserBody: unknown;
   createProfilePostOk: boolean;
   createProfilePostCalls: unknown[];
+  /** خريطة profile.id → صف profiles، لحالة delete_user من غير user_id (بروفايل يتيم) */
+  profilesByRowId: Record<string, { tenant_id?: string | null }>;
+  deleteAuthUserOk: boolean;
+  deleteAuthUserStatus: number;
+  deleteAuthUserCalls: string[];
+  deleteProfileOk: boolean;
+  deleteProfileCalls: string[];
 }
 
 function freshState(): FetchState {
@@ -50,11 +57,29 @@ function freshState(): FetchState {
     createAuthUserBody: { id: 'new-auth-user-1' },
     createProfilePostOk: true,
     createProfilePostCalls: [],
+    profilesByRowId: {
+      'row-1': { tenant_id: 'tenant-a' },
+    },
+    deleteAuthUserOk: true,
+    deleteAuthUserStatus: 200,
+    deleteAuthUserCalls: [],
+    deleteProfileOk: true,
+    deleteProfileCalls: [],
   };
 }
 
 function extractUserId(url: string): string {
   const m = url.match(/user_id=eq\.([^&]+)/);
+  return m ? decodeURIComponent(m[1]) : '';
+}
+
+function extractRowId(url: string): string {
+  const m = url.match(/[?&]id=eq\.([^&]+)/);
+  return m ? decodeURIComponent(m[1]) : '';
+}
+
+function extractAuthUserIdFromPath(url: string): string {
+  const m = url.match(/\/auth\/v1\/admin\/users\/([^/?]+)/);
   return m ? decodeURIComponent(m[1]) : '';
 }
 
@@ -92,6 +117,15 @@ function buildFetchMock(state: FetchState) {
           : { status: 400, body: { message: 'فشل إنشاء profile' } };
       },
     },
+    // delete_user (بروفايل يتيم بلا user_id): GET profiles?id=eq.X&select=tenant_id
+    {
+      match: (url, init) => url.includes('/rest/v1/profiles') && init?.method === 'GET' && /[?&]id=eq\./.test(url),
+      respond: (url) => {
+        const id = extractRowId(url);
+        const row = state.profilesByRowId[id];
+        return { status: 200, body: row ? [row] : [] };
+      },
+    },
     // getCallerProfile / authorizeOnTarget: GET profiles?user_id=eq.X&select=...
     {
       match: (url, init) => url.includes('/rest/v1/profiles') && init?.method === 'GET',
@@ -99,6 +133,26 @@ function buildFetchMock(state: FetchState) {
         const id = extractUserId(url);
         const row = state.profilesById[id];
         return { status: 200, body: row ? [row] : [] };
+      },
+    },
+    // delete_user: DELETE profiles?id=eq.X
+    {
+      match: (url, init) => url.includes('/rest/v1/profiles') && init?.method === 'DELETE',
+      respond: (url) => {
+        state.deleteProfileCalls.push(extractRowId(url));
+        return state.deleteProfileOk
+          ? { status: 204, body: null }
+          : { status: 400, body: { message: 'فشل حذف profile' } };
+      },
+    },
+    // delete_user: DELETE auth/v1/admin/users/:id
+    {
+      match: (url, init) => url.includes('/auth/v1/admin/users/') && init?.method === 'DELETE',
+      respond: (url) => {
+        state.deleteAuthUserCalls.push(extractAuthUserIdFromPath(url));
+        return state.deleteAuthUserOk
+          ? { status: 200, body: {} }
+          : { status: state.deleteAuthUserStatus, body: { msg: 'فشل حذف حساب Auth' } };
       },
     },
     // rpc: admin_force_logout
@@ -398,6 +452,103 @@ describe('admin-actions — action=create_lawyer', () => {
       role: 'admin',
       is_active: true,
     });
+  });
+});
+
+describe('admin-actions — action=delete_user', () => {
+  it('من غير profile_id → 200 + error، ومفيش أي حذف حصل', async () => {
+    const res = await handler(req({ action: 'delete_user', user_id: 'target-1' }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.error).toBe('profile_id مطلوب');
+    expect(state.deleteAuthUserCalls).toEqual([]);
+    expect(state.deleteProfileCalls).toEqual([]);
+  });
+
+  it('الطالب بيحاول يحذف حسابه هو نفسه (user_id بتاعه) → 200 + error، من غير أي حذف', async () => {
+    const res = await handler(req({ action: 'delete_user', profile_id: 'row-1', user_id: 'caller-1' }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.error).toBe('لا يمكنك حذف حسابك الخاص');
+    expect(state.deleteAuthUserCalls).toEqual([]);
+    expect(state.deleteProfileCalls).toEqual([]);
+  });
+
+  it('غير مسموح (تينانت مختلف) → 200 + error، ومفيش حذف حصل لا لـ Auth ولا profile', async () => {
+    state.profilesById['target-1'] = { role: 'lawyer', tenant_id: 'tenant-b', is_active: true };
+    const res = await handler(req({ action: 'delete_user', profile_id: 'row-1', user_id: 'target-1' }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.error).toBe('غير مسموح لك بتنفيذ هذا الإجراء');
+    expect(state.deleteAuthUserCalls).toEqual([]);
+    expect(state.deleteProfileCalls).toEqual([]);
+  });
+
+  it('فشل حذف حساب Auth → 200 + error، والبروفايل بيفضل موجود (مفيش DELETE عليه)', async () => {
+    state.deleteAuthUserOk = false;
+    state.deleteAuthUserStatus = 400;
+    const res = await handler(req({ action: 'delete_user', profile_id: 'row-1', user_id: 'target-1' }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.error).toBe('تعذر حذف حساب الدخول. لم يتم حذف المستخدم، حاول مرة أخرى.');
+    expect(state.deleteProfileCalls).toEqual([]);
+  });
+
+  it('حساب Auth مش موجود أصلاً (404) → يتعامل معاه كنجاح، وبيكمل يحذف صف profiles', async () => {
+    state.deleteAuthUserOk = false;
+    state.deleteAuthUserStatus = 404;
+    const res = await handler(req({ action: 'delete_user', profile_id: 'row-1', user_id: 'target-1' }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+    expect(state.deleteProfileCalls).toEqual(['row-1']);
+  });
+
+  it('مسار النجاح الكامل → بيحذف حساب Auth الأول وبعدين صف profiles، بنفس الترتيب', async () => {
+    const res = await handler(req({ action: 'delete_user', profile_id: 'row-1', user_id: 'target-1' }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+    expect(state.deleteAuthUserCalls).toEqual(['target-1']);
+    expect(state.deleteProfileCalls).toEqual(['row-1']);
+  });
+
+  it('نجاح حذف Auth لكن فشل حذف صف profiles → ok:true + تحذير واضح بدل ما يختفي الخطأ', async () => {
+    state.deleteProfileOk = false;
+    const res = await handler(req({ action: 'delete_user', profile_id: 'row-1', user_id: 'target-1' }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+    expect(data.warning).toBe('تم حذف حساب الدخول لكن تعذر حذف بيانات البروفايل بالكامل. تواصل مع الدعم.');
+    expect(state.deleteAuthUserCalls).toEqual(['target-1']);
+  });
+
+  it('بروفايل يتيم بلا user_id، أدمن نفس المكتب → بيتسمح، بيحذف صف profiles بس من غير أي نداء لحذف Auth', async () => {
+    const res = await handler(req({ action: 'delete_user', profile_id: 'row-1', user_id: null }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+    expect(state.deleteAuthUserCalls).toEqual([]);
+    expect(state.deleteProfileCalls).toEqual(['row-1']);
+  });
+
+  it('بروفايل يتيم بلا user_id، أدمن مكتب مختلف → 200 + error، من غير أي حذف', async () => {
+    state.profilesByRowId['row-1'] = { tenant_id: 'tenant-b' };
+    const res = await handler(req({ action: 'delete_user', profile_id: 'row-1', user_id: null }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.error).toBe('غير مسموح لك بتنفيذ هذا الإجراء');
+    expect(state.deleteProfileCalls).toEqual([]);
+  });
+
+  it('بروفايل يتيم بلا user_id، سوبر أدمن → مسموح بغض النظر عن التينانت', async () => {
+    state.profilesById['caller-1'] = { is_super_admin: true, tenant_id: null, is_active: true };
+    state.profilesByRowId['row-1'] = { tenant_id: 'tenant-anything' };
+    const res = await handler(req({ action: 'delete_user', profile_id: 'row-1', user_id: null }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+    expect(state.deleteProfileCalls).toEqual(['row-1']);
   });
 });
 
