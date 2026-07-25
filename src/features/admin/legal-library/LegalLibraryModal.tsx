@@ -44,16 +44,17 @@ function LegalLibraryModal({ onClose, onSave, saving, categories, editingLaw }: 
                 editingLaw ? 'تعديل قانون' : 'إضافة قانون جديد للمكتبة القانونية'
             ),
             React.createElement('div', { className: "space-y-4" },
-                React.createElement(Inp, { label: "اسم القانون", value: form.title, onChange: (e: React.ChangeEvent<HTMLInputElement>) => s('title', e.target.value), placeholder: "مثال: القانون المدني المصري", required: true }),
+                React.createElement(Inp, { label: "اسم القانون", value: form.title, onChange: (e: React.ChangeEvent<HTMLInputElement>) => s('title', e.target.value), placeholder: "مثال: القانون المدني المصري", required: true, 'data-testid': 'admin-law-title' }),
                 React.createElement('div', { className: "grid grid-cols-2 gap-2" },
-                    React.createElement(Inp, { label: "رقم القانون", value: form.law_number, onChange: (e: React.ChangeEvent<HTMLInputElement>) => s('law_number', e.target.value), placeholder: "مثال: 131" }),
-                    React.createElement(Inp, { label: "سنة القانون", value: form.law_year, onChange: (e: React.ChangeEvent<HTMLInputElement>) => s('law_year', e.target.value.replace(/[^0-9]/g, '')), placeholder: "مثال: 1948" })
+                    React.createElement(Inp, { label: "رقم القانون", value: form.law_number, onChange: (e: React.ChangeEvent<HTMLInputElement>) => s('law_number', e.target.value), placeholder: "مثال: 131", 'data-testid': 'admin-law-number' }),
+                    React.createElement(Inp, { label: "سنة القانون", value: form.law_year, onChange: (e: React.ChangeEvent<HTMLInputElement>) => s('law_year', e.target.value.replace(/[^0-9]/g, '')), placeholder: "مثال: 1948", 'data-testid': 'admin-law-year' })
                 ),
                 React.createElement(Sel, {
                     label: "التصنيف",
                     value: form.category_id,
                     onChange: (e: React.ChangeEvent<HTMLSelectElement>) => s('category_id', e.target.value),
-                    options: categories.map((c: LegalCategoryRow) => ({ value: c.id, label: c.name_ar }))
+                    options: categories.map((c: LegalCategoryRow) => ({ value: c.id, label: c.name_ar })),
+                    testId: 'admin-law-category'
                 }),
 
                 // ── رفع ملف PDF ──
@@ -69,6 +70,7 @@ function LegalLibraryModal({ onClose, onSave, saving, categories, editingLaw }: 
                         React.createElement('span', null, file ? file.name : (editingLaw?.file_name || 'اختر ملف PDF')),
                         React.createElement('input', {
                             type: "file", accept: "application/pdf", className: "hidden",
+                            'data-testid': 'admin-law-file',
                             onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
                                 const f = e.target.files?.[0];
                                 if (!f) return;
@@ -84,6 +86,7 @@ function LegalLibraryModal({ onClose, onSave, saving, categories, editingLaw }: 
                 React.createElement('button', {
                     disabled: saving,
                     onClick: handleSubmit,
+                    'data-testid': 'admin-law-submit',
                     className: "w-full py-3.5 rounded-xl font-black text-sm shadow-md flex items-center justify-center gap-2 disabled:opacity-60 active:scale-95 transition-transform mt-2 text-premium-bg",
                     style: { background: 'linear-gradient(135deg,#D4AF37,#E8C84A)' }
                 }, saving ? React.createElement(I.Spin) : null, saving ? 'جاري الحفظ...' : (editingLaw ? 'حفظ التعديلات' : 'إضافة القانون'))
