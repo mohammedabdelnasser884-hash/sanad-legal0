@@ -126,7 +126,7 @@ function AILegalAssistant({onClose, cases, clients, profile, country}: AILegalAs
         { mode: 'next-step', icon: I.Compass, title: 'الخطوة التالية', desc: 'أهم إجراء محتاج تعمله دلوقتي في القضية', accent: 'from-fuchsia-500/20 to-fuchsia-400/5 border-fuchsia-500/20 text-fuchsia-300' },
     ];
 
-    return React.createElement('div',{className:"fixed inset-0 z-50 flex flex-col bg-premium-bg fade-in"},
+    return React.createElement('div',{'data-testid':'ai-assistant-panel',className:"fixed inset-0 z-50 flex flex-col bg-premium-bg fade-in"},
         // ── Ambient background ──
         React.createElement('div',{className:"absolute inset-0 pointer-events-none overflow-hidden"},
             React.createElement('div',{className:"absolute -top-32 -right-32 w-96 h-96 rounded-full orb-pulse",style:{background:'radial-gradient(circle, rgba(212,175,55,0.08) 0%, transparent 70%)'}}),
@@ -320,6 +320,7 @@ function AILegalAssistant({onClose, cases, clients, profile, country}: AILegalAs
                     key:t.mode,
                     type:"button",
                     onClick:()=>setMode(t.mode),
+                    'data-testid':`ai-task-card-${t.mode}`,
                     className:`w-full text-right p-3.5 rounded-2xl border bg-gradient-to-l ${t.accent} flex items-center gap-3 active:scale-[0.98] transition-all`
                 },
                     React.createElement(t.icon,{className:"w-5 h-5 shrink-0"}),
@@ -502,6 +503,7 @@ function AILegalAssistant({onClose, cases, clients, profile, country}: AILegalAs
                 Object.entries(DOC_TEMPLATES).map(([k,v]: [string, DocTemplateConfig])=>React.createElement('button',{
                     key:k,
                     onClick:()=>{setDocType(k);setGeneratedDoc('');},
+                    'data-testid':`ai-doctype-${k}`,
                     className:`p-3 rounded-2xl border text-right transition-all ${docType===k?`bg-gradient-to-br ${colorMap[v.color]} shadow-lg`:'bg-premium-card border-white/5 text-slate-500 hover:border-white/15'}`
                 },
                     React.createElement('div',{className:"text-xl mb-1"},v.icon),
@@ -548,7 +550,7 @@ function AILegalAssistant({onClose, cases, clients, profile, country}: AILegalAs
                     React.createElement('div',{className:"grid grid-cols-2 gap-2"},
                         React.createElement('div',null,
                             React.createElement('label',{className:"block text-[10px] font-black text-slate-400 mb-1"},"الموكل *"),
-                            React.createElement('input',{value:docFields.plaintiff,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>sf('plaintiff',e.target.value),placeholder:"اسم الموكل",className:"w-full p-2.5 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600",style:{fontFamily:'Cairo,sans-serif'}})
+                            React.createElement('input',{value:docFields.plaintiff,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>sf('plaintiff',e.target.value),placeholder:"اسم الموكل",'data-testid':'ai-doc-field-plaintiff',className:"w-full p-2.5 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600",style:{fontFamily:'Cairo,sans-serif'}})
                         ),
                         React.createElement('div',null,
                             React.createElement('label',{className:"block text-[10px] font-black text-slate-400 mb-1"},"صفته"),
@@ -559,7 +561,7 @@ function AILegalAssistant({onClose, cases, clients, profile, country}: AILegalAs
                     React.createElement('div',{className:"grid grid-cols-2 gap-2"},
                         React.createElement('div',null,
                             React.createElement('label',{className:"block text-[10px] font-black text-slate-400 mb-1"},"الخصم *"),
-                            React.createElement('input',{value:docFields.defendant,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>sf('defendant',e.target.value),placeholder:"اسم الخصم",className:"w-full p-2.5 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600",style:{fontFamily:'Cairo,sans-serif'}})
+                            React.createElement('input',{value:docFields.defendant,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>sf('defendant',e.target.value),placeholder:"اسم الخصم",'data-testid':'ai-doc-field-defendant',className:"w-full p-2.5 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600",style:{fontFamily:'Cairo,sans-serif'}})
                         ),
                         React.createElement('div',null,
                             React.createElement('label',{className:"block text-[10px] font-black text-slate-400 mb-1"},"صفته"),
@@ -583,7 +585,7 @@ function AILegalAssistant({onClose, cases, clients, profile, country}: AILegalAs
                 ),
                 React.createElement('div',null,
                     React.createElement('label',{className:"block text-[10px] font-black text-slate-400 mb-1"},"الموضوع / العنوان *"),
-                    React.createElement('input',{value:docFields.subject,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>sf('subject',e.target.value),placeholder:docType==='توكيل_رسمي'?"موضوع التوكيل وصلاحياته":"موضوع القضية أو الدعوى",className:"w-full p-2.5 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600",style:{fontFamily:'Cairo,sans-serif'}})
+                    React.createElement('input',{value:docFields.subject,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>sf('subject',e.target.value),placeholder:docType==='توكيل_رسمي'?"موضوع التوكيل وصلاحياته":"موضوع القضية أو الدعوى",'data-testid':'ai-doc-field-subject',className:"w-full p-2.5 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600",style:{fontFamily:'Cairo,sans-serif'}})
                 ),
                 docType!=='توكيل_رسمي' && React.createElement(React.Fragment,null,
                     React.createElement('div',null,
@@ -612,6 +614,7 @@ function AILegalAssistant({onClose, cases, clients, profile, country}: AILegalAs
             React.createElement('button',{
                 onClick:generateDocument,
                 disabled:!canGenerateDoc||keyLoading,
+                'data-testid':'ai-generate-doc-submit',
                 className:"w-full py-4 rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50 shadow-lg",
                 style:{background:'linear-gradient(135deg,#7c3aed,#a855f7)',color:'white',boxShadow:'0 8px 24px rgba(124,58,237,0.3)'}
             },
@@ -620,7 +623,7 @@ function AILegalAssistant({onClose, cases, clients, profile, country}: AILegalAs
             ),
 
             // Generated document display
-            generatedDoc && React.createElement('div',{className:"bg-premium-card border border-purple-500/20 rounded-2xl overflow-hidden slide-up"},
+            generatedDoc && React.createElement('div',{'data-testid':'ai-generated-doc',className:"bg-premium-card border border-purple-500/20 rounded-2xl overflow-hidden slide-up"},
                 // Doc header
                 React.createElement('div',{className:"flex items-center justify-between px-4 py-3 border-b border-white/5",style:{background:'linear-gradient(135deg,rgba(124,58,237,0.15),rgba(168,85,247,0.05))'}},
                     React.createElement('div',{className:"flex items-center gap-2"},
