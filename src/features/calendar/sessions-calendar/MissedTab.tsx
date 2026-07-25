@@ -67,7 +67,8 @@ function MissedTab({ cases, clients, onOpenCase, onOpenReminders, onOpenStandalo
         React.createElement(I.Spin), "جاري التحميل...");
 
     if (sessions.length === 0 && missedTasks.length === 0) return React.createElement('div', {
-        className: "bg-premium-card border border-white/5 rounded-2xl p-10 text-center space-y-2"
+        className: "bg-premium-card border border-white/5 rounded-2xl p-10 text-center space-y-2",
+        'data-testid': 'missed-empty'
     },
         React.createElement('p', { className: "text-3xl" }, "✅"),
         React.createElement('p', { className: "text-sm font-black text-emerald-400" }, "لا توجد جلسات أو مهام فائتة"),
@@ -100,7 +101,8 @@ function MissedTab({ cases, clients, onOpenCase, onOpenReminders, onOpenStandalo
                 key: s.id,
                 onClick: () => { if (linkedCase && onOpenCase) onOpenCase(linkedCase as MappedCase); else if (!linkedCase && onOpenStandalone) onOpenStandalone(s); },
                 className: "rounded-lg overflow-hidden cursor-pointer active:scale-[0.98] transition-all",
-                style: { background: urgencyColor.bg, border: '1px solid ' + urgencyColor.border }
+                style: { background: urgencyColor.bg, border: '1px solid ' + urgencyColor.border },
+                'data-testid': 'missed-session-card'
             },
                 React.createElement('div', { className: "flex items-center gap-2 px-2 py-1.5" },
                     // التاريخ
