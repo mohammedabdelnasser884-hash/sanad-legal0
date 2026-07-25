@@ -41,6 +41,7 @@ function BackupSection({
         React.createElement('button',{
           onClick: handleCreateBackup,
           disabled: creatingBackup,
+          'data-testid': 'admin-backup-create-button',
           className:"w-full py-3 rounded-xl text-xs font-black text-white bg-gradient-to-tr from-[#C9A84C] to-[#C9A84C]/80 shadow-lg active:scale-95 transition-transform disabled:opacity-60 flex items-center justify-center gap-2"
         },
           creatingBackup
@@ -68,6 +69,7 @@ function BackupSection({
           React.createElement('p',{className:"text-xs font-black text-white"},"النسخ السابقة"),
           React.createElement('button',{
             onClick:fetchBackups,
+            'data-testid': 'admin-backup-refresh',
             className:"text-[10px] text-slate-500 hover:text-white flex items-center gap-1"
           }, React.createElement(I.Refresh,{className:"w-3 h-3"}), "تحديث")
         ),
@@ -77,7 +79,9 @@ function BackupSection({
               React.createElement(I.Spin), "جاري التحميل...")
 
           : backups.length === 0
-          ? React.createElement('div',{className:"bg-premium-card border border-white/5 rounded-xl p-8 text-center space-y-2"},
+          ? React.createElement('div',{
+              'data-testid': 'admin-backup-empty',
+              className:"bg-premium-card border border-white/5 rounded-xl p-8 text-center space-y-2"},
               React.createElement('p',{className:"text-2xl"},"💾"),
               React.createElement('p',{className:"text-slate-400 text-xs font-bold"},"لا توجد نسخ احتياطية بعد"),
               React.createElement('p',{className:"text-slate-600 text-[10px]"},"أنشئ أول نسخة الآن لحماية بياناتك")
@@ -89,6 +93,7 @@ function BackupSection({
                 const isToday = new Date().toDateString() === date.toDateString();
                 return React.createElement('div',{
                   key:backup.id||i,
+                  'data-testid': 'admin-backup-card',
                   className:"bg-premium-card border border-white/5 rounded-2xl overflow-hidden"
                 },
                   // معلومات النسخة
@@ -123,6 +128,7 @@ function BackupSection({
                     // تنزيل
                     React.createElement('button',{
                       onClick:()=>handleDownloadBackup(backup),
+                      'data-testid': 'admin-backup-download',
                       className:"flex items-center justify-center gap-1.5 py-2.5 bg-premium-card hover:bg-[#C9A84C]/10 transition-colors active:scale-95"
                     },
                       React.createElement('span',{className:"text-xs"},"📥"),
@@ -132,6 +138,7 @@ function BackupSection({
                     // استعادة
                     React.createElement('button',{
                       onClick:()=>setConfirmRestore(backup),
+                      'data-testid': 'admin-backup-restore-button',
                       className:"flex items-center justify-center gap-1.5 py-2.5 bg-premium-card hover:bg-[#C9A84C]/10 transition-colors active:scale-95"
                     },
                       React.createElement('span',{className:"text-xs"},"🔄"),
