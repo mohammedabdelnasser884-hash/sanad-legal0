@@ -115,6 +115,7 @@ function SessionsCalendar({ cases, clients, onOpenCase, onOpenReminders, onClien
             tabs.map((t: typeof tabs[number]) => React.createElement('button', {
                 key: t.id,
                 onClick: () => setActiveTab(t.id),
+                'data-testid': `calendar-subtab-${t.id}`,
                 className: `flex-1 flex items-center justify-center gap-0.5 px-1 py-2 rounded-lg text-[12px] font-black transition-all relative ${
                     activeTab === t.id
                         ? t.id === 'missed'
