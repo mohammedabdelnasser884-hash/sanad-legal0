@@ -96,6 +96,66 @@ export async function openAdminArchiveTab(
   await page.getByTestId('archive-tab-' + tab).click();
 }
 
+// المرحلة 6 (الأدمن) — هيلبر عام لفتح أي قسم فرعي في لوحة الإدارة (nav-more-toggle →
+// nav-more-admin → admin-section-<id>)، بديل مبسّط لـ openAdminArchiveTab فوق
+// للأقسام اللي مالهاش تابات فرعية داخلية (نشاط/مكتبة قانونية/مكتب...).
+export async function openAdminSection(
+  page: Page,
+  sectionId: 'users' | 'portal' | 'activity' | 'sessions' | 'security' | 'backup' | 'office' | 'legal_library' | 'archive'
+): Promise<void> {
+  await page.getByTestId('nav-more-toggle').click();
+  await page.getByTestId('nav-more-admin').click();
+  await page.getByTestId('admin-section-' + sectionId).click();
+}
+
+// المرحلة 6 (الأدمن) — دفعة 2 — هيلبر إنشاء مستخدم جديد قابل للتصرف
+// (disposable) عبر UserFormModal الحقيقي (useAdminUsers.handleAddUser →
+// callAdminAction({action:'create_lawyer'})). بيفترض إن القسم مش مفتوح
+// أصلًا فبيفتحه بنفسه (openAdminSection) عشان يبقى قابل للاستدعاء من
+// أول التست مباشرة. بيرجّع البريد/كلمة السر المستخدمة عشان تستات
+// "تغيير كلمة المرور" تقدر تتأكد من القيمة الجديدة لو احتاجت.
+export async function createTestUser(
+  page: Page,
+  fullName: string,
+  opts?: { role?: 'admin' | 'lawyer' | 'viewer' }
+): Promise<{ email: string; password: string }> {
+  const email = `e2e-user-${Date.now()}@example.com`;
+  const password = 'TestUser12345';
+  await openAdminSection(page, 'users');
+  await page.getByTestId('admin-user-new-button').click();
+  await page.getByTestId('admin-user-full_name').fill(fullName);
+  await page.getByTestId('admin-user-email').fill(email);
+  await page.getByTestId('admin-user-password').fill(password);
+  if (opts?.role) await page.getByTestId('admin-user-role-' + opts.role).click();
+  await page.getByTestId('admin-user-submit').click();
+
+  const card = page.getByTestId('admin-user-card').filter({ hasText: fullName });
+  await card.first().waitFor({ state: 'visible', timeout: 15_000 });
+  return { email, password };
+}
+
+// المرحلة 1 (خطة تنفيذ اختبارات E2E المقسمة) — هيلبر إنشاء موكل، بنفس نمط
+// createCase فوق. بيرجّع الرقم القومي المستخدم فعليًا (مهم لتستات التكرار
+// اللي محتاجة تعرف نفس الرقم بالظبط عشان تحاول تكرره في موكل تاني).
+export async function createClient(
+  page: Page,
+  name: string,
+  nationalId?: string
+): Promise<{ nationalId: string }> {
+  const finalNationalId = nationalId ?? `2900101${Date.now()}`.slice(0, 14);
+  await page.getByTestId('nav-more-toggle').click();
+  await page.getByTestId('nav-more-clients').click();
+  await page.getByTestId('new-client-button').click();
+  await page.getByTestId('new-client-name').fill(name);
+  await page.getByTestId('new-client-phone').fill('01000000000');
+  await page.getByTestId('new-client-national-id').fill(finalNationalId);
+  await page.getByTestId('save-client-button').click();
+
+  const card = page.getByTestId('client-card').filter({ hasText: name });
+  await card.first().waitFor({ state: 'visible', timeout: 15_000 });
+  return { nationalId: finalNationalId };
+}
+
 // خطوة 6 (فاليديشن) — التأكد من ظهور رسالة توست بنص معيّن ولونها بيطابق
 // حالة الخطأ (نفس آلية toast() في shared/lib/notifications.ts — بتلوّن
 // الحدود/النص بالأحمر #f87171 لما isErr=true، وبتضيف class 'show').
@@ -104,3 +164,85 @@ export async function expectToast(page: Page, text: string): Promise<void> {
   await expect(toastEl).toHaveClass(/show/, { timeout: 5_000 });
   await expect(toastEl).toHaveText(text);
 }
+
+// المرحلة 3 (خطة تنفيذ اختبارات E2E المقسمة) — هيلبر إضافة جلسة لقضية
+// مفتوحة بالفعل على شاشة تفاصيلها (case-detail-view، تبويب "الجلسات"
+// نشط). بيستقبل رقم اليوم (day) في الشهر الحالي (نفس تاريخ اليوم أو أي
+// يوم تاني في نفس الشهر — بلا احتياج للتنقل بين الشهور في الـDatePicker،
+// راجع ملحوظة sessions.spec.ts الأصلية) عشان تستات المرحلة 3 (تعديل/حذف/
+// تعارض) تقدر تتحكم في ترتيب الجلستين (الأحدث تاريخًا = index 0، وعليها
+// زرار "⚡ تحديث" بس من غير تعديل/حذف مباشر — راجع TimelineSection.tsx).
+export async function addCaseSession(page: Page, day: number, description: string): Promise<void> {
+  await page.getByTestId('add-session-button').click();
+  await page.getByTestId('session-date-trigger').click();
+  await page.getByTestId('session-date-day').filter({ hasText: new RegExp(`^${day}$`) }).click();
+  await page.getByTestId('session-description').fill(description);
+  await page.getByTestId('save-session-button').click();
+  await page.getByTestId('session-card').filter({ hasText: description }).first().waitFor({ state: 'visible', timeout: 15_000 });
+}
+
+// المرحلة 2 (خطة تنفيذ اختبارات E2E المقسمة) — هيلبر إنشاء جلسة مستقلة
+// بأبسط بيانات صالحة (طرف مدعي واحد عليه ⭐ + طرف مدعى عليه واحد، نفس
+// نمط createCase فوق)، وتاريخها دايمًا "النهاردة" — عشان standalone-sessions.spec.ts
+// (وأي مرحلة تانية محتاجة جلسة مستقلة كنقطة بداية) تقدر توصل لشاشة
+// التقويم وتفتحها من غير ما تكرر نفس الخطوات. بيسيب مودال "تحويل لقضية؟"
+// مقفول (بيدوس "لا شكراً، إغلاق") وبيرجّع الصفحة على تبويب الجلسات.
+export async function createStandaloneSession(page: Page, title: string): Promise<void> {
+  await page.getByTestId('nav-calendar').click();
+  await page.getByTestId('calendar-new-session-button').click();
+  await page.getByTestId('new-session-modal').waitFor({ state: 'visible', timeout: 10_000 });
+  await page.getByTestId('new-session-title').fill(title);
+  const today = new Date().toISOString().slice(0, 10);
+  await page.getByTestId('new-session-date').fill(today);
+  await page.getByTestId('party-side-card-plaintiff').click();
+  await page.getByTestId('new-session-plaintiff-0-star').click();
+  await page.getByTestId('new-session-plaintiff-0-name').fill('موكل جلسة مستقلة E2E');
+  await page.getByTestId('new-session-plaintiff-0-capacity').fill('مدعي');
+  await page.getByTestId('new-session-plaintiff-0-national-id').fill('12345678901234');
+  await page.getByTestId('new-session-plaintiff-subform-save').click();
+  await page.getByTestId('party-side-card-defendant').click();
+  await page.getByTestId('new-session-defendant-0-name').fill('خصم جلسة مستقلة E2E');
+  await page.getByTestId('new-session-defendant-0-capacity').fill('مدعى عليه');
+  await page.getByTestId('new-session-defendant-subform-save').click();
+  await page.getByTestId('new-session-save').click();
+
+  // بعد الحفظ الناجح بيفتح مودال "تحويل لقضية؟" (خطوة idle) تلقائيًا —
+  // بنقفله عشان نرجع لشاشة التقويم العادية، جاهزة لأي خطوة بعد الهيلبر.
+  await page.getByTestId('new-session-postsave-idle-close').click();
+  await page.getByTestId('new-session-modal').waitFor({ state: 'hidden', timeout: 10_000 });
+}
+
+// المرحلة 7 (باقي Tier 2) — بند 4: EditReminderModal.tsx. هيلبر إنشاء
+// تذكير بتاريخ اليوم (بيقع في تاب "قادمة" الافتراضي — راجع useRemindersTab:
+// upcoming = due_date >= اليوم). بيرجع للتاب الافتراضي بعد الحفظ (الفورم
+// بيتقفل تلقائيًا وfetchReminders() بيحدّث القايمة).
+// المرحلة 8 (Smoke) — MissedTab.tsx محتاج جلسة "فائتة" فعليًا (تاريخها فات
+// من غير result ولا next_action) عشان نقدر نختبر المسار غير الفارغ. بتفترض
+// إن فيه قضية مفتوحة بالفعل (case-detail-view ظاهرة) — بترجع لنفس الشاشة
+// بعد الحفظ زي addCaseSession العادي، وبتستخدم نفس يوم النهاردة بس في
+// الشهر السابق (Math.min بـ 28 عشان نضمن إن اليوم موجود في أي شهر).
+export async function addMissedSession(page: Page, description: string): Promise<void> {
+  const day = Math.min(new Date().getDate(), 28);
+  await page.getByTestId('add-session-button').click();
+  await page.getByTestId('session-date-trigger').click();
+  await page.getByTestId('date-picker-prev-month').click();
+  await page.getByTestId('session-date-day').filter({ hasText: new RegExp(`^${day}$`) }).click();
+  await page.getByTestId('session-description').fill(description);
+  await page.getByTestId('save-session-button').click();
+  await page.getByTestId('session-card').filter({ hasText: description }).first().waitFor({ state: 'visible', timeout: 15_000 });
+}
+
+export async function createReminder(page: Page, title: string): Promise<void> {
+  await page.getByTestId('nav-reminders').click();
+  await page.getByTestId('new-reminder-toggle').click();
+  await page.getByTestId('new-reminder-title').fill(title);
+  await page.getByTestId('new-reminder-date-trigger').click();
+  await page
+    .getByTestId('new-reminder-date-day')
+    .filter({ hasText: new RegExp(`^${new Date().getDate()}$`) })
+    .click();
+  await page.getByTestId('new-reminder-save').click();
+  const card = page.locator('[data-testid^="reminder-card-"]').filter({ hasText: title });
+  await card.first().waitFor({ state: 'visible', timeout: 15_000 });
+}
+
