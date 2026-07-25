@@ -71,6 +71,7 @@ function SessionCard({ s, cases, clients, onOpenCase, onOpenStandalone, onGoogle
     return React.createElement('div', {
         className: "bg-premium-card rounded-lg px-2.5 py-1.5 cursor-pointer active:scale-[0.98] transition-all flex items-center gap-1.5",
         style: { border: isStandalone ? '1px solid rgba(251,191,36,0.25)' : '1px solid rgba(212,175,55,0.12)' },
+        'data-testid': 'calendar-session-card',
         onClick: async () => {
             // ⚠️ مهم: للفتح (navigation) لازم نستخدم الكائن الكامل بتاع القضية
             // (caseForNav) مش الـ join المختصر (joinedCase) لأن شاشة تفاصيل
