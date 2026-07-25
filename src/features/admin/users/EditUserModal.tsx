@@ -48,7 +48,8 @@ function EditUserModal({ user, onSave, onClose, saving }: EditUserModalProps) {
           value:form.full_name,
           onChange:(e: React.ChangeEvent<HTMLInputElement>) =>setForm((f: EditUserForm) =>({...f,full_name:e.target.value})),
           className:"w-full p-2.5 text-xs rounded-xl border border-white/10 bg-white/5 text-white",
-          style:{fontFamily:'Cairo,sans-serif'}
+          style:{fontFamily:'Cairo,sans-serif'},
+          'data-testid':'admin-edituser-full_name'
         })
       ),
 
@@ -61,6 +62,7 @@ function EditUserModal({ user, onSave, onClose, saving }: EditUserModalProps) {
             return React.createElement('button',{
               key:role,
               onClick:()=>setForm((f: EditUserForm) =>({...f,role,permissions:{}})),
+              'data-testid':'admin-edituser-role-'+role,
               className:`py-2 rounded-xl text-[10px] font-black border transition-all ${form.role===role?`${rc.bg} ${rc.color} ${rc.border}`:'bg-white/5 text-slate-500 border-white/10'}`
             }, rc.label);
           })
@@ -84,6 +86,7 @@ function EditUserModal({ user, onSave, onClose, saving }: EditUserModalProps) {
               key,
               disabled,
               onClick:()=>!disabled&&setForm((f: EditUserForm) =>({...f,permissions:{...f.permissions,[key]:!f.permissions[key]}})),
+              'data-testid':'admin-edituser-permission-'+key,
               className:`flex items-center gap-2 p-2 rounded-xl text-[9px] font-bold border transition-all ${isOn?'bg-[#C9A84C]/15 text-[#C9A84C] border-[#C9A84C]/30':'bg-white/5 text-slate-500 border-white/8'} ${disabled?'opacity-60 cursor-default':''}`
             },
               React.createElement('span',null,icon),
@@ -103,6 +106,7 @@ function EditUserModal({ user, onSave, onClose, saving }: EditUserModalProps) {
         ),
         React.createElement('button',{
           onClick:()=>setForm((f: EditUserForm) =>({...f,is_active:!f.is_active})),
+          'data-testid':'admin-edituser-active-toggle',
           className:`w-12 h-6 rounded-full transition-all relative ${form.is_active?'bg-[#C9A84C]':'bg-slate-600'}`
         },
           React.createElement('div',{
@@ -115,6 +119,7 @@ function EditUserModal({ user, onSave, onClose, saving }: EditUserModalProps) {
       React.createElement('button',{
         onClick:()=>onSave(form),
         disabled:saving||!form.full_name.trim(),
+        'data-testid':'admin-edituser-save',
         className:"w-full py-3 rounded-xl text-xs font-black text-premium-bg bg-gradient-to-tr from-premium-gold to-[#E8C97A] shadow-lg active:scale-95 transition-transform disabled:opacity-50"
       },saving?'جاري الحفظ...':'حفظ التعديلات')
     )
