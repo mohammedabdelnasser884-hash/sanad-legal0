@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { login, openAdminSection, expectToast } from './utils';
 
 // المرحلة 6 (الأدمن) — دفعة 1 (أقل خطورة): المكتبة القانونية.
@@ -10,7 +11,10 @@ import { login, openAdminSection, expectToast } from './utils';
 //
 // ⚠️ شرط أساسي: حساب E2E_TEST_EMAIL لازم يكون Admin/Owner، وإلا
 // nav-more-admin مش هيظهر أصلًا (نفس ملحوظة admin-archive-lifecycle.spec.ts).
-
+//
+// ⚠️ FIX: المشروع ESM ("type": "module") — __dirname مش موجود جاهز في
+// ملفات .ts زي CommonJS، كان بيرمي ReferenceError ويكسر تشغيل كل E2E.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PDF = path.join(__dirname, 'fixtures', 'sample-law.pdf');
 
 test('إضافة قانون جديد للمكتبة القانونية برفع ملف PDF', async ({ page }) => {
