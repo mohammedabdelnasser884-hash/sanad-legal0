@@ -36,7 +36,7 @@ function ClientPortalModal({ client, portalAccess, onSave, onClose, saving }: Cl
           React.createElement('h3',{className:"text-sm font-black text-white"},"بوابة الموكل"),
           React.createElement('p',{className:"text-[10px] text-slate-500"},client.full_name)
         ),
-        React.createElement('button',{onClick:onClose,className:"w-8 h-8 rounded-full bg-white/8 flex items-center justify-center text-slate-400"},
+        React.createElement('button',{onClick:onClose,'data-testid':'admin-portal-edit-close',className:"w-8 h-8 rounded-full bg-white/8 flex items-center justify-center text-slate-400"},
           React.createElement(I.X))
       ),
 
@@ -48,11 +48,13 @@ function ClientPortalModal({ client, portalAccess, onSave, onClose, saving }: Cl
             value:pin,
             onChange:(e: React.ChangeEvent<HTMLInputElement>) =>setPin(e.target.value.replace(/\D/,'').slice(0,4)),
             maxLength:4, placeholder:"****",
+            'data-testid':'admin-portal-edit-pin',
             className:"flex-1 p-2.5 text-center text-lg tracking-[0.5em] font-black rounded-xl border border-white/10 bg-white/5 text-white",
             style:{fontFamily:'monospace',letterSpacing:'0.5em'}
           }),
           React.createElement('button',{
             onClick:genPin,
+            'data-testid':'admin-portal-edit-genpin',
             className:"px-3 py-2 rounded-xl bg-[#C9A84C]/20 text-[#C9A84C] text-xs font-bold border border-[#C9A84C]/30 active:scale-95 transition-transform"
           },"توليد")
         )
@@ -67,6 +69,7 @@ function ClientPortalModal({ client, portalAccess, onSave, onClose, saving }: Cl
         ),
         React.createElement('button',{
           onClick:()=>setIsActive((s: boolean) =>!s),
+          'data-testid':'admin-portal-edit-active-toggle',
           className:`w-12 h-6 rounded-full transition-all relative ${isActive?'bg-[#C9A84C]':'bg-slate-600'}`
         },
           React.createElement('div',{className:`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all shadow ${isActive?'right-0.5':'left-0.5'}`})
@@ -86,6 +89,7 @@ function ClientPortalModal({ client, portalAccess, onSave, onClose, saving }: Cl
       React.createElement('button',{
         onClick:()=>onSave({client_id:client.id,pin,is_active:isActive,client_name:client.full_name || '—',email:client.email}),
         disabled:saving||pin.length!==4,
+        'data-testid':'admin-portal-edit-save',
         className:"w-full py-3 rounded-xl text-xs font-black text-premium-bg bg-gradient-to-tr from-premium-gold to-[#E8C97A] shadow-lg active:scale-95 transition-transform disabled:opacity-50"
       },saving?'جاري الحفظ...':'حفظ الإعدادات')
     )
