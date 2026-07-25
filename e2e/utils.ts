@@ -142,7 +142,15 @@ export async function createClient(
   name: string,
   nationalId?: string
 ): Promise<{ nationalId: string }> {
-  const finalNationalId = nationalId ?? `2900101${Date.now()}`.slice(0, 14);
+  // ⚠️ FIX: كانت .slice(0, 14) — بتاخد أول 14 خانة من '2900101' +
+  // Date.now() (7+13=20 خانة)، يعني بتقطع آخر 6 خانات من Date.now()
+  // وتسيب بس أول 7 (اللي بتتغيّر ببطء شديد، كل ~16-17 دقيقة). في أي
+  // تشغيل E2E أطول من كده، كل الموكلين اللي بيتعملوا في نفس الـ16 دقيقة
+  // بياخدوا نفس الرقم القومي بالظبط → تكرار حقيقي وفشل الإنشاء، وده
+  // بيكسر أي تست تاني مبني على وجود الموكل ده (سبب متسلسل لعدد كبير من
+  // فشل الـE2E). الحل: ناخد آخر 14 خانة بدل الأول، فيتضمن Date.now()
+  // كامل (13 خانة، فريدة لكل ميلي ثانية) بدل ما نقطعه.
+  const finalNationalId = nationalId ?? `2900101${Date.now()}`.slice(-14);
   await page.getByTestId('nav-more-toggle').click();
   await page.getByTestId('nav-more-clients').click();
   await page.getByTestId('new-client-button').click();
