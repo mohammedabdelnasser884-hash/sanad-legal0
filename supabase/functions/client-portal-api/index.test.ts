@@ -382,9 +382,16 @@ describe('client-portal-api — التحقق من التوكن على الأكش
     expect(res.status).toBe(401);
   });
 
-  it('token بتوقيع متلاعب فيه (آخر حرف اتغيّر) → 401', async () => {
+  it('token بتوقيع متلاعب فيه (حرف قبل الأخير اتغيّر) → 401', async () => {
     const token = await getValidToken();
-    const tampered = token.slice(0, -1) + (token.endsWith('a') ? 'b' : 'a');
+    // ⚠️ التلاعب هنا في الحرف قبل الأخير من التوقيع، مش آخر حرف فيه:
+    // آخر حرف base64url في توقيع HMAC-SHA256 (43 حرف بدون padding) بيمثّل
+    // 4 بيتات معنى بس (والباقي padding صفري بيتترمي وقت الفك) — فبعض
+    // الحروف (زي a/b) بتشترك في نفس القيمة المفكوكة، وده كان بيخلي
+    // التلاعب أحيانًا "no-op" فعليًا (فلاكي تست). الحرف قبل الأخير
+    // دايمًا بيمثّل 6 بيتات كاملة، فأي تغيير فيه بيغيّر البايتات فعليًا.
+    const pos = token.length - 2;
+    const tampered = token.slice(0, pos) + (token[pos] === 'a' ? 'b' : 'a') + token.slice(pos + 1);
     const res = await handler(req({ action: 'getClient', token: tampered }));
     expect(res.status).toBe(401);
   });
