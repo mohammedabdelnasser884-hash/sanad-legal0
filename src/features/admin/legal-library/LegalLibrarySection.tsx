@@ -40,7 +40,7 @@ function LegalLibrarySection({
             React.createElement(I.Spin), React.createElement('span',{className:"mr-2"},"جاري التحميل...")
           )
         : laws.length === 0
-          ? React.createElement('div',{className:"bg-premium-card border border-white/5 rounded-xl p-10 text-center text-slate-500 text-xs"},"لا توجد قوانين مضافة بعد")
+          ? React.createElement('div',{'data-testid':'admin-law-empty',className:"bg-premium-card border border-white/5 rounded-xl p-10 text-center text-slate-500 text-xs"},"لا توجد قوانين مضافة بعد")
           : laws.map((law: LawRow) => {
               const cat = legalCategories.find((c: LegalCategoryRow) => c.id === law.category_id);
               const statusCfg = ({
@@ -52,6 +52,7 @@ function LegalLibrarySection({
 
               return React.createElement('div',{
                 key: law.id,
+                'data-testid': 'admin-law-card',
                 className:"bg-premium-card border border-white/5 rounded-2xl p-4 space-y-2.5"
               },
                 // العنوان + الحالة
@@ -98,6 +99,7 @@ function LegalLibrarySection({
                 !processingLaw && React.createElement('button',{
                   onClick:()=>handleProcessLaw(law),
                   disabled: !!processingLaw,
+                  'data-testid': 'admin-law-process',
                   className:"w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-[11px] font-black active:scale-95 transition-transform disabled:opacity-50",
                   style:{background:'rgba(45,212,191,0.1)', color:'#2dd4bf', border:'1px solid rgba(45,212,191,0.2)'}
                 },
@@ -109,10 +111,12 @@ function LegalLibrarySection({
                 React.createElement('div',{className:"flex items-center gap-2 pt-1"},
                   React.createElement('button',{
                     onClick:()=>{ setEditingLaw(law); setShowLawModal(true); },
+                    'data-testid': 'admin-law-edit',
                     className:"flex-1 flex items-center justify-center gap-1 py-2 rounded-xl bg-white/5 border border-white/10 text-slate-300 text-[11px] font-bold active:scale-95 transition-transform"
                   }, React.createElement(I.Edit), "تعديل"),
                   React.createElement('button',{
                     onClick:()=>setConfirmDeleteLaw(law),
+                    'data-testid': 'admin-law-delete',
                     className:"flex-1 flex items-center justify-center gap-1 py-2 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-[11px] font-bold active:scale-95 transition-transform"
                   }, React.createElement(I.Trash), "حذف")
                 )
