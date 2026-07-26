@@ -180,9 +180,13 @@ export async function createClient(
 // خطوة 6 (فاليديشن) — التأكد من ظهور رسالة توست بنص معيّن ولونها بيطابق
 // حالة الخطأ (نفس آلية toast() في shared/lib/notifications.ts — بتلوّن
 // الحدود/النص بالأحمر #f87171 لما isErr=true، وبتضيف class 'show').
-export async function expectToast(page: Page, text: string): Promise<void> {
+// ⚠️ timeout اختياري (افتراضي 5 ثواني — كافية لمعظم التستات). العمليات
+// البطيئة فعليًا (زي إنشاء نسخة احتياطية كاملة على بيانات production حقيقية
+// في admin-backup.spec.ts) بتاخد وقت بيتناسب مع حجم البيانات، فمحتاجة
+// تمرر timeout أكبر صراحةً بدل ما تتصادم مع الافتراضي القصير.
+export async function expectToast(page: Page, text: string, timeout = 5_000): Promise<void> {
   const toastEl = page.locator('#toast');
-  await expect(toastEl).toHaveClass(/show/, { timeout: 5_000 });
+  await expect(toastEl).toHaveClass(/show/, { timeout });
   await expect(toastEl).toHaveText(text);
 }
 
