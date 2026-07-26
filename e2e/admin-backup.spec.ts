@@ -20,7 +20,10 @@ test('إنشاء نسخة احتياطية جديدة وظهورها في الق
   await openAdminSection(page, 'backup');
 
   await page.getByTestId('admin-backup-create-button').click();
-  await expectToast(page, '✅ تم إنشاء النسخة الاحتياطية بنجاح');
+  // ⚠️ مهلة أطول من الافتراضي: إنشاء نسخة احتياطية بيصدّر كل جداول المكتب
+  // بالتسلسل على بيانات production حقيقية (مفيش staging)، فالوقت بيتناسب
+  // مع حجم البيانات الفعلي وممكن يعدي الـ5 ثواني الافتراضية بسهولة.
+  await expectToast(page, '✅ تم إنشاء النسخة الاحتياطية بنجاح', 30_000);
 
   const firstCard = page.getByTestId('admin-backup-card').first();
   await firstCard.waitFor({ state: 'visible', timeout: 15_000 });
@@ -32,7 +35,10 @@ test('زر تحديث القائمة يعمل من غير خطأ ويعرض نف
   await openAdminSection(page, 'backup');
 
   await page.getByTestId('admin-backup-create-button').click();
-  await expectToast(page, '✅ تم إنشاء النسخة الاحتياطية بنجاح');
+  // ⚠️ مهلة أطول من الافتراضي: إنشاء نسخة احتياطية بيصدّر كل جداول المكتب
+  // بالتسلسل على بيانات production حقيقية (مفيش staging)، فالوقت بيتناسب
+  // مع حجم البيانات الفعلي وممكن يعدي الـ5 ثواني الافتراضية بسهولة.
+  await expectToast(page, '✅ تم إنشاء النسخة الاحتياطية بنجاح', 30_000);
 
   await page.getByTestId('admin-backup-refresh').click();
   await expect(page.getByTestId('admin-backup-card').first()).toBeVisible({ timeout: 10_000 });
@@ -43,7 +49,10 @@ test('تنزيل نسخة احتياطية كملف JSON', async ({ page }) => {
   await openAdminSection(page, 'backup');
 
   await page.getByTestId('admin-backup-create-button').click();
-  await expectToast(page, '✅ تم إنشاء النسخة الاحتياطية بنجاح');
+  // ⚠️ مهلة أطول من الافتراضي: إنشاء نسخة احتياطية بيصدّر كل جداول المكتب
+  // بالتسلسل على بيانات production حقيقية (مفيش staging)، فالوقت بيتناسب
+  // مع حجم البيانات الفعلي وممكن يعدي الـ5 ثواني الافتراضية بسهولة.
+  await expectToast(page, '✅ تم إنشاء النسخة الاحتياطية بنجاح', 30_000);
 
   const firstCard = page.getByTestId('admin-backup-card').first();
   await firstCard.waitFor({ state: 'visible', timeout: 15_000 });
@@ -60,7 +69,10 @@ test('فتح مودال تأكيد الاستعادة، فاليديشن حقل 
   await openAdminSection(page, 'backup');
 
   await page.getByTestId('admin-backup-create-button').click();
-  await expectToast(page, '✅ تم إنشاء النسخة الاحتياطية بنجاح');
+  // ⚠️ مهلة أطول من الافتراضي: إنشاء نسخة احتياطية بيصدّر كل جداول المكتب
+  // بالتسلسل على بيانات production حقيقية (مفيش staging)، فالوقت بيتناسب
+  // مع حجم البيانات الفعلي وممكن يعدي الـ5 ثواني الافتراضية بسهولة.
+  await expectToast(page, '✅ تم إنشاء النسخة الاحتياطية بنجاح', 30_000);
 
   const firstCard = page.getByTestId('admin-backup-card').first();
   await firstCard.waitFor({ state: 'visible', timeout: 15_000 });
