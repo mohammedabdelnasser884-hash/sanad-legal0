@@ -58,7 +58,7 @@ test('2) إنشاء جلسة مستقلة بأكتر من طرف — فاليد�
   // القانوني الجامع لجهة المدعى عليهم فاضي.
   await page.getByTestId('new-session-defendant-subform-save').click();
   await page.getByTestId('new-session-save').click();
-  await expectToast(page, '⚠️ الطرف الثاني (المدعى عليه) فيه أكثر من شخص — لازم تكتب "المسمى القانوني" الجامع لهذا الطرف');
+  await expectToast(page, 'يرجى مراجعة بيانات أطراف الدعوى');
 
   // نرجع نملأ المسمى القانوني الجامع ونحفظ تاني — لازم ينجح دلوقتي.
   await page.getByTestId('party-side-card-defendant').click();
@@ -177,6 +177,16 @@ test('6) حفظ الجلسة المستقلة أوفلاين', async ({ page, co
   await page.getByTestId('new-session-plaintiff-0-capacity').fill('مدعي');
   await page.getByTestId('new-session-plaintiff-0-national-id').fill(`5${Date.now()}`.slice(0, 14));
   await page.getByTestId('new-session-plaintiff-subform-save').click();
+  // ⚠️ FIX (تحليل لوجز E2E — 26 يوليو 2026): usePartyFields.ts بيبدأ
+  // دايمًا بطرف مدعى-عليه فاضي افتراضيًا حتى لو التست ملوش قصد يضيفه —
+  // وفاليديشن casePartiesValidation.ts بترفض الحفظ لو اسمه فاضي (نفس
+  // قاعدة "اسم الطرف مطلوب" لأي طرف في الـarray). كان التست بيملى
+  // المدعي بس، فبيقع دايمًا على توست "اسم الطرف مطلوب" بدل توست
+  // الأوفلاين المتوقع. لازم نملى المدعى عليه برضو قبل الحفظ.
+  await page.getByTestId('party-side-card-defendant').click();
+  await page.getByTestId('new-session-defendant-0-name').fill('خصم أوفلاين E2E');
+  await page.getByTestId('new-session-defendant-0-capacity').fill('مدعى عليه');
+  await page.getByTestId('new-session-defendant-subform-save').click();
 
   await context.setOffline(true);
   try {
