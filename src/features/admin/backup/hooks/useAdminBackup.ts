@@ -126,21 +126,36 @@ export function useAdminBackup(profile?: ProfileRow | null) {
     }
 
     setBackupProgress('جاري الحفظ...');
-    const totalRows = Object.values(snapshot.tables).reduce((s: number, t: unknown[])=>s+t.length, 0);
-    const sizeKb = Math.round(JSON.stringify(snapshot).length / 1024);
+    let totalRows = 0;
+    let sizeKb = 0;
+    let error: unknown = null;
+    try {
+      totalRows = Object.values(snapshot.tables).reduce((s: number, t: unknown[])=>s+t.length, 0);
+      sizeKb = Math.round(JSON.stringify(snapshot).length / 1024);
 
-    const { error } = await db.from('backups').insert([{
-      created_by: profile?.id,
-      created_by_name: profile?.full_name || 'مدير',
-      tables_count: tables.length,
-      rows_count: totalRows,
-      size_kb: sizeKb,
-      data: snapshot,
-    }]);
+      ({ error } = await db.from('backups').insert([{
+        created_by: profile?.id,
+        created_by_name: profile?.full_name || 'مدير',
+        tables_count: tables.length,
+        rows_count: totalRows,
+        size_kb: sizeKb,
+        data: snapshot,
+      }]));
+    } catch (e) {
+      // 🔎 TEMP DEBUG (تشخيص فشل admin-backup — 26 يوليو 2026): التوست
+      // مكنش بيظهر خالص (لا نجاح ولا فشل) — يعني في استثناء غير ملتقط قبل
+      // ما نوصل لأي toast(). بدل ما يضيع صامت، بنحوّله لتوست فيه رسالة
+      // الخطأ الخام، عشان تظهر في "Received:" بتاعة expectToast في اللوج.
+      // يتشال بعد ما نعرف السبب الحقيقي.
+      setCreatingBackup(false);
+      setBackupProgress('');
+      toast('❌ [TEMP DEBUG] استثناء غير متوقع: ' + (e instanceof Error ? e.message : String(e)), true);
+      return;
+    }
 
     setCreatingBackup(false);
     setBackupProgress('');
-    if (error) { toast('❌ فشل حفظ النسخة الاحتياطية', true); return; }
+    if (error) { toast('❌ فشل حفظ النسخة الاحتياطية — [TEMP DEBUG] ' + JSON.stringify(error), true); return; }
     toast(incomplete ? '⚠️ تم الحفظ لكن بعض الجداول فشل تصديرها — راجع النسخة' : '✅ تم إنشاء النسخة الاحتياطية بنجاح');
     logActivity(db, 'إنشاء نسخة احتياطية', { entity_type: 'backup', details: `${totalRows} صف — ${sizeKb} KB`, userName: _userName });
     fetchBackups();
