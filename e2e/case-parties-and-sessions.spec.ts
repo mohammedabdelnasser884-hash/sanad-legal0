@@ -294,10 +294,12 @@ test('تعارض تعديل جلسة عند التحديث المتزامن من
 });
 
 test('حفظ جلسة جديدة أوفلاين في تبويب الجلسات', async ({ page, context }) => {
-  // 🔎 TEMP DEBUG (تشخيص فشل الحفظ أوفلاين — 26 يوليو 2026): نفس فيكس
-  // standalone-sessions.spec.ts — يتشال بعد ما نعرف السبب.
+  // 🔎 TEMP DEBUG (نسخة 3 — 26 يوليو 2026): زي standalone-sessions.spec.ts
+  // — console.log عن طريق page.on('console') بيضيع مع reporter: 'list'،
+  // فبنجمع الرسائل ونرميها جوه رسالة الخطأ نفسها لو التوست المتوقع فشل.
+  const consoleErrors: string[] = [];
   page.on('console', (msg) => {
-    if (msg.type() === 'error') console.log(`[browser console] ${msg.text()}`);
+    if (msg.type() === 'error') consoleErrors.push(msg.text());
   });
   await login(page);
   const caseTitle = `اختبار E2E - جلسة أوفلاين - ${Date.now()}`;
@@ -313,7 +315,17 @@ test('حفظ جلسة جديدة أوفلاين في تبويب الجلسات',
   await context.setOffline(true);
   try {
     await page.getByTestId('save-session-button').click();
-    await expectToast(page, '📥 الجلسة محفوظة محلياً — ستُزامن عند عودة الإنترنت');
+    try {
+      await expectToast(page, '📥 الجلسة محفوظة محلياً — ستُزامن عند عودة الإنترنت');
+    } catch (e) {
+      // 🔎 TEMP DEBUG: نفس فكرة standalone-sessions.spec.ts.
+      const onLineNow = await page.evaluate(() => navigator.onLine).catch(() => 'unknown');
+      throw new Error(
+        `[TEMP DEBUG] فشل توست الأوفلاين — navigator.onLine: ${onLineNow}\n` +
+        `console errors ملتقطة: ${consoleErrors.length ? consoleErrors.join(' | ') : '(مفيش)'}\n` +
+        `الخطأ الأصلي: ${(e as Error).message}`
+      );
+    }
     await expect(page.getByTestId('session-description')).not.toBeVisible({ timeout: 10_000 });
   } finally {
     await context.setOffline(false);
