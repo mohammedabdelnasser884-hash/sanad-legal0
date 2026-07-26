@@ -47,7 +47,10 @@ test.describe('الموكلين — إضافة', () => {
     const name = `اختبار E2E - دبل كليك إضافة - ${Date.now()}`;
     await page.getByTestId('new-client-name').fill(name);
     await page.getByTestId('new-client-phone').fill('01222222222');
-    await page.getByTestId('new-client-national-id').fill(`2900101${Date.now()}`.slice(0, 14));
+    // ⚠️ FIX: راجع نفس التعليق في dashboard-tab.spec.ts — .slice(0, 14) كانت
+    // بتسيب رقم قومي شبه ثابت لمدة ~16-17 دقيقة (تكرار حقيقي بين تشغيلتين
+    // قريبتين). آخر 14 خانة بدل الأول.
+    await page.getByTestId('new-client-national-id').fill(`2900101${Date.now()}`.slice(-14));
 
     // بنضغط الزرار مرتين ورا بعض جوه نفس الـtask (من غير أي فاصل زمني
     // حقيقي بين الضغطتين) عشان نتأكد إن الحماية شغالة حتى لو الضغطتين
