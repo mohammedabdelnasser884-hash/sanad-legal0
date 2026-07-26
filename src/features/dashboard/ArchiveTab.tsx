@@ -248,7 +248,9 @@ function ArchiveTab({cases, clients, nav}: ArchiveTabProps){
 
         React.createElement('input',{
             ref:fileInputRef, type:'file',
-            accept:'image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt',
+            // ⚠️ FIX: نفس فيكس DocsSection.tsx — .txt مرفوضة فعليًا من
+            // validateUploadFile() فشيلناها من الـaccept هنا كمان عشان تتطابق.
+            accept:'image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx',
             onChange:handleFileSelect, style:{display:'none'},
             'data-testid':'archive-file-input'
         }),
