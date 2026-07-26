@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { toast } from '../../../../shared/lib/notifications';
+import { showErrorToast } from '../../../../shared/lib/errorReporting';
 import { logActivity } from '../../../../shared/lib/dataAccess';
 import { db } from '../../../../supabaseClient';
 import { formatArDate } from '../../../../shared/ui/arabicLocale';
@@ -142,14 +143,18 @@ export function useAdminBackup(profile?: ProfileRow | null) {
         data: snapshot,
       }]));
     } catch (e) {
-      // 🔎 TEMP DEBUG (تشخيص فشل admin-backup — 26 يوليو 2026): التوست
-      // مكنش بيظهر خالص (لا نجاح ولا فشل) — يعني في استثناء غير ملتقط قبل
-      // ما نوصل لأي toast(). بدل ما يضيع صامت، بنحوّله لتوست فيه رسالة
-      // الخطأ الخام، عشان تظهر في "Received:" بتاعة expectToast في اللوج.
-      // يتشال بعد ما نعرف السبب الحقيقي.
+      // ✅ تشخيص فشل admin-backup (26 يوليو 2026): اتأكد إن السبب كان وقت
+      // العملية (تصدير + حفظ كل جداول المكتب بالتسلسل على بيانات production
+      // حقيقية) بياخد وقت أطول من مهلة التست القديمة، مش استثناء حقيقي —
+      // راجع e2e/admin-backup.spec.ts (مهلة expectToast اتزودت لـ30 ثانية).
       setCreatingBackup(false);
       setBackupProgress('');
-      toast('❌ [TEMP DEBUG] استثناء غير متوقع: ' + (e instanceof Error ? e.message : String(e)), true);
+      showErrorToast(
+        'admin_backup_create',
+        e,
+        'تعذّر إنشاء النسخة الاحتياطية. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.',
+        'إنشاء نسخة احتياطية',
+      );
       return;
     }
 
