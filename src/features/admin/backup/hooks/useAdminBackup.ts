@@ -155,7 +155,7 @@ export function useAdminBackup(profile?: ProfileRow | null) {
 
     setCreatingBackup(false);
     setBackupProgress('');
-    if (error) { toast('❌ فشل حفظ النسخة الاحتياطية — [TEMP DEBUG] ' + JSON.stringify(error), true); return; }
+    if (error) { toast('❌ فشل حفظ النسخة الاحتياطية', true); return; }
     toast(incomplete ? '⚠️ تم الحفظ لكن بعض الجداول فشل تصديرها — راجع النسخة' : '✅ تم إنشاء النسخة الاحتياطية بنجاح');
     logActivity(db, 'إنشاء نسخة احتياطية', { entity_type: 'backup', details: `${totalRows} صف — ${sizeKb} KB`, userName: _userName });
     fetchBackups();
