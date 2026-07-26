@@ -383,6 +383,7 @@ export default function AdminPanel({ profile, lawyers, clients, fetchLawyers, co
       React.createElement('button',{
         key:'office',
         onClick:()=>setSection('office'),
+        'data-testid': 'admin-section-office',
         className:'active:scale-[0.97] transition-all text-right',
         style:{
           gridColumn:'span 2',
@@ -419,6 +420,7 @@ export default function AdminPanel({ profile, lawyers, clients, fetchLawyers, co
       React.createElement('button',{
         key:'legal_library',
         onClick:()=>setSection('legal_library'),
+        'data-testid': 'admin-section-legal_library',
         className:'active:scale-[0.97] transition-all text-right',
         style:{
           gridColumn:'span 2',
