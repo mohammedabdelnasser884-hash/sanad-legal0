@@ -6,10 +6,12 @@ import { login } from './utils';
 // متغطي بالفعل في docs.spec.ts). الشاشة كانت من غير أي testid خالص.
 // نطاق Smoke: مسار واحد — رفع مستند غير مرتبط بقضية، ظهوره في القائمة،
 // البحث عنه، ومسح البحث من غير كسر.
+// ⚠️ FIX (تحليل لوجز E2E — 26 يوليو 2026): نفس فيكس docs.spec.ts — .txt
+// مرفوضة فعليًا من ALLOWED_UPLOAD_EXTENSIONS، غيّرناها لـ.pdf.
 function makeArchiveTestFile(prefix: string, content: string) {
   return {
-    name: `${prefix}-${Date.now()}.txt`,
-    mimeType: 'text/plain',
+    name: `${prefix}-${Date.now()}.pdf`,
+    mimeType: 'application/pdf',
     buffer: Buffer.from(content, 'utf-8'),
   };
 }
