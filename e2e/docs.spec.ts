@@ -8,10 +8,16 @@ import { login, createAndOpenCase, expectToast } from './utils';
 // شبكية ماديًا مش ممكن تتقيّد في طابور offline)، البحث في المستندات،
 // وحذف مستند (إلغاء التأكيد + تنفيذ فعلي).
 
+// ⚠️ FIX (تحليل لوجز E2E — 26 يوليو 2026): كانت الملفات هنا .txt، وده
+// امتداد مرفوض فعليًا في ALLOWED_UPLOAD_EXTENSIONS (storage.ts) — الفورم
+// كان بيرفض الملف بصمت (toast خطأ) وdoc-label-input مكنش بيظهر خالص، فكل
+// تستات docs.spec.ts كانت بتفشل بتايم-أوت من أول خطوة رفع. غيّرنا الامتداد
+// لـ.pdf (من ضمن الـwhitelist) — المحتوى نص عادي وده كافي لغرض الاختبار
+// (السيرفر مش بيتحقق من صحة بايتات PDF وقت الرفع).
 function makeTestFile(prefix: string, content: string) {
   return {
-    name: `${prefix}-${Date.now()}.txt`,
-    mimeType: 'text/plain',
+    name: `${prefix}-${Date.now()}.pdf`,
+    mimeType: 'application/pdf',
     buffer: Buffer.from(content, 'utf-8'),
   };
 }
