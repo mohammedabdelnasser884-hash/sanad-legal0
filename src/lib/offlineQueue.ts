@@ -916,18 +916,22 @@ window.__dbWrite = async function <T extends DbWriteTable>({ type, table, data, 
             } else if (type === 'DELETE') {
                 ({ error } = await dbFrom(table).delete().eq('id', id as string));
             }
-            if (error) {
-                // 🔎 TEMP DEBUG (تشخيص فشل الحفظ أوفلاين — 26 يوليو 2026): لو
-                // navigator.onLine رجع true رغم إن المتصفح فعليًا أوفلاين
-                // (Playwright context.setOffline)، بندخل هنا بدل مسار
-                // __offlineEnqueue تمامًا — ده هيوضح لو المشكلة أصلًا في كشف
-                // حالة الاتصال، أو في خطأ حقيقي من السيرفر. سطر مؤقت، يتشال بعدين.
-                console.error('[TEMP DEBUG][__dbWrite online-path] table:', table, 'type:', type, 'navigator.onLine:', navigator.onLine, 'error:', JSON.stringify(error));
-            }
             return { error, offline: false, data: insertedRow || updatedRow };
         } catch {
             // الشبكة بتقول أونلاين بس الطلب فشل فعليًا — نحاول نحفظ محليًا
-            const saved = await window.__offlineEnqueue({ type, table, data, id, knownUpdatedAt });
+            // 🐛 FIX (تشخيص أوفلاين — نسخة 3، 26 يوليو 2026): كان بيتبعت
+            // `{ type, table, data, id, knownUpdatedAt }` بالـ shorthand
+            // دايمًا — يعني في عمليات INSERT (id === undefined)، الخاصية
+            // `id` كانت لسه موجودة كـ "own property" بقيمة undefined بدل
+            // ما تكون غائبة تمامًا. IndexedDB بيفرّق بين الاتنين: خاصية
+            // غائبة = يولّد autoIncrement، خاصية موجودة بقيمة undefined =
+            // `DataError: ...key path yielded a value that is not a valid
+            // key`. ده كان بيكسر أي INSERT أوفلاين فعليًا (مش بس في
+            // التستات) لأن __offlineEnqueue كان بيرجع false دايمًا في
+            // الحالة دي. الفيكس: منضيفش `id` للـ object أصلاً لو undefined.
+            const opToQueue: Record<string, unknown> = { type, table, data, knownUpdatedAt };
+            if (id !== undefined) opToQueue.id = id;
+            const saved = await window.__offlineEnqueue(opToQueue);
             if (!saved) {
                 // BUG FIX: قبل كان بيرجع queued:true دايمًا حتى لو فشل الحفظ في
                 // IndexedDB، فالمستخدم يشوف "محفوظة محلياً" والبيانات ضايعة فعليًا.
@@ -937,7 +941,12 @@ window.__dbWrite = async function <T extends DbWriteTable>({ type, table, data, 
         }
     } else {
         // نحفظ knownUpdatedAt في الـ Queue عشان نستخدمه وقت المزامنة
-        const saved = await window.__offlineEnqueue({ type, table, data, id, knownUpdatedAt });
+        // 🐛 FIX (زي أعلاه بالظبط): نفس المشكلة، وده هو المسار اللي فعليًا
+        // بيتنفّذ في تستات الأوفلاين (context.setOffline(true) → navigator.onLine
+        // false مباشرة) — ده كان السبب الحقيقي الوحيد لكل فشل التستات دي.
+        const opToQueue: Record<string, unknown> = { type, table, data, knownUpdatedAt };
+        if (id !== undefined) opToQueue.id = id;
+        const saved = await window.__offlineEnqueue(opToQueue);
         if (!saved) {
             // BUG FIX: نفس المشكلة — هنا كانت أوضح، لأن المستخدم فعليًا offline
             // وملوش طريقة تانية يحفظ بيها، فلو IndexedDB فشلت (مساحة تخزين ممتلئة،
