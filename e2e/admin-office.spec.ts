@@ -22,8 +22,15 @@ test('حفظ إعدادات المكتب: تعديل الاسم والسلوجن
   const nameInput = page.getByTestId('admin-office-field-name');
   const sloganInput = page.getByTestId('admin-office-field-slogan');
   await nameInput.waitFor({ state: 'visible', timeout: 10_000 });
-  const originalName = await nameInput.inputValue();
+  const originalNameRaw = await nameInput.inputValue();
   const originalSlogan = await sloganInput.inputValue();
+
+  // ⚠️ زرار الحفظ متعطّل لو حقل الاسم فاضي (disabled: !officeSettings.name?.trim()
+  // في OfficeSection.tsx) — ده شرط عمل صحيح في التطبيق (مش لازم نغيّره)، لكنه
+  // معناه إننا منقدرش "نرجّع" الاسم لحالة فاضية في التنظيف لو كان فاضي من
+  // الأساس (زي أول مرة office_settings بتتعمل تلقائيًا لمكتب التست عن طريق
+  // generate_invoice_number). في الحالة دي بنسيب اسم افتراضي واضح بدل الفاضي.
+  const originalName = originalNameRaw.trim() || 'مكتب اختبار E2E (افتراضي)';
 
   await nameInput.fill(newName);
   await sloganInput.fill(newSlogan);
