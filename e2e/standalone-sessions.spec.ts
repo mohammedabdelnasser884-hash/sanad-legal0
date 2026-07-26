@@ -162,17 +162,6 @@ test('5) إضافة الموكل لقائمة الموكلين فقط من خط�
 });
 
 test('6) حفظ الجلسة المستقلة أوفلاين', async ({ page, context }) => {
-  // 🔎 TEMP DEBUG (نسخة 3 — 26 يوليو 2026): النسخة اللي فاتت كانت بتطبع
-  // console.error المتصفح عن طريق console.log في Node (page.on('console'))،
-  // لكن ده اتضح إنه بيضيع تمامًا مع reporter: 'list' — الـstdout المُلتقط
-  // مبيتطبعش في لوج الـCI النصي أصلاً (بيفضل جوه trace.zip/HTML report
-  // بس، اللي مش بيترفع). فبدل console.log، بنجمع الرسائل في array، ولو
-  // التوست المتوقع فشل، بنرميها كلها + navigator.onLine جوه رسالة
-  // الخطأ نفسها — ده مضمون يظهر في قسم Expected/Received بتاع اللوج.
-  const consoleErrors: string[] = [];
-  page.on('console', (msg) => {
-    if (msg.type() === 'error') consoleErrors.push(msg.text());
-  });
   await login(page);
   const title = `اختبار E2E - جلسة أوفلاين - ${Date.now()}`;
 
@@ -202,18 +191,7 @@ test('6) حفظ الجلسة المستقلة أوفلاين', async ({ page, co
   await context.setOffline(true);
   try {
     await page.getByTestId('new-session-save').click();
-    try {
-      await expectToast(page, '📥 الجلسة المستقلة محفوظة محلياً — ستُضاف فور عودة الإنترنت');
-    } catch (e) {
-      // 🔎 TEMP DEBUG: نرمي الخطأ الأصلي زائد أي console.error اتلقط زائد
-      // navigator.onLine وقت الفشل، عشان تظهر كلها في اللوج النصي.
-      const onLineNow = await page.evaluate(() => navigator.onLine).catch(() => 'unknown');
-      throw new Error(
-        `[TEMP DEBUG] فشل توست الأوفلاين — navigator.onLine: ${onLineNow}\n` +
-        `console errors ملتقطة: ${consoleErrors.length ? consoleErrors.join(' | ') : '(مفيش)'}\n` +
-        `الخطأ الأصلي: ${(e as Error).message}`
-      );
-    }
+    await expectToast(page, '📥 الجلسة المستقلة محفوظة محلياً — ستُضاف فور عودة الإنترنت');
     // أونلاين وضع "standalone" بيفتح مودال "تحويل لقضية؟"، لكن أوفلاين
     // (offline && queued) بيقفل المودال فورًا (راجع handleSave) — بلا
     // فقد بيانات، الجلسة اتقيّدت في طابور الأوفلاين.
