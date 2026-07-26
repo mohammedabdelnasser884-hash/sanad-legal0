@@ -75,6 +75,12 @@ function App() {
     const setShowAI          = useCallback((v: boolean) => v ? nav.openModal('ai')         : nav.closeModal('ai'),         [nav]);
     const showNewSessionModal    = nav.isOpen('newSession');
     const setShowNewSessionModal = useCallback((v: boolean) => v ? nav.openModal('newSession') : nav.closeModal('newSession'), [nav]);
+    // ⚡ [جديد] بيتزوّد بعد حفظ جلسة مستقلة جديدة، عشان SessionsCalendar
+    // (اللي عنده refreshKey داخلي منفصل) يعمل refetch فوري لبيانات
+    // التقويم — قبل كده كان بيفضل شايف بيانات قديمة لحد ما تتغيّر
+    // الشهر يدويًا. راجع SessionsCalendar.tsx / AppModals.tsx.
+    const [sessionsRefreshSignal, setSessionsRefreshSignal] = useState(0);
+    const bumpSessionsRefreshSignal = useCallback(() => setSessionsRefreshSignal((k) => k + 1), []);
     const showFeesSummary    = nav.isOpen('feeSummary');
     const setShowFeesSummary = useCallback((v: boolean) => v ? nav.openModal('feeSummary') : nav.closeModal('feeSummary'), [nav]);
 
@@ -392,6 +398,7 @@ function App() {
                     onOpenReminders: () => { setRemindersInitialFilter('overdue'); setTab('reminders'); },
                     onClientAdded: () => { fetchClients(0, clientSearch); },
                     initialTab: sessionsInitialTab ?? undefined,
+                    externalRefreshSignal: sessionsRefreshSignal,
                     nav,
                     onOpenClientProfile: (c) => setSelectedClient(c as MappedClient),
                 })
@@ -435,6 +442,7 @@ function App() {
             _setDeleteConfirm, _setSelectedClient, _setSelectedCase,
             setCases, setCasesFilter, setCasesPage,
             fetchCases, fetchTodaySessions, fetchUpcomingSessions,
+            onStandaloneSessionSaved: bumpSessionsRefreshSignal,
             fetchClients, clientSearch,
             handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleUnlinkClient, handleCreateAndLinkClient: handleOpenCreateClientForCase,
             handleOpenCreateClientForSession, handleOpenCreateClientForSessionCase: handleOpenCreateClientForCase,
