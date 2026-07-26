@@ -17,6 +17,12 @@ test('تبويب الفائتة: جلسة بدون قرار تظهر وفتحه�
   await createAndOpenCase(page, caseTitle);
   await addMissedSession(page, 'جلسة اختبار E2E - فائتة');
 
+  // ⚠️ FIX: نفس مشكلة calendar-month-tab.spec.ts — case-detail-view لسه
+  // مفتوح هنا وبيغطي الدوك السفلي بالكامل (z-50 fixed inset-0)، فكليك
+  // nav-calendar كان بيتحجب ويفشل التست بـTest timeout بعد 30 ثانية.
+  await page.getByTestId('case-detail-close').click();
+  await page.getByTestId('case-detail-view').waitFor({ state: 'hidden', timeout: 10_000 });
+
   await page.getByTestId('nav-calendar').click();
   await page.getByTestId('calendar-subtab-missed').click();
 
