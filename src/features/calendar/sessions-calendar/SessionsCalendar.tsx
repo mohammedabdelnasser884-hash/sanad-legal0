@@ -64,7 +64,6 @@ function SessionsCalendar({ cases, clients, onOpenCase, onOpenReminders, onClien
     useEffect(() => {
         if (!skippedFirstRun.current) { skippedFirstRun.current = true; return; }
         if (externalRefreshSignal !== undefined) setRefreshKey((k) => k + 1);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [externalRefreshSignal]);
 
     // جلب عدد الفائتة لعرضه على الـ badge
