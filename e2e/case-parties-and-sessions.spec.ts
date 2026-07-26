@@ -294,6 +294,11 @@ test('تعارض تعديل جلسة عند التحديث المتزامن من
 });
 
 test('حفظ جلسة جديدة أوفلاين في تبويب الجلسات', async ({ page, context }) => {
+  // 🔎 TEMP DEBUG (تشخيص فشل الحفظ أوفلاين — 26 يوليو 2026): نفس فيكس
+  // standalone-sessions.spec.ts — يتشال بعد ما نعرف السبب.
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') console.log(`[browser console] ${msg.text()}`);
+  });
   await login(page);
   const caseTitle = `اختبار E2E - جلسة أوفلاين - ${Date.now()}`;
   await createAndOpenCase(page, caseTitle);
