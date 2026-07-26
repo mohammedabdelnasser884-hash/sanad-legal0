@@ -94,7 +94,12 @@ function CommandDock({
                     onClick: () => { setShowAI(true); setShowMore(false); },
                     'data-testid': 'nav-ai-center',
                     className: 'w-[48px] h-[48px] rounded-[16px] flex items-center justify-center active:scale-90 transition-transform relative overflow-hidden',
-                    style: { background: 'linear-gradient(135deg,#c9922a,#D4AF37,#E8C84A)', boxShadow: '0 4px 24px rgba(212,175,55,0.55), 0 0 0 1px rgba(212,175,55,0.3)', animation: 'pulseGlow 3s ease-in-out infinite' }
+                    // ⚠️ FIX: كانت 'pulseGlow' (بتعمل transform:scale() على الزرار نفسه بشكل
+                    // مستمر) — ده بيخلي الزرار "غير مستقر" أبديًا لأي أداة أتمتة بتتأكد من
+                    // ثبات مكان العنصر قبل الضغط (Playwright)، وده تحسّسه فعليًا نفس المستخدم
+                    // العادي لو حاول يدوس بالظبط وقت تغيّر الحجم. 'pulseGlowStatic' بتحافظ على
+                    // نفس تأثير التوهج (box-shadow) من غير ما تحرك حدود الزرار نفسه.
+                    style: { background: 'linear-gradient(135deg,#c9922a,#D4AF37,#E8C84A)', boxShadow: '0 4px 24px rgba(212,175,55,0.55), 0 0 0 1px rgba(212,175,55,0.3)', animation: 'pulseGlowStatic 3s ease-in-out infinite' }
                 }, React.createElement(I.AI, { cls: 'w-6 h-6 text-[#070d1a]' })),
                 React.createElement('span', { className: 'text-[7.5px] font-black text-premium-gold mt-[2px] leading-none' }, 'AI')
             ),
