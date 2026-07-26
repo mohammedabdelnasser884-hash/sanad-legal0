@@ -58,7 +58,7 @@ test('2) إنشاء جلسة مستقلة بأكتر من طرف — فاليد�
   // القانوني الجامع لجهة المدعى عليهم فاضي.
   await page.getByTestId('new-session-defendant-subform-save').click();
   await page.getByTestId('new-session-save').click();
-  await expectToast(page, 'يرجى مراجعة بيانات أطراف الدعوى');
+  await expectToast(page, '⚠️ الطرف الثاني (المدعى عليه) فيه أكثر من شخص — لازم تكتب "المسمى القانوني" الجامع لهذا الطرف');
 
   // نرجع نملأ المسمى القانوني الجامع ونحفظ تاني — لازم ينجح دلوقتي.
   await page.getByTestId('party-side-card-defendant').click();
