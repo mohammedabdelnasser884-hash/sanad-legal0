@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { db } from '../../../supabaseClient';
 import { toast } from '../../../shared/lib/notifications';
+import { showErrorToast } from '../../../shared/lib/errorReporting';
 import { escapeTelegramHtml } from '../../../shared/lib/sanitize';
 import { logActivity, recalcNextHearing as recalcNextHearingShared } from '../../../shared/lib/dataAccess';
 import type { ClientRow, ProfileRow, CaseSessionRow } from '../../../types';
@@ -75,13 +76,12 @@ export function useCaseSessions(
       return;
     }
     if (error) {
-      // 🔎 TEMP DEBUG (تشخيص فشل الحفظ أوفلاين — 26 يوليو 2026): مفيش أي
-      // console.error هنا أصلًا قبل كده، فالخطأ الخام من __dbWrite ضايع
-      // تمامًا ومفيش طريقة نعرف السبب الحقيقي من لوجز CI. الغرض من السطر
-      // ده مؤقت بس لحد ما نعرف السبب، وبعدين المفروض يتشال أو يتحول
-      // لـrecordError زي باقي أماكن معالجة الأخطاء في المشروع.
-      console.error('[TEMP DEBUG][handleAddSession] __dbWrite error:', JSON.stringify(error), 'offline:', offline, 'queued:', queued);
-      toast('❌ فشل إضافة الجلسة — تحقق من الاتصال وأعد المحاولة', true);
+      // 🔒 FIX (تشخيص أوفلاين — نسخة 3، 26 يوليو 2026): قبل كده الخطأ الخام
+      // من __dbWrite كان بيضيع تمامًا (مفيش تسجيل خالص) — استُخدمت
+      // showErrorToast بدل toast مباشر عشان الخطأ الخام يتسجل في نظام صحة
+      // الخدمات (recordError) زي باقي أماكن معالجة الأخطاء في المشروع، من
+      // غير ما يتعرض للمستخدم.
+      showErrorToast('db_sessions', error, 'فشل إضافة الجلسة — تحقق من الاتصال وأعد المحاولة', 'إضافة جلسة قضية');
       return;
     }
     // تحديث أقرب جلسة في جدول القضايا — بمقارنة حقيقية، مش استبدال أعمى
