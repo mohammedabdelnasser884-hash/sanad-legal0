@@ -916,6 +916,14 @@ window.__dbWrite = async function <T extends DbWriteTable>({ type, table, data, 
             } else if (type === 'DELETE') {
                 ({ error } = await dbFrom(table).delete().eq('id', id as string));
             }
+            if (error) {
+                // 🔎 TEMP DEBUG (تشخيص فشل الحفظ أوفلاين — 26 يوليو 2026): لو
+                // navigator.onLine رجع true رغم إن المتصفح فعليًا أوفلاين
+                // (Playwright context.setOffline)، بندخل هنا بدل مسار
+                // __offlineEnqueue تمامًا — ده هيوضح لو المشكلة أصلًا في كشف
+                // حالة الاتصال، أو في خطأ حقيقي من السيرفر. سطر مؤقت، يتشال بعدين.
+                console.error('[TEMP DEBUG][__dbWrite online-path] table:', table, 'type:', type, 'navigator.onLine:', navigator.onLine, 'error:', JSON.stringify(error));
+            }
             return { error, offline: false, data: insertedRow || updatedRow };
         } catch {
             // الشبكة بتقول أونلاين بس الطلب فشل فعليًا — نحاول نحفظ محليًا
