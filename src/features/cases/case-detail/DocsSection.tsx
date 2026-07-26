@@ -39,7 +39,13 @@ function DocsSection({
                     'data-testid': 'doc-file-input',
                     ref: fileInputRef,
                     type: 'file',
-                    accept: 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt',
+                    // ⚠️ FIX: كانت شايلة .txt في accept بينما validateUploadFile()
+                    // (whitelist الأمان) بترفضها فعليًا — اختلاف كان بيخلي أي حد
+                    // يختار .txt ياخد رسالة رفض بصمت بعد الاختيار مباشرة (وده اللي
+                    // كان بيكسر تستات e2e اللي بتستخدم ملفات .txt للاختبار). شيلنا
+                    // .txt من هنا عشان الـaccept يبقى مطابق تمامًا لـALLOWED_UPLOAD_EXTENSIONS
+                    // في storage.ts (راجع تحليل لوجز E2E — 26 يوليو 2026).
+                    accept: 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx',
                     onChange: handleFileSelect,
                     style: {display: 'none'}
                 }),
