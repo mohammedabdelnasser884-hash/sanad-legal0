@@ -5,7 +5,6 @@ import { checkCaseNumberDuplicate } from '../../../shared/lib/caseValidation';
 import { showErrorToast } from '../../../shared/lib/errorReporting';
 import { db } from '../../../supabaseClient';
 import { withFkOfflineSentinel } from '../../calendar/hooks/caseSessionLinkingShared';
-import { useRef } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type { ClientRow, ProfileRow } from '../../../types';
 import type { NavigationState } from '../../../useNavigation';
@@ -88,6 +87,19 @@ export interface DeleteConfirmState {
     deleteConsequences?: string[];
 }
 
+// 🔒 FIX (دبل-كليك حقيقي على زرار حفظ القضية الجديدة/تعديلها):
+// setSavingCase(true) بيجدول re-render، ومفيش ضمان إنه يخلص وي disabled
+// يتفعّل قبل ما ثاني حدث click (دبل كليك سريع فعلي، مش React batching)
+// ينفّذ نفس الـonClick تاني. النتيجة: قضيتين بنفس البيانات بيتسجلوا.
+// ⚠️ متعرّفين هنا برّه الدالة (مش useRef جوّاها) عشان useCaseActions()
+// بتتنادى كـfunction عادي مباشرة (في التستات وفي الاستخدام الفعلي —
+// مش عن طريق renderHook)، فـuseRef هيدور على React render context مش
+// موجود أصلاً. متغيّر على مستوى الملف بيفضل قيمته بين النداءات المتتالية
+// من غير أي اعتماد على React، وده كافي هنا لأن التطبيق تبويب واحد لكل
+// مستخدم (نفس فلسفة window.__dbWrite في offlineQueue.ts).
+let creatingCaseGuard = false;
+let updatingCaseGuard = false;
+
 export function useCaseActions(params: {
     sendTelegram: (text: string) => void | Promise<void>;
     fetchCases: (page?: number, filter?: string) => void | Promise<void>;
@@ -120,15 +132,6 @@ export function useCaseActions(params: {
     } = params;
     const _userName = profile?.full_name || null;
 
-    // 🔒 FIX (دبل-كليك حقيقي على زرار حفظ القضية الجديدة): setSavingCase(true)
-    // بيجدول re-render، ومفيش ضمان إنه يخلص وي disabled يتفعّل قبل ما ثاني
-    // حدث click (دبل كليك سريع فعلي، مش React batching) ينفّذ نفس الـ onClick
-    // تاني. النتيجة: قضيتين بنفس البيانات بيتسجلوا. refs هنا بتتفحص/تتحدّث
-    // بشكل متزامن (مش عن طريق state) قبل أي await، فبتقفل الباب فورًا مهما كان
-    // توقيت الـ re-render.
-    const creatingCaseRef = useRef(false);
-    const updatingCaseRef = useRef(false);
-
     // ─ تسجيل خروج ─
     const handleLogout = async () => {
         // نسجّل الخروج قبل signOut عشان الـ session لسه شغّالة
@@ -145,12 +148,12 @@ export function useCaseActions(params: {
     const handleSaveCase = async (form: CaseFormSubmitData) => {
         // 🔒 فحص متزامن أولًا — قبل أي setState أو await — عشان يمنع دخول
         // ثاني نداء لو دبل-كليك سريع حصل فعليًا قبل ما disabled يتفعّل.
-        if (creatingCaseRef.current) return;
+        if (creatingCaseGuard) return;
         if (!form.title || !form.title.trim()) {
             toast('❌ حقل "موضوع ومسمى الدعوى" مطلوب', true);
             return;
         }
-        creatingCaseRef.current = true;
+        creatingCaseGuard = true;
         setSavingCase(true);
         // 🔒 FIX (تقرير الموثوقية — نتيجة 2، مُصحَّحة): فحص تكرار رقم القيد
         // الرسمي — نفس نمط checkClientDuplicate بالظبط (زرار مقفول قبل
@@ -165,11 +168,11 @@ export function useCaseActions(params: {
             caseDup = await checkCaseNumberDuplicate(db, form.number, form.court_level, form.type);
         } catch (e) {
             showErrorToast('case_number_duplicate_check', e, 'تعذّر التحقق من رقم القيد. حاول مرة أخرى.', 'إضافة قضية');
-            creatingCaseRef.current = false;
+            creatingCaseGuard = false;
             setSavingCase(false);
             return;
         }
-        if (caseDup.duplicate) { toast(caseDup.message!, true); creatingCaseRef.current = false; setSavingCase(false); return; }
+        if (caseDup.duplicate) { toast(caseDup.message!, true); creatingCaseGuard = false; setSavingCase(false); return; }
         // 🔒 FIX (تتبع زر "إضافة قضية" — 18 يوليو 2026): معرّف مؤقت client-side
         // فريد لكل عملية إضافة قضية أوفلاين. بيتبعت مع القضية نفسها (وبيتشال
         // قبل أي INSERT حقيقي — شوف stripOfflineSentinels في offlineQueue.ts)،
@@ -321,7 +324,7 @@ export function useCaseActions(params: {
             } else {
                 toast('❌ فشل تسجيل القضية الجديدة — تحقق من الاتصال وأعد المحاولة', true);
             }
-            creatingCaseRef.current = false;
+            creatingCaseGuard = false;
             setSavingCase(false);
             return;
         } else {
@@ -390,7 +393,7 @@ export function useCaseActions(params: {
             sendTelegram(caseMsg);
             fetchCases(0, casesFilter);
         }
-        creatingCaseRef.current = false;
+        creatingCaseGuard = false;
         setSavingCase(false);
         setShowCaseModal(false);
     };
@@ -507,7 +510,7 @@ export function useCaseActions(params: {
     // ─ تعديل قضية ─
     const handleUpdateCase = async (caseId: string, form: CaseFormSubmitData) => {
         // 🔒 نفس فحص handleSaveCase المتزامن — قبل أي setState أو await.
-        if (updatingCaseRef.current) return;
+        if (updatingCaseGuard) return;
         if (!form.title || !form.title.trim()) {
             toast('❌ حقل "موضوع ومسمى الدعوى" مطلوب', true);
             return;
@@ -515,7 +518,7 @@ export function useCaseActions(params: {
         // 🔒 FIX (تقرير الموثوقية — نتيجة 1): الدالة دي ما كانش فيها أي
         // حماية دبل كليك خالص (بعكس handleSaveCase اللي فيها setSavingCase).
         // بنستخدم نفس savingCase state عشان EditCaseModal يقدر يقفل زراره.
-        updatingCaseRef.current = true;
+        updatingCaseGuard = true;
         setSavingCase(true);
         try {
             // 🔒 FIX (تقرير الموثوقية — نتيجة 2، مُصحَّحة): نفس فحص تكرار
@@ -528,11 +531,11 @@ export function useCaseActions(params: {
                 caseDup = await checkCaseNumberDuplicate(db, form.number, form.court_level, form.type, caseId);
             } catch (e) {
                 showErrorToast('case_number_duplicate_check', e, 'تعذّر التحقق من رقم القيد. حاول مرة أخرى.', 'تعديل قضية');
-                updatingCaseRef.current = false;
+                updatingCaseGuard = false;
                 setSavingCase(false);
                 return;
             }
-            if (caseDup.duplicate) { toast(caseDup.message!, true); updatingCaseRef.current = false; setSavingCase(false); return; }
+            if (caseDup.duplicate) { toast(caseDup.message!, true); updatingCaseGuard = false; setSavingCase(false); return; }
 
             // ⚡ NEW (مرحلة 5.2 — خطة تعدد الأطراف، 22 يوليو 2026): نفس فلسفة
             // insertCaseParties في handleSaveCase (فاليديشن سيرفر مكرر أولاً،
@@ -652,7 +655,7 @@ export function useCaseActions(params: {
                 // فوق تعديله بصمت. بنسيب البيانات المعروضة زي ما هي ونطلب من
                 // المستخدم يفتح القضية تاني عشان يشوف آخر نسخة قبل ما يعدّل.
                 toast('⚠️ هذه القضية عدّلها شخص آخر بعد ما فتحتها — أعد فتحها وحاول التعديل مرة أخرى', true);
-                updatingCaseRef.current = false;
+                updatingCaseGuard = false;
                 setSavingCase(false);
                 return;
             } else if (error) {
@@ -661,7 +664,7 @@ export function useCaseActions(params: {
                 } else {
                     toast('❌ فشل تعديل بيانات القضية — تحقق من الاتصال وأعد المحاولة', true);
                 }
-                updatingCaseRef.current = false;
+                updatingCaseGuard = false;
                 setSavingCase(false);
                 return;
             } else {
@@ -729,11 +732,11 @@ export function useCaseActions(params: {
                 sendTelegram(updMsg);
                 fetchCases(0, casesFilter);
             }
-            updatingCaseRef.current = false;
+            updatingCaseGuard = false;
             setSavingCase(false);
         } catch (e) {
             toast('❌ خطأ في الاتصال، تحقق من الإنترنت وأعد المحاولة', true);
-            updatingCaseRef.current = false;
+            updatingCaseGuard = false;
             setSavingCase(false);
         }
     };
