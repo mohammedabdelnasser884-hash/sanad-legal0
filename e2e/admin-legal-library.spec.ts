@@ -4,10 +4,14 @@ import { fileURLToPath } from 'url';
 import { login, openAdminSection, expectToast } from './utils';
 
 // المرحلة 6 (الأدمن) — دفعة 1 (أقل خطورة): المكتبة القانونية.
-// بيغطي: إضافة قانون جديد (برفع PDF فعلي)، تعديل بياناته، وحذفه نهائيًا —
-// نفس تدفق useAdminLegalLibrary.ts (handleSaveLaw/handleDeleteLaw) اللي
-// unit tests (useAdminLegalLibrary.test.ts) بتتأكد من منطقه بس، مش من
-// إن الزرار الحقيقي في الواجهة بيوصل له فعليًا.
+//
+// ⚠️ تحديث (26 يوليو 2026): بعد تفعيل RLS على جدول laws بحيث الإضافة/
+// التعديل/الحذف مقصورة على سوبر أدمن المنصة بس (is_super_admin())،
+// والقراءة (SELECT) متاحة لأي مستخدم مسجّل دخول — راجع محادثة تشخيص
+// اللوجز بتاريخ 26 يوليو. حساب E2E_TEST_EMAIL هو owner/admin لمكتب
+// تجريبي عادي، مش سوبر أدمن على مستوى المنصة، فمن المتوقع إن أي محاولة
+// إضافة/تعديل/حذف ترفض فعليًا — والتستات دي بقت بتتأكد من الرفض ده
+// بدل ما تتأكد من نجاح كان بيحصل قبل تفعيل السياسة الجديدة.
 //
 // ⚠️ شرط أساسي: حساب E2E_TEST_EMAIL لازم يكون Admin/Owner، وإلا
 // nav-more-admin مش هيظهر أصلًا (نفس ملحوظة admin-archive-lifecycle.spec.ts).
@@ -17,7 +21,7 @@ import { login, openAdminSection, expectToast } from './utils';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PDF = path.join(__dirname, 'fixtures', 'sample-law.pdf');
 
-test('إضافة قانون جديد للمكتبة القانونية برفع ملف PDF', async ({ page }) => {
+test('إضافة قانون جديد بحساب مكتب عادي (مش سوبر أدمن) → مرفوضة', async ({ page }) => {
   const title = `اختبار E2E قانون - ${Date.now()}`;
 
   await login(page);
@@ -30,55 +34,40 @@ test('إضافة قانون جديد للمكتبة القانونية برفع 
   await page.getByTestId('admin-law-file').setInputFiles(FIXTURE_PDF);
   await page.getByTestId('admin-law-submit').click();
 
-  await expectToast(page, '✅ تم إضافة القانون — جاهز للمعالجة');
+  // RLS بترفض الـ INSERT لحساب مش سوبر أدمن — الرسالة العامة الموحّدة
+  // اللي بتظهر لأي فشل رفع (راجع showErrorToast('legal_library_upload', ...)
+  // في useAdminLegalLibrary.ts)، مش رسالة نجاح.
+  await expectToast(page, '❌ تعذّر رفع الملف. تأكد من نوع وحجم الملف وحاول تاني. لو المشكلة استمرت، تواصل مع الدعم.');
 
-  const card = page.getByTestId('admin-law-card').filter({ hasText: title });
-  await expect(card).toHaveCount(1, { timeout: 10_000 });
+  // القانون ميتضافش فعليًا في المكتبة
+  await expect(page.getByTestId('admin-law-card').filter({ hasText: title })).toHaveCount(0);
 });
 
-test('تعديل قانون موجود: تغيير الاسم يظهر فورًا في البطاقة', async ({ page }) => {
-  const title = `اختبار E2E قانون تعديل - ${Date.now()}`;
-  const editedTitle = `${title} (معدّل)`;
-
+test('تعديل/حذف قانون موجود بحساب مكتب عادي (مش سوبر أدمن) → مرفوضة', async ({ page }) => {
   await login(page);
   await openAdminSection(page, 'legal_library');
 
-  await page.getByTestId('admin-law-new-button').click();
-  await page.getByTestId('admin-law-title').fill(title);
-  await page.getByTestId('admin-law-file').setInputFiles(FIXTURE_PDF);
+  // القراءة متاحة للكل، فلو فيه قانون واحد على الأقل (اتضاف قبل كده بحساب
+  // سوبر أدمن) هيظهر هنا. لو المكتبة فاضية تمامًا (مفيش أي قانون اتضاف
+  // لحد دلوقتي)، مفيش حاجة نتأكد من رفضها — بنتخطى التست بأمان بدل ما
+  // نفشل على حاجة برة سيطرة الحساب العادي أصلًا.
+  const firstCard = page.getByTestId('admin-law-card').first();
+  const hasExistingLaw = await firstCard.isVisible().catch(() => false);
+  test.skip(!hasExistingLaw, 'مفيش أي قانون موجود في المكتبة أصلًا لاختبار رفض التعديل/الحذف عليه');
+
+  const originalTitle = (await firstCard.textContent()) || '';
+
+  // محاولة تعديل — لازم ترفض
+  await firstCard.getByTestId('admin-law-edit').click();
+  await page.getByTestId('admin-law-title').fill(`محاولة تعديل من مكتب عادي - ${Date.now()}`);
   await page.getByTestId('admin-law-submit').click();
-  await expectToast(page, '✅ تم إضافة القانون — جاهز للمعالجة');
+  await expectToast(page, '❌ تعذّر رفع الملف. تأكد من نوع وحجم الملف وحاول تاني. لو المشكلة استمرت، تواصل مع الدعم.');
+  await expect(firstCard).toContainText(originalTitle.trim().slice(0, 20));
 
-  const card = page.getByTestId('admin-law-card').filter({ hasText: title });
-  await card.first().waitFor({ state: 'visible', timeout: 10_000 });
-
-  await card.getByTestId('admin-law-edit').click();
-  await page.getByTestId('admin-law-title').fill(editedTitle);
-  await page.getByTestId('admin-law-submit').click();
-  await expectToast(page, '✅ تم حفظ التعديلات');
-
-  await expect(page.getByTestId('admin-law-card').filter({ hasText: editedTitle })).toHaveCount(1, { timeout: 10_000 });
-});
-
-test('حذف قانون نهائيًا: يختفي من المكتبة القانونية', async ({ page }) => {
-  const title = `اختبار E2E قانون حذف - ${Date.now()}`;
-
-  await login(page);
-  await openAdminSection(page, 'legal_library');
-
-  await page.getByTestId('admin-law-new-button').click();
-  await page.getByTestId('admin-law-title').fill(title);
-  await page.getByTestId('admin-law-file').setInputFiles(FIXTURE_PDF);
-  await page.getByTestId('admin-law-submit').click();
-  await expectToast(page, '✅ تم إضافة القانون — جاهز للمعالجة');
-
-  const card = page.getByTestId('admin-law-card').filter({ hasText: title });
-  await card.first().waitFor({ state: 'visible', timeout: 10_000 });
-
-  await card.getByTestId('admin-law-delete').click();
-  // لازم كتابة اسم القانون بالظبط عشان يتفعّل زرار التأكيد (isMatch في DeleteConfirmModal)
-  await page.getByTestId('admin-law-delete-input').fill(title);
+  // محاولة حذف — لازم ترفض والقانون يفضل موجود
+  await firstCard.getByTestId('admin-law-delete').click();
+  await page.getByTestId('admin-law-delete-input').fill(originalTitle.trim());
   await page.getByTestId('admin-law-delete-confirm').click();
-
-  await expect(page.getByTestId('admin-law-card').filter({ hasText: title })).toHaveCount(0, { timeout: 10_000 });
+  await expectToast(page, '❌ تعذّر حذف الملف. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.');
+  await expect(page.getByTestId('admin-law-card').first()).toBeVisible();
 });
