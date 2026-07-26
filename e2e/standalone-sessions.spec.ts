@@ -41,6 +41,7 @@ test('2) إنشاء جلسة مستقلة بأكتر من طرف — فاليد�
   await page.getByTestId('new-session-plaintiff-0-name').fill('موكل اختبار E2E متعدد');
   await page.getByTestId('new-session-plaintiff-0-capacity').fill('مدعي');
   await page.getByTestId('new-session-plaintiff-0-national-id').fill('11111111111111');
+  await page.getByTestId('new-session-plaintiff-subform-save').click();
 
   // إضافة مدعى عليه تاني — من غير ما نملأ "المسمى القانوني" الجامع،
   // عشان نتأكد إن فاليديشن قاعدة 6 (إلزامية المسمى القانوني عند ≥٢
