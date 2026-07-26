@@ -23,7 +23,13 @@ test('الإجراءات السريعة: إضافة موكل من الداشبو
   await page.getByTestId('new-client-name').waitFor({ state: 'visible', timeout: 10_000 });
   await page.getByTestId('new-client-name').fill(name);
   await page.getByTestId('new-client-phone').fill('01000000000');
-  await page.getByTestId('new-client-national-id').fill(`2900101${Date.now()}`.slice(0, 14));
+  // ⚠️ FIX: كانت .slice(0, 14) — بتاخد أول 14 خانة من '2900101' + Date.now()
+  // (7+13=20 خانة)، يعني بتقطع آخر 6 خانات من Date.now() وتسيب بس أول 7
+  // (اللي بتتغيّر ببطء شديد، كل ~16-17 دقيقة) → تكرار رقم قومي حقيقي بين
+  // تشغيلتين قريبتين وفشل الإنشاء. نفس السبب الجذري اللي اتصلّح في
+  // createClient() جوه utils.ts — هنا نفس الباج لأن التست بيبني الرقم
+  // مباشرة بدل ما يستخدم الهيلبر. الحل: آخر 14 خانة بدل الأول.
+  await page.getByTestId('new-client-national-id').fill(`2900101${Date.now()}`.slice(-14));
   await page.getByTestId('save-client-button').click();
 
   await expectToast(page, '✅ تم إضافة الموكل بنجاح!');
