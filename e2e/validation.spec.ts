@@ -101,7 +101,10 @@ test.describe('فاليديشن الحقول المطلوبة', () => {
     // NewClientModal — من غيره زرار الحفظ كان بيرفض يعمل submit خالص
     // (توست "يرجى إدخال الرقم القومي")، فالموكل ما كانش بيتحفظ أبدًا
     // والتست كان بيستنى كارت هيظهر أصلاً مش هيتبعت.
-    await page.getByTestId('new-client-national-id').fill(`2900101${Date.now()}`.slice(0, 14));
+    // ⚠️ FIX: راجع نفس التعليق في dashboard-tab.spec.ts — .slice(0, 14) كانت
+    // بتسيب رقم قومي شبه ثابت لمدة ~16-17 دقيقة (تكرار حقيقي بين تشغيلتين
+    // قريبتين). آخر 14 خانة بدل الأول.
+    await page.getByTestId('new-client-national-id').fill(`2900101${Date.now()}`.slice(-14));
     await page.getByTestId('save-client-button').click();
 
     const newClientCard = page.getByTestId('client-card').filter({ hasText: clientName });
