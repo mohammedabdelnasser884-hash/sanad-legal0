@@ -38,7 +38,7 @@ interface OverdueReminderRow {
     done: boolean;
 }
 
-function SessionsCalendar({ cases, clients, onOpenCase, onOpenReminders, onClientAdded, initialTab, nav, onOpenClientProfile }: SessionsCalendarProps) {
+function SessionsCalendar({ cases, clients, onOpenCase, onOpenReminders, onClientAdded, initialTab, nav, onOpenClientProfile, externalRefreshSignal }: SessionsCalendarProps & { externalRefreshSignal?: number }) {
     const [activeTab, setActiveTab] = useState<'month'|'calendar'|'missed'>(initialTab || 'calendar');
     const [missedCount, setMissedCount] = useState(0);
     // النوع الأعم (CalendarSessionRow) بيغطي كل الاستخدامات التلاتة (Calendar/Missed/Month)
@@ -54,6 +54,18 @@ function SessionsCalendar({ cases, clients, onOpenCase, onOpenReminders, onClien
     // بيانات التاب كانت فاضلة فاكرة case_id القديم لحد ما تتغيّر الشهر
     // أو يتبدّل التاب يدويًا).
     const [refreshKey, setRefreshKey] = useState(0);
+
+    // externalRefreshSignal بيتغيّر لما جلسة مستقلة جديدة تتحفظ من بره
+    // (App.tsx/AppModals.tsx) — نزوّد refreshKey المحلي بنفس الطريقة
+    // اللي الإجراءات جوه المودال بتعملها. skippedFirstRun بيمنع فetch
+    // مزدوج عند أول تحميل (externalRefreshSignal بيوصل بقيمة ابتدائية
+    // معرّفة من App.tsx مش undefined).
+    const skippedFirstRun = React.useRef(false);
+    useEffect(() => {
+        if (!skippedFirstRun.current) { skippedFirstRun.current = true; return; }
+        if (externalRefreshSignal !== undefined) setRefreshKey((k) => k + 1);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [externalRefreshSignal]);
 
     // جلب عدد الفائتة لعرضه على الـ badge
     const fetchMissedCount = useCallback(async () => {
