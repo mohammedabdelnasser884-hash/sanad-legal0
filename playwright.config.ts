@@ -9,7 +9,12 @@ export default defineConfig({
   fullyParallel: false, // رحلة واحدة متسلسلة (login → قضية → جلسة → أتعاب → أرشفة)، مش تستات مستقلة
   retries: 0,
   workers: 1,
-  reporter: 'list',
+  // 'list' لسه موجود عشان يطبع في الـconsole زي ما هو، لكن ده لوحده
+  // مابيولّدش أي ملفات على القرص — عشان كده خطوة "Upload Playwright
+  // report on failure" في ci.yml كانت دايمًا مش لاقية حاجة في
+  // playwright-report/ (المجلد ده أصلاً معملش). 'html' بيولّد التقرير
+  // فعليًا (وفيه لينكات لكل trace.zip/screenshot لكل تست فشل).
+  reporter: [['list'], ['html', { open: 'never' }]],
   // تنظيف تلقائي لبيانات E2E بعد كل تشغيل (تقرير المرحلة 4، "الخطوة
   // الجاية") — globalSetup بيسجّل وقت البداية، globalTeardown بيمسح كل
   // صف اتعمل بعده وعليه علامة "اختبار E2E". لو SUPABASE_SERVICE_ROLE_KEY
