@@ -326,11 +326,6 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
             });
 
             if (error) {
-                // 🔎 TEMP DEBUG (تشخيص فشل الحفظ أوفلاين — 26 يوليو 2026): recordError
-                // (جوه showErrorToast) بيخزّن في localStorage بس، من غير console.error،
-                // فالخطأ الخام من __dbWrite مكنش ظاهر في لوجز CI خالص. سطر مؤقت لحد
-                // ما نعرف السبب — يتشال بعدها.
-                console.error('[TEMP DEBUG][NewStandaloneSessionModal.handleSave] __dbWrite error:', JSON.stringify(error), 'offline:', offline, 'queued:', queued);
                 showErrorToast('session_save', error, 'تعذّر حفظ الجلسة. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'حفظ الجلسة');
                 return;
             }
