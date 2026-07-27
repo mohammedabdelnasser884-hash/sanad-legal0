@@ -1,0 +1,157 @@
+--- project_orig/sanad-fix-unit-test-1/playwright.config.ts	2026-07-26 14:27:42.000000000 +0000
++++ project/sanad-fix-unit-test-1/playwright.config.ts	2026-07-26 15:19:29.707504771 +0000
+@@ -25,7 +25,17 @@
+     baseURL: 'http://localhost:5173',
+     trace: 'retain-on-failure',
+     screenshot: 'only-on-failure',
++    // ⚠️ FIX (26 يوليو 2026 — فشل ai-assistant.spec.ts): sw.js بيعمل
++    // event.respondWith(fetch(...)) لأي ريكوست فيه supabase.co (استراتيجية
++    // "Network Only" لبيانات حساسة) — وده fetch حقيقي من جوه الـ Service
++    // Worker نفسه، خارج نطاق page.route() تمامًا (اللي بيتمسك بس بريكوستات
++    // الصفحة/الفريمز، مش بريكوستات الـ SW). فموك page.route('**/functions/
++    // v1/ai-chat') كان بيتسجل بس الريكوست الحقيقي يعدّي من غيره ويوصل
++    // للإيدج فانكشن الحقيقي على السيرفر. حجب تسجيل الـ SW خلال E2E يمنع
++    // المشكلة من أصلها — مفيش تست هنا بيعتمد فعليًا على سلوك الـ SW نفسه.
++    serviceWorkers: 'block',
+   },
++
+   projects: [
+     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+   ],
+--- project_orig/sanad-fix-unit-test-1/src/features/fees/hooks/useFeesActions.ts	2026-07-23 20:39:55.000000000 +0000
++++ project/sanad-fix-unit-test-1/src/features/fees/hooks/useFeesActions.ts	2026-07-26 15:21:17.015004822 +0000
+@@ -226,6 +226,16 @@
+                 case_name: cases.find((c) => c.id === form.case_id)?.title || null,
+                 case_type: cases.find((c) => c.id === form.case_id)?.type || null,
+             });
++            // 🔒 FIX (26 يوليو 2026 — نفس مشكلة handleAddPayment): تعديل سجل
++            // أتعاب مفتوح تفاصيله (nested داخل feeDetail) بتحديث محلي بدل
++            // fetchFees الكاملة اللي ممكن تشيله من fees[] لو الإجمالي/الحالة
++            // الجديدة مش متوافقة مع فلتر التاب المفتوح، وتسحب معاها المودال.
++            setFees((prev) => prev.map((f) => (f.id === editId ? { ...f, ...payloadWithStatus } : f)));
++            setSaving(false);
++            setShowForm(false); setForm({case_id:'',client_id:'',client_name_manual:'',client_name_text:'',receiver:'',total:'',paid:'',payment_date:'',notes:''}); setEditId(null);
++            fetchGrandSummary();
++            fetchStatusCounts();
++            return;
+         } else {
+             const initialPaidAmount = parseFloat(form.paid) > 0 ? parseFloat(form.paid) : 0;
+             // 🔒 قرار عمل محسوم مع صاحب المشروع (21 يوليو — المرحلة 6): إضافة
+@@ -313,7 +323,7 @@
+         // مش متحدّث (partial save موثّق فى الكود القديم). دلوقتي التلاتة
+         // بقوا جوه RPC واحدة (record_fee_payment) بتتنفذ فى transaction
+         // حقيقية على مستوى القاعدة — إما تنجح كلها أو ترجع كلها.
+-        const { error: rpcError } = await db.rpc('record_fee_payment', {
++        const { data: updatedFeeRow, error: rpcError } = await db.rpc('record_fee_payment', {
+             p_fee_id: fee.id,
+             p_amount: amount,
+             p_payment_date: payDate || null,
+@@ -333,7 +343,23 @@
+         });
+         setPayingFeeId(null);
+         setAddPaymentFor(null); setPayAmount(''); setPayDate(''); setPayNote(''); setPayReceiver(''); setPayClientName(''); setPayClientNameText('');
+-        fetchFees(0, feesFilter, feesSearch, false);
++        // 🔒 FIX (26 يوليو 2026 — مودال تفاصيل الأتعاب بيختفي بعد سداد كامل
++        // أو زيادة): كان هنا fetchFees(0, feesFilter,...) بتستبدل كل قايمة
++        // fees بنتيجة سيرفر مفلترة بـ status الحالي. لو الدفعة كمّلت السداد
++        // (status بيتحول لـ 'collected' جوه الـ RPC) والفلتر المفتوح
++        // 'deferred'، السجل يختفي من fees[] فورًا فيسحب معاه مودال التفاصيل
++        // المفتوح من تحت المستخدم. بنحدّث السجل ده بس محليًا ببيانات الـ RPC
++        // الراجعة (نفس صف case_fees بعد التحديث) — يفضل ظاهر بأحدث بياناته
++        // لحد ما المستخدم يقفل المودال أو يغيّر الفلتر/البحث بنفسه (وقتها
++        // fetchFees الطبيعية هي اللي تشيله من القايمة).
++        if (updatedFeeRow) {
++            setFees((prev) => prev.map((f) => (f.id === fee.id ? { ...f, ...updatedFeeRow } : f)));
++        }
++        const { data: refreshedPays } = await db.from('fee_payments')
++            .select('*')
++            .eq('fee_id', fee.id)
++            .order('payment_date', { ascending: false });
++        setPayments((prev) => ({ ...prev, [fee.id]: refreshedPays || [] }));
+         fetchGrandSummary();
+         fetchStatusCounts();
+     };
+@@ -352,9 +378,10 @@
+         if(deleteError){ toast('❌ فشل حذف الدفعة، يرجى المحاولة مرة أخرى', true); return; }
+         const {data:allPays} = await db.from('fee_payments').select('amount').eq('fee_id',fee.id);
+         const realPaid = (allPays||[]).reduce((s: number, p: { amount: number | null }) => s+(p.amount||0), 0);
++        const newStatus = computeFeeStatus(fee.total_fees || 0, realPaid);
+         const { error: updateError } = await window.__dbWrite({
+             type: 'UPDATE', table: 'case_fees',
+-            data: {paid_fees: realPaid, status: computeFeeStatus(fee.total_fees || 0, realPaid)},
++            data: {paid_fees: realPaid, status: newStatus},
+             id: fee.id,
+         });
+         if(updateError){ toast('⚠️ تم حذف الدفعة لكن فشل تحديث إجمالي المدفوع، يرجى تحديث الصفحة', true); fetchFees(0, feesFilter, feesSearch, false); fetchGrandSummary(); return; }
+@@ -365,7 +392,11 @@
+             case_name: cases.find((c) => c.id === fee.case_id)?.title || null,
+             case_type: cases.find((c) => c.id === fee.case_id)?.type || null,
+         });
+-        fetchFees(0, feesFilter, feesSearch, false);
++        // 🔒 FIX (26 يوليو 2026 — نفس مشكلة handleAddPayment): تحديث محلي
++        // للسجل بدل fetchFees الكاملة اللي ممكن تشيله من fees[] لو الفلتر
++        // مش مطابق لحالته الجديدة وتسحب معاها مودال التفاصيل المفتوح.
++        setFees((prev) => prev.map((f) => (f.id === fee.id ? { ...f, paid_fees: realPaid, status: newStatus } : f)));
++        setPayments((prev) => ({ ...prev, [fee.id]: (prev[fee.id] || []).filter((p) => p.id !== payId) }));
+         fetchGrandSummary();
+         fetchStatusCounts();
+     };
+--- project_orig/sanad-fix-unit-test-1/src/features/fees/FeesTab.tsx	2026-07-25 09:17:00.000000000 +0000
++++ project/sanad-fix-unit-test-1/src/features/fees/FeesTab.tsx	2026-07-27 06:03:07.462180699 +0000
+@@ -7,6 +7,7 @@
+ import { useFeesActions } from './hooks/useFeesActions';
+ import { useInvoicePrinting } from './hooks/useInvoicePrinting';
+ import DeleteConfirmModal from '@/shared/modals/DeleteConfirmModal';
++import { useNestedModalBackButton } from '../../shared/lib/useNestedModalBackButton';
+ import SummaryModal from './SummaryModal';
+ import InvoiceModal from './InvoiceModal';
+ import FeeCard from './FeeCard';
+@@ -61,7 +62,6 @@
+ 
+     const [detailsForRaw, setDetailsForRaw] = useState<string | null>(null); // معرف بطاقة الأتعاب المفتوحة تفاصيلها
+     const detailsFor = nav.isOpen('feeDetail') ? detailsForRaw : null;
+-    const showForm = nav.isOpen('feeForm') ? showFormRaw : false;
+ 
+     // ⚠️ BUG-08 FIX (19 يوليو 2026): كل مودالات الأتعاب (الفورم، تفاصيل
+     // البطاقة، تأكيد الحذف، الفاتورة) كانت React state محلي بحت، مش مسجّلة
+@@ -70,14 +70,35 @@
+     // بيسجّل نفسه في nav.activeModal (بالظبط زي newCase/caseDetail/delete
+     // في App.tsx)، فزر الرجوع بيقفل المودال المفتوح بس ويفضل واقف في تاب
+     // الأتعاب — نفس سلوك باقي التابات.
+-    const setShowForm = (v: boolean) => { setShowFormRaw(v); if (v) nav.openModal('feeForm'); else nav.closeModal('feeForm'); };
++    //
++    // 🔒 FIX (26 يوليو 2026): nav.activeModal بيتتبع مودال واحد نشط بس.
++    // فورم تعديل سجل أتعاب وتأكيد حذف دفعة/سجل بيتفتحوا **جوه** مودال
++    // تفاصيل الأتعاب (feeDetail) المفتوح بالفعل — فنداء nav.openModal لأي
++    // منهم كان بيحوّل activeModal ليهم، وبالتبعية nav.isOpen('feeDetail')
++    // يرجع false ومودال التفاصيل يختفي كامل من تحت المستخدم (والمعلومات
++    // اللي جواه زي fee-remaining-value تختفي معاه). زر "إضافة أتعاب" هو
++    // الاستخدام الوحيد لفورم الأتعاب **بره** مودال التفاصيل (مفيش feeDetail
++    // مفتوح وقته) — فده لسه بيسجّل نفسه في nav.activeModal زي ما هو. أما
++    // التعديل/الحذف المتداخلين جوه feeDetail، بقوا حالة محلية بحتة +
++    // useNestedModalBackButton (نفس الأداة المستخدمة فعلاً لنموذج طرف
++    // الدعوى الفرعي جوه NewCaseModal) عشان زر الرجوع يقفلهم هم بس، من غير
++    // ما يلمس nav.activeModal (اللي فاضل 'feeDetail' طول الوقت).
++    const showForm = detailsFor ? showFormRaw : (nav.isOpen('feeForm') ? showFormRaw : false);
++    const setShowForm = (v: boolean) => {
++        setShowFormRaw(v);
++        if (detailsFor) return; // نموذج فرعي جوه مودال تفاصيل مفتوح بالفعل — nav.activeModal يفضل 'feeDetail'
++        if (v) nav.openModal('feeForm'); else nav.closeModal('feeForm');
++    };
+     const setDetailsFor = (v: string | null) => { setDetailsForRaw(v); if (v) nav.openModal('feeDetail'); else nav.closeModal('feeDetail'); };
+-    const confirmDeleteFee = nav.isOpen('delete') ? confirmDeleteFeeRaw : null;
+-    const confirmDeletePay = nav.isOpen('delete') ? confirmDeletePayRaw : null;
++    const confirmDeleteFee = confirmDeleteFeeRaw;
++    const confirmDeletePay = confirmDeletePayRaw;
+     const invoiceModal = nav.isOpen('feeInvoice') ? invoiceModalRaw : null;
+-    const setConfirmDeleteFee = (v: typeof confirmDeleteFeeRaw) => { setConfirmDeleteFeeRaw(v); if (v) nav.openModal('delete'); else nav.closeModal('delete'); };
+-    const setConfirmDeletePay = (v: typeof confirmDeletePayRaw) => { setConfirmDeletePayRaw(v); if (v) nav.openModal('delete'); else nav.closeModal('delete'); };
++    const setConfirmDeleteFee = (v: typeof confirmDeleteFeeRaw) => { setConfirmDeleteFeeRaw(v); };
++    const setConfirmDeletePay = (v: typeof confirmDeletePayRaw) => { setConfirmDeletePayRaw(v); };
+     const setInvoiceModal = (v: typeof invoiceModalRaw) => { setInvoiceModalRaw(v); if (v) nav.openModal('feeInvoice'); else nav.closeModal('feeInvoice'); };
++    useNestedModalBackButton(!!showFormRaw && !!detailsFor, () => setShowFormRaw(false));
++    useNestedModalBackButton(!!confirmDeleteFeeRaw, () => setConfirmDeleteFeeRaw(null));
++    useNestedModalBackButton(!!confirmDeletePayRaw, () => setConfirmDeletePayRaw(null));
+ 
+     const [invoiceLoadingFor, setInvoiceLoadingFor] = useState<string | null>(null); // معرف الدفعة اللي بيتصدر لها فاتورة دلوقتي
+     // ── بيانات المكتب (الاسم/الشعار) لعرضها في معاينة الفاتورة على الشاشة ──
