@@ -152,10 +152,22 @@ test('5) إضافة الموكل لقائمة الموكلين فقط من خط�
   // idlePartyList فيها طرف واحد ⭐ → زرار "إضافة X لقائمة الموكلين"
   // بالـid الخاص بالطرف (مش الـlegacy الموحّد، لأن الجلسة دي جديدة
   // بأطراف مسجّلة في case_parties من مرحلة 6.2).
+  // 🔒 FIX (27 يوليو 2026): التست ده كان بيفشل 100% من المرات — الزرار ده
+  // بقى (خطة توحيد إنشاء الموكل، Phase 3) بيفتح NewClientModal الموحّد
+  // بدل INSERT مباشر يوصّل لخطوة "تم بنجاح" (راجع
+  // handleAddClientOnlyForParty/handleOpenCreateClientForSessionPartyOnly
+  // في useClientLinking.ts/App.tsx). الاسم والرقم القومي بييجوا متعبيين
+  // تلقائيًا من initialData، لكن الهاتف لأ فلازم نتعباه يدوي. وبعد الحفظ
+  // مفيش خطوة "done" منفصلة — بنرجع لنفس خطوة "idle" وزرار الطرف ده
+  // بيختفي من القائمة (اتضاف لـ linkedIdlePartyIds).
   const addButton = page.locator('[data-testid^="new-session-postsave-add-client-only"]').first();
   await addButton.click();
-  await expect(page.getByText('تم بنجاح')).toBeVisible({ timeout: 10_000 });
-  await page.getByTestId('new-session-postsave-done-close').click();
+  await page.getByTestId('new-client-name').waitFor({ state: 'visible', timeout: 10_000 });
+  await expect(page.getByTestId('new-client-name')).toHaveValue(clientName);
+  await page.getByTestId('new-client-phone').fill('01000000000');
+  await page.getByTestId('save-client-button').click();
+  await expect(page.getByTestId('new-client-name')).not.toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('new-session-postsave-idle-close').click();
 
   await page.getByTestId('nav-more-toggle').click();
   await page.getByTestId('nav-more-clients').click();
