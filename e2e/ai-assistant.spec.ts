@@ -13,6 +13,21 @@ import { login } from './utils';
 
 const AI_CHAT_ROUTE = '**/functions/v1/ai-chat';
 
+// ⚠️ FIX (27 يوليو 2026): sw.js بيعمل event.respondWith(fetch(...)) لأي
+// ريكوست فيه supabase.co (استراتيجية "Network Only") — ده fetch حقيقي من
+// جوه الـ Service Worker نفسه، خارج نطاق page.route() تمامًا. فموك
+// page.route(AI_CHAT_ROUTE) هنا بالتحديد كان بيتسجل بس الريكوست الحقيقي
+// يعدّي من غيره ويوصل للإيدج فانكشن الحقيقي على السيرفر.
+//
+// ⚠️ ملحوظة مهمّة: أول حل جُرّب كان حجب serviceWorkers على مستوى
+// playwright.config.ts كله (globally) — ده رجّع الاختبارين دول، لكنه كسر
+// 5 اختبارات تانية بتعتمد فعليًا على سلوك الـ SW (خصوصًا اختبارات حفظ
+// أوفلاين اللي بتستخدم context.setOffline، لأن offlineQueue.ts بينتظر
+// navigator.serviceWorker.ready كجزء من مسار تسجيل الكتابة). فالحجب هنا
+// محصور بملف الاختبار ده بس (test.use على مستوى الملف) — الاختبارات
+// الباقية كلها بتفضل شغالة بسلوك الـ SW الطبيعي.
+test.use({ serviceWorkers: 'block' });
+
 test.describe('مساعد الذكاء الاصطناعي — توليد مستند (mock عبر اعتراض ai-chat)', () => {
   test('توليد مستند بنجاح يعرض محتوى الرد من الإيدج فانكشن', async ({ page }) => {
     await login(page);
