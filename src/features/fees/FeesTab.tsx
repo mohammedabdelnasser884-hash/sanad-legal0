@@ -7,6 +7,7 @@ import { I, COUNTRY_CONFIGS, loadOfficeSetting } from '../../constants';
 import { useFeesActions } from './hooks/useFeesActions';
 import { useInvoicePrinting } from './hooks/useInvoicePrinting';
 import DeleteConfirmModal from '@/shared/modals/DeleteConfirmModal';
+import { useNestedModalBackButton } from '../../shared/lib/useNestedModalBackButton';
 import SummaryModal from './SummaryModal';
 import InvoiceModal from './InvoiceModal';
 import FeeCard from './FeeCard';
@@ -61,7 +62,6 @@ function FeesTab({cases, clients, showSummaryModal, setShowSummaryModal, country
 
     const [detailsForRaw, setDetailsForRaw] = useState<string | null>(null); // معرف بطاقة الأتعاب المفتوحة تفاصيلها
     const detailsFor = nav.isOpen('feeDetail') ? detailsForRaw : null;
-    const showForm = nav.isOpen('feeForm') ? showFormRaw : false;
 
     // ⚠️ BUG-08 FIX (19 يوليو 2026): كل مودالات الأتعاب (الفورم، تفاصيل
     // البطاقة، تأكيد الحذف، الفاتورة) كانت React state محلي بحت، مش مسجّلة
@@ -70,14 +70,35 @@ function FeesTab({cases, clients, showSummaryModal, setShowSummaryModal, country
     // بيسجّل نفسه في nav.activeModal (بالظبط زي newCase/caseDetail/delete
     // في App.tsx)، فزر الرجوع بيقفل المودال المفتوح بس ويفضل واقف في تاب
     // الأتعاب — نفس سلوك باقي التابات.
-    const setShowForm = (v: boolean) => { setShowFormRaw(v); if (v) nav.openModal('feeForm'); else nav.closeModal('feeForm'); };
+    //
+    // 🔒 FIX (26 يوليو 2026): nav.activeModal بيتتبع مودال واحد نشط بس.
+    // فورم تعديل سجل أتعاب وتأكيد حذف دفعة/سجل بيتفتحوا **جوه** مودال
+    // تفاصيل الأتعاب (feeDetail) المفتوح بالفعل — فنداء nav.openModal لأي
+    // منهم كان بيحوّل activeModal ليهم، وبالتبعية nav.isOpen('feeDetail')
+    // يرجع false ومودال التفاصيل يختفي كامل من تحت المستخدم (والمعلومات
+    // اللي جواه زي fee-remaining-value تختفي معاه). زر "إضافة أتعاب" هو
+    // الاستخدام الوحيد لفورم الأتعاب **بره** مودال التفاصيل (مفيش feeDetail
+    // مفتوح وقته) — فده لسه بيسجّل نفسه في nav.activeModal زي ما هو. أما
+    // التعديل/الحذف المتداخلين جوه feeDetail، بقوا حالة محلية بحتة +
+    // useNestedModalBackButton (نفس الأداة المستخدمة فعلاً لنموذج طرف
+    // الدعوى الفرعي جوه NewCaseModal) عشان زر الرجوع يقفلهم هم بس، من غير
+    // ما يلمس nav.activeModal (اللي فاضل 'feeDetail' طول الوقت).
+    const showForm = detailsFor ? showFormRaw : (nav.isOpen('feeForm') ? showFormRaw : false);
+    const setShowForm = (v: boolean) => {
+        setShowFormRaw(v);
+        if (detailsFor) return; // نموذج فرعي جوه مودال تفاصيل مفتوح بالفعل — nav.activeModal يفضل 'feeDetail'
+        if (v) nav.openModal('feeForm'); else nav.closeModal('feeForm');
+    };
     const setDetailsFor = (v: string | null) => { setDetailsForRaw(v); if (v) nav.openModal('feeDetail'); else nav.closeModal('feeDetail'); };
-    const confirmDeleteFee = nav.isOpen('delete') ? confirmDeleteFeeRaw : null;
-    const confirmDeletePay = nav.isOpen('delete') ? confirmDeletePayRaw : null;
+    const confirmDeleteFee = confirmDeleteFeeRaw;
+    const confirmDeletePay = confirmDeletePayRaw;
     const invoiceModal = nav.isOpen('feeInvoice') ? invoiceModalRaw : null;
-    const setConfirmDeleteFee = (v: typeof confirmDeleteFeeRaw) => { setConfirmDeleteFeeRaw(v); if (v) nav.openModal('delete'); else nav.closeModal('delete'); };
-    const setConfirmDeletePay = (v: typeof confirmDeletePayRaw) => { setConfirmDeletePayRaw(v); if (v) nav.openModal('delete'); else nav.closeModal('delete'); };
+    const setConfirmDeleteFee = (v: typeof confirmDeleteFeeRaw) => { setConfirmDeleteFeeRaw(v); };
+    const setConfirmDeletePay = (v: typeof confirmDeletePayRaw) => { setConfirmDeletePayRaw(v); };
     const setInvoiceModal = (v: typeof invoiceModalRaw) => { setInvoiceModalRaw(v); if (v) nav.openModal('feeInvoice'); else nav.closeModal('feeInvoice'); };
+    useNestedModalBackButton(!!showFormRaw && !!detailsFor, () => setShowFormRaw(false));
+    useNestedModalBackButton(!!confirmDeleteFeeRaw, () => setConfirmDeleteFeeRaw(null));
+    useNestedModalBackButton(!!confirmDeletePayRaw, () => setConfirmDeletePayRaw(null));
 
     const [invoiceLoadingFor, setInvoiceLoadingFor] = useState<string | null>(null); // معرف الدفعة اللي بيتصدر لها فاتورة دلوقتي
     // ── بيانات المكتب (الاسم/الشعار) لعرضها في معاينة الفاتورة على الشاشة ──
