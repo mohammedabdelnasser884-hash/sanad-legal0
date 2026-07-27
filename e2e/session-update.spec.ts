@@ -38,9 +38,13 @@ test('فاليديشن: منع الحفظ من غير تاريخ الجلسة ا
   await page.getByTestId('standalone-session-update-trigger').click();
   await page.getByTestId('session-update-modal').waitFor({ state: 'visible', timeout: 10_000 });
 
-  // من غير ما نختار تاريخ الجلسة القادمة أصلاً
-  await page.getByTestId('session-update-save').click();
-  await expectToast(page, '⚠️ حدد تاريخ الجلسة القادمة');
+  // 🔒 FIX (27 يوليو 2026): التست ده كان بيفشل 100% من المرات (30 ثانية
+  // timeout كل مرة، مش flake) — كان بيحاول .click() على زرار الحفظ
+  // ويستنى توست خطأ، لكن الزرار فعليًا disabled بالكامل من غير تاريخ
+  // (راجع `disabled: saving || !nextDate` في SessionUpdateModal.tsx:224)
+  // — يعني الفاليديشن بقت client-side عن طريق تعطيل الزرار نفسه، مش
+  // توست بعد الضغط. من غير تاريخ الجلسة القادمة أصلاً
+  await expect(page.getByTestId('session-update-save')).toBeDisabled();
   // المودال يفضل مفتوح — مفيش جلسة جديدة اتعملت
   await expect(page.getByTestId('session-update-modal')).toBeVisible();
 });
@@ -111,10 +115,17 @@ test('تحديث جلسة مستقلة مربوطة بموكل — الجلسة 
   // 2) من خطوة idle: "إضافة الموكل لقائمة الموكلين فقط" — دي بترتبط
   // فعليًا بـ case_sessions.client_id (راجع useClientLinking.ts —
   // handleAddClientOnlyForParty)، مش مجرد إضافة لقائمة الموكلين.
+  // 🔒 FIX (27 يوليو 2026): نفس فيكس standalone-sessions.spec.ts تست 5 —
+  // الزرار بقى بيفتح NewClientModal الموحّد (Phase 3 من خطة توحيد إنشاء
+  // الموكل) بدل مسار "تم بنجاح" المباشر القديم.
   const addButton = page.locator('[data-testid^="new-session-postsave-add-client-only"]').first();
   await addButton.click();
-  await expect(page.getByText('تم بنجاح')).toBeVisible({ timeout: 10_000 });
-  await page.getByTestId('new-session-postsave-done-close').click();
+  await page.getByTestId('new-client-name').waitFor({ state: 'visible', timeout: 10_000 });
+  await expect(page.getByTestId('new-client-name')).toHaveValue(originalClientName);
+  await page.getByTestId('new-client-phone').fill('01000000000');
+  await page.getByTestId('save-client-button').click();
+  await expect(page.getByTestId('new-client-name')).not.toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('new-session-postsave-idle-close').click();
 
   // 3) نعدّل اسم الموكل من قائمة الموكلين — عشان نفرّق بين "نسخة الجلسة
   // القديمة" (لسه فيها الاسم الأصلي) و"الموكل الحي" (فيه الاسم الجديد).
