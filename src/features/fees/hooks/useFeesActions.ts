@@ -226,6 +226,16 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
                 case_name: cases.find((c) => c.id === form.case_id)?.title || null,
                 case_type: cases.find((c) => c.id === form.case_id)?.type || null,
             });
+            // 🔒 FIX (26 يوليو 2026 — نفس مشكلة handleAddPayment): تعديل سجل
+            // أتعاب مفتوح تفاصيله (nested داخل feeDetail) بتحديث محلي بدل
+            // fetchFees الكاملة اللي ممكن تشيله من fees[] لو الإجمالي/الحالة
+            // الجديدة مش متوافقة مع فلتر التاب المفتوح، وتسحب معاها المودال.
+            setFees((prev) => prev.map((f) => (f.id === editId ? { ...f, ...payloadWithStatus } : f)));
+            setSaving(false);
+            setShowForm(false); setForm({case_id:'',client_id:'',client_name_manual:'',client_name_text:'',receiver:'',total:'',paid:'',payment_date:'',notes:''}); setEditId(null);
+            fetchGrandSummary();
+            fetchStatusCounts();
+            return;
         } else {
             const initialPaidAmount = parseFloat(form.paid) > 0 ? parseFloat(form.paid) : 0;
             // 🔒 قرار عمل محسوم مع صاحب المشروع (21 يوليو — المرحلة 6): إضافة
@@ -313,7 +323,7 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
         // مش متحدّث (partial save موثّق فى الكود القديم). دلوقتي التلاتة
         // بقوا جوه RPC واحدة (record_fee_payment) بتتنفذ فى transaction
         // حقيقية على مستوى القاعدة — إما تنجح كلها أو ترجع كلها.
-        const { error: rpcError } = await db.rpc('record_fee_payment', {
+        const { data: updatedFeeRow, error: rpcError } = await db.rpc('record_fee_payment', {
             p_fee_id: fee.id,
             p_amount: amount,
             p_payment_date: payDate || null,
@@ -333,7 +343,23 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
         });
         setPayingFeeId(null);
         setAddPaymentFor(null); setPayAmount(''); setPayDate(''); setPayNote(''); setPayReceiver(''); setPayClientName(''); setPayClientNameText('');
-        fetchFees(0, feesFilter, feesSearch, false);
+        // 🔒 FIX (26 يوليو 2026 — مودال تفاصيل الأتعاب بيختفي بعد سداد كامل
+        // أو زيادة): كان هنا fetchFees(0, feesFilter,...) بتستبدل كل قايمة
+        // fees بنتيجة سيرفر مفلترة بـ status الحالي. لو الدفعة كمّلت السداد
+        // (status بيتحول لـ 'collected' جوه الـ RPC) والفلتر المفتوح
+        // 'deferred'، السجل يختفي من fees[] فورًا فيسحب معاه مودال التفاصيل
+        // المفتوح من تحت المستخدم. بنحدّث السجل ده بس محليًا ببيانات الـ RPC
+        // الراجعة (نفس صف case_fees بعد التحديث) — يفضل ظاهر بأحدث بياناته
+        // لحد ما المستخدم يقفل المودال أو يغيّر الفلتر/البحث بنفسه (وقتها
+        // fetchFees الطبيعية هي اللي تشيله من القايمة).
+        if (updatedFeeRow) {
+            setFees((prev) => prev.map((f) => (f.id === fee.id ? { ...f, ...updatedFeeRow } : f)));
+        }
+        const { data: refreshedPays } = await db.from('fee_payments')
+            .select('*')
+            .eq('fee_id', fee.id)
+            .order('payment_date', { ascending: false });
+        setPayments((prev) => ({ ...prev, [fee.id]: refreshedPays || [] }));
         fetchGrandSummary();
         fetchStatusCounts();
     };
@@ -352,9 +378,10 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
         if(deleteError){ toast('❌ فشل حذف الدفعة، يرجى المحاولة مرة أخرى', true); return; }
         const {data:allPays} = await db.from('fee_payments').select('amount').eq('fee_id',fee.id);
         const realPaid = (allPays||[]).reduce((s: number, p: { amount: number | null }) => s+(p.amount||0), 0);
+        const newStatus = computeFeeStatus(fee.total_fees || 0, realPaid);
         const { error: updateError } = await window.__dbWrite({
             type: 'UPDATE', table: 'case_fees',
-            data: {paid_fees: realPaid, status: computeFeeStatus(fee.total_fees || 0, realPaid)},
+            data: {paid_fees: realPaid, status: newStatus},
             id: fee.id,
         });
         if(updateError){ toast('⚠️ تم حذف الدفعة لكن فشل تحديث إجمالي المدفوع، يرجى تحديث الصفحة', true); fetchFees(0, feesFilter, feesSearch, false); fetchGrandSummary(); return; }
@@ -365,7 +392,11 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
             case_name: cases.find((c) => c.id === fee.case_id)?.title || null,
             case_type: cases.find((c) => c.id === fee.case_id)?.type || null,
         });
-        fetchFees(0, feesFilter, feesSearch, false);
+        // 🔒 FIX (26 يوليو 2026 — نفس مشكلة handleAddPayment): تحديث محلي
+        // للسجل بدل fetchFees الكاملة اللي ممكن تشيله من fees[] لو الفلتر
+        // مش مطابق لحالته الجديدة وتسحب معاها مودال التفاصيل المفتوح.
+        setFees((prev) => prev.map((f) => (f.id === fee.id ? { ...f, paid_fees: realPaid, status: newStatus } : f)));
+        setPayments((prev) => ({ ...prev, [fee.id]: (prev[fee.id] || []).filter((p) => p.id !== payId) }));
         fetchGrandSummary();
         fetchStatusCounts();
     };
