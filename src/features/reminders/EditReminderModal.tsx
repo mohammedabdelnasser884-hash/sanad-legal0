@@ -27,7 +27,15 @@ function EditReminderModal({
         className:"fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm",
         onClick:(e: React.MouseEvent<HTMLDivElement>) =>{ if(e.target===e.currentTarget) setEditTarget(null); }
     },
-        React.createElement('div',{className:"bg-premium-card w-full max-w-lg rounded-t-3xl border-t border-white/10 p-6 pb-10 shadow-2xl slide-up",'data-testid':'reminder-edit-modal'},
+        // 🔒 FIX (27 يوليو 2026 — e2e/reminders-edit.spec.ts "فاليديشن" كانت
+        // بتفشل 100% من المرات، مش flake): المودال ده bottom-sheet من غير
+        // overflow-y-auto/max-h، وDatePicker بيفتح لوحة التقويم لأسفل
+        // (absolute top-full) — فلما اللوحة بتوسّع المحتوى أكتر من ارتفاع
+        // الشاشة، زرار "✕ مسح التاريخ" (آخر عنصر في اللوحة) بيتقفل برّه
+        // viewport من غير أي scroll container يوصله بيه — Playwright بيحاول
+        // يعمل scroll طول 30 ثانية ومش لاقي حاوية تتحرك. max-h + overflow-y-auto
+        // بيدّي المودال نفسه قدرة يتمرجل لو محتواه زاد عن الشاشة.
+        React.createElement('div',{className:"bg-premium-card w-full max-w-lg rounded-t-3xl border-t border-white/10 p-6 pb-10 shadow-2xl slide-up max-h-[85vh] overflow-y-auto",'data-testid':'reminder-edit-modal'},
             React.createElement('div',{className:"w-10 h-1 bg-white/20 rounded-full mx-auto mb-5"}),
             React.createElement('div',{className:"flex items-center justify-between mb-4"},
                 React.createElement('h3',{className:"text-sm font-black text-white flex items-center gap-2"},
