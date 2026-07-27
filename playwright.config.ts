@@ -25,15 +25,6 @@ export default defineConfig({
     baseURL: 'http://localhost:5173',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
-    // ⚠️ FIX (26 يوليو 2026 — فشل ai-assistant.spec.ts): sw.js بيعمل
-    // event.respondWith(fetch(...)) لأي ريكوست فيه supabase.co (استراتيجية
-    // "Network Only" لبيانات حساسة) — وده fetch حقيقي من جوه الـ Service
-    // Worker نفسه، خارج نطاق page.route() تمامًا (اللي بيتمسك بس بريكوستات
-    // الصفحة/الفريمز، مش بريكوستات الـ SW). فموك page.route('**/functions/
-    // v1/ai-chat') كان بيتسجل بس الريكوست الحقيقي يعدّي من غيره ويوصل
-    // للإيدج فانكشن الحقيقي على السيرفر. حجب تسجيل الـ SW خلال E2E يمنع
-    // المشكلة من أصلها — مفيش تست هنا بيعتمد فعليًا على سلوك الـ SW نفسه.
-    serviceWorkers: 'block',
   },
 
   projects: [
