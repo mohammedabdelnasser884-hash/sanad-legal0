@@ -406,13 +406,21 @@ export function useClientActions(params: {
     };
 
     // ─ تعديل موكل ─
-    const handleUpdateClient = async (clientId: string, form: ClientFormData, idFile?: File | null, poaFile?: File | null) => {
+    // 🔒 FIX (تشخيص لوجز E2E — 29 يوليو 2026): الدالة دي بترجع boolean دلوقتي
+    // (true = اتحدثت فعلاً، false = فشل التحديث لأي سبب) بدل void. السبب:
+    // ClientDetailModal.tsx كان بيقفل مودال التعديل فورًا بمجرد الضغط على
+    // "حفظ" (onEdit?.(...) من غير await، وبعدها على طول setShowEditClient(false))
+    // — بغض النظر عن نتيجة الفحص الأسينك ده (تكرار رقم قومي، فشل اتصال...).
+    // ده كان بيخلي المودال يقفل حتى في حالة الفشل (اختبار E2E clients.spec.ts
+    // — تكرار الرقم القومي عند التعديل). دلوقتي الكولر بينتظر النتيجة ويقفل
+    // المودال بس لو true.
+    const handleUpdateClient = async (clientId: string, form: ClientFormData, idFile?: File | null, poaFile?: File | null): Promise<boolean> => {
         if (!form.full_name || !form.full_name.trim()) {
             toast('❌ حقل "اسم الموكل" مطلوب', true);
-            return;
+            return false;
         }
         const nameErr = validateFullNameParts(form.full_name);
-        if (nameErr) { toast(nameErr, true); return; }
+        if (nameErr) { toast(nameErr, true); return false; }
         // 🔒 FIX (تقرير الموثوقية — نتيجة 0/1): الدالة دي ما كانش فيها أي
         // حماية دبل كليك خالص — لا setSavingClient ولا أي state تاني. زرار
         // "حفظ التعديلات" في EditClientModal فاضل شغال طول وقت الفحص
@@ -430,9 +438,9 @@ export function useClientActions(params: {
         } catch (e) {
             showErrorToast('client_duplicate_check', e, 'تعذّر التحقق من بيانات الموكل. حاول مرة أخرى.', 'تعديل موكل');
             setSavingClient(false);
-            return;
+            return false;
         }
-        if (dup.duplicate) { toast(dup.message!, true); setSavingClient(false); return; }
+        if (dup.duplicate) { toast(dup.message!, true); setSavingClient(false); return false; }
         const client = clients.find((c) => c.id === clientId);
         const existingContactInfo = (client?.contact_info as ClientContactInfo | null) || null;
 
@@ -478,7 +486,7 @@ export function useClientActions(params: {
         }, client?.updated_at || null);
         setSavingClient(false);
         // 🔒 FIX (تقرير الموثوقية — القسم 12، Concurrent Editing): توست بدل السكوت التام.
-        if (conflict) { toast('⚠️ هذا الموكل عدّله شخص آخر بعد ما فتحته — أعد المحاولة', true); return; }
+        if (conflict) { toast('⚠️ هذا الموكل عدّله شخص آخر بعد ما فتحته — أعد المحاولة', true); return false; }
         if (!success) {
             // 🔒 FIX (تقرير الموثوقية — نتيجة 3): نفس خط الدفاع الأخير المستخدم
             // في handleSaveClient — راجع التعليق هناك.
@@ -487,13 +495,14 @@ export function useClientActions(params: {
             } else {
                 toast('❌ فشل تعديل بيانات الموكل — تحقق من الاتصال وأعد المحاولة', true);
             }
-            return;
+            return false;
         }
         toast('✅ تم تحديث بيانات الموكل');
         logActivity(db, 'تعديل موكل', { userName: _userName, entity_type: 'client', entity_id: clientId, details: form.full_name || null, client_name: form.full_name || null });
         fetchClients(0, clientSearch);
         nav.closeModal('clientDetail');
         setSelectedClient(null);
+        return true;
     };
 
     // ─ إنشاء محامي جديد ─
