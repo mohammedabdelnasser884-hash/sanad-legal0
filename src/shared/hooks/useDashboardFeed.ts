@@ -64,8 +64,14 @@ export function useDashboardFeed(profile: ProfileRow | null) {
     // ── المهام (reminders) ──
     const [upcomingTasks,     setUpcomingTasks]     = useState<TaskFeedItem[]>([]); // due_date >= اليوم، غير منجزة
     const [missedTasks,       setMissedTasks]       = useState<TaskFeedItem[]>([]); // due_date < اليوم، غير منجزة
-    const [upcomingTasksOpen, setUpcomingTasksOpen] = useState(false);
-    const [todayOpen,         setTodayOpen]         = useState(false); // مقفولة افتراضيًا — تقليل الزحمة
+    const [upcomingTasksOpen, setUpcomingTasksOpen] = useState(false); // مقفولة افتراضيًا — تقليل الزحمة
+    // 🔒 FIX (تشخيص لوجز E2E — 29 يوليو 2026): كانت false زي upcomingOpen
+    // ("تقليل الزحمة")، بس ده كان بيخفي جلسات اليوم بالكامل (dashboard-session-card
+    // مش بيتعرض إلا لو todayOpen=true — راجع DashboardTab.tsx) لحد ما
+    // المستخدم يضغط زرار التبديل يدويًا. بطاقة "اليوم" هي الوحيدة اللي
+    // فيها مؤشر عاجل (نقطة حمرا نابضة + عداد) وده معناها المفروض تكون
+    // ظاهرة فورًا، بعكس "القادم" (أقل إلحاحًا، تقليل الزحمة منطقي ليها).
+    const [todayOpen,         setTodayOpen]         = useState(true);
     const [upcomingOpen,      setUpcomingOpen]      = useState(false); // مقفولة افتراضيًا — تقليل الزحمة
 
     // ── ملاحظة: فحص dbOnline + الـ event listeners موجودين في App.tsx فقط ──
