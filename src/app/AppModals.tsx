@@ -79,7 +79,7 @@ interface AppModalsProps {
     // ── هاندلرز ──
     handleSaveCase: (form: CaseFormSubmitData) => void | Promise<void>;
     handleDeleteCase: (caseId: string) => void | Promise<void>;
-    handleUpdateCase: (caseId: string, form: CaseFormSubmitData) => void | Promise<void>;
+    handleUpdateCase: (caseId: string, form: CaseFormSubmitData) => void | boolean | Promise<void | boolean>;
     handleLinkClient: (caseId: string, clientId: string) => void | Promise<void>;
     // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 4): عكس handleLinkClient.
     handleUnlinkClient: (caseId: string) => void | Promise<void>;
@@ -112,7 +112,7 @@ interface AppModalsProps {
     handleOpenCreateClientForCaseParty: OpenCreateClientForParty;
     handleSaveClient: (form: ClientFormData, idFile: File | null, poaFile: File | null) => void | Promise<void>;
     handleDeleteClient: (clientId: string) => void | Promise<void>;
-    handleUpdateClient: (clientId: string, form: ClientFormData, idFile?: File | null, poaFile?: File | null) => void | Promise<void>;
+    handleUpdateClient: (clientId: string, form: ClientFormData, idFile?: File | null, poaFile?: File | null) => void | boolean | Promise<void | boolean>;
     handleSaveLawyer: (form: { email: string; password: string; full_name: string; role?: string }) => void | Promise<void>;
     sendTelegram: (msg: string) => void | Promise<void>;
 }
