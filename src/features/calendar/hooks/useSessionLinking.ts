@@ -235,7 +235,16 @@ export function useSessionLinking(
       } else {
         setClientStep('notfound');
       }
-    } catch { toast('❌ خطأ غير متوقع', true); }
+    } catch (e) {
+      // 🩺 TEMP DEBUG (30 يوليو 2026) — الـcatch ده كان بيبلع أي استثناء
+      // حقيقي (مفيش console.error ولا recordError) ويعرض بس توست عام،
+      // وده بالظبط ممكن يفسّر تست 9 (ربط جلسة بقضية من التفاصيل): لو
+      // استثناء حصل هنا (في matchClientsForParties أو movePartiesFromSessionToCase
+      // أو غيرهم)، الدالة بترجع من غير ما توصل لـsetClientStep('found'/'notfound')
+      // خالص — فزراري found/notfound فعلاً ما بيظهروش أبدًا، مش مجرد تايمنج.
+      console.error('[DEBUG handleLinkCase]', e instanceof Error ? (e.stack || e.message) : String(e));
+      toast('❌ خطأ غير متوقع', true);
+    }
     finally { setLinkingCase(false); }
   };
 
