@@ -89,10 +89,14 @@ export function useDashboardFeed(profile: ProfileRow | null) {
         if (!profile) return;
         setLoadingUrgent(true);
         const todayStr = fmtDate(new Date());
-        const { data } = await db.from('case_sessions')
+        const { data, error } = await db.from('case_sessions')
             .select('id, session_date, session_time, session_floor, session_hall, description, case_id, client_id, result, next_action, title, case_number, court, case_type, circuit_number, plaintiff, plaintiff_role, defendant, defendant_role, plaintiff_legal_title, defendant_legal_title, cases(id,title,plaintiff,defendant,plaintiff_legal_title,defendant_legal_title,court_name,case_type,case_number_official,client_id)')
             .eq('session_date', todayStr)
             .order('session_date', { ascending: true });
+        // 🔒 FIX (تشخيص لوجز E2E — 30 يوليو 2026): كان بيتجاهل error تمامًا —
+        // أي فشل حقيقي في الاستعلام كان بيرجّع قائمة فاضية بصمت من غير أي أثر
+        // في الكونسول، يصعّب تشخيص أي مشكلة مستقبلية بنفس الطريقة.
+        if (error) console.error('[Dashboard] فشل تحميل جلسات اليوم:', error.message);
         setTodaySessions(data || []);
         setLoadingUrgent(false);
     }, [profile]);
@@ -103,11 +107,12 @@ export function useDashboardFeed(profile: ProfileRow | null) {
         const today    = new Date();
         const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
         const endDay   = new Date(today); endDay.setDate(today.getDate() + 7);
-        const { data } = await db.from('case_sessions')
+        const { data, error } = await db.from('case_sessions')
             .select('id, session_date, session_time, session_floor, session_hall, description, case_id, client_id, result, next_action, title, case_number, court, case_type, circuit_number, plaintiff, plaintiff_role, defendant, defendant_role, plaintiff_legal_title, defendant_legal_title, cases(id,title,plaintiff,defendant,plaintiff_legal_title,defendant_legal_title,court_name,case_type,case_number_official,client_id)')
             .gte('session_date', fmtDate(tomorrow))
             .lte('session_date', fmtDate(endDay))
             .order('session_date', { ascending: true });
+        if (error) console.error('[Dashboard] فشل تحميل جلسات الأسبوع القادم:', error.message);
         setUpcomingSessions(data || []);
     }, [profile]);
 
