@@ -97,6 +97,10 @@ export function useDashboardFeed(profile: ProfileRow | null) {
         // أي فشل حقيقي في الاستعلام كان بيرجّع قائمة فاضية بصمت من غير أي أثر
         // في الكونسول، يصعّب تشخيص أي مشكلة مستقبلية بنفس الطريقة.
         if (error) console.error('[Dashboard] فشل تحميل جلسات اليوم:', error.message);
+        // 🩺 TEMP DEBUG (30 يوليو 2026): لوج نجاح كمان (مش بس فشل) — عشان
+        // نتأكد هل الاستعلام أصلاً بيرجّع الصف المتوقع من غير error (يعني
+        // المشكلة عرض/تايمنج) ولا بيرجّع فاضي (يعني المشكلة استعلام/بيانات).
+        console.error('[DEBUG fetchTodaySessions]', 'todayStr=' + todayStr, 'count=' + (data?.length ?? 0), JSON.stringify((data || []).map((s) => ({ id: s.id, session_date: s.session_date, case_id: s.case_id }))));
         setTodaySessions(data || []);
         setLoadingUrgent(false);
     }, [profile]);
