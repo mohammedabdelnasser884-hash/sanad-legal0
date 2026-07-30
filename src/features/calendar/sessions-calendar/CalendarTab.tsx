@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../../../supabaseClient';
 import { toast } from '../../../shared/lib/notifications';
 import { exportSessionToGoogleCalendar } from '@/shared/ui/calendarExport';
@@ -65,8 +65,22 @@ function CalendarTab({ cases, clients, onOpenCase, onOpenStandalone, refreshKey 
 
     const YEARS = Array.from({ length: 21 }, (_: unknown, i: number) => 2020 + i); // 2020 → 2040
 
+    // 🔒 FIX (تحليل لوجز E2E — 30 يوليو 2026): كان useEffect بيقفل الأكورديون
+    // (setSelectedDay(null)) في كل مرة يعيد فيها الجلب، حتى لو السبب كان
+    // refreshKey بس (تعديل/ربط/حذف جلسة في نفس اليوم المفتوح بالفعل) —
+    // مش تنقل حقيقي بين الشهور. ده كان بيخلي أي عملية على جلسة (زي حفظ
+    // تعديل) تقفل اليوم المفتوح فورًا، فاليوزر (والتستات) محتاجين يدوسوا
+    // على اليوم تاني عشان يشوفوا النتيجة — وده كمان سباق تايمنج حقيقي:
+    // لو دوسة "افتح اليوم" التانية حصلت قبل ما الـfetch يخلص، بتتلغي
+    // (toggle) بدل ما تفتح. دلوقتي بنسيب selectedDay زي ما هو لو التغيير
+    // كان بسبب refreshKey بس، ونصفّره بس لما فعليًا الشهر/السنة يتغيّروا.
+    const prevMonthYear = useRef({ viewYear, viewMonth });
+
     useEffect(() => {
         setLoading(true);
+        const isMonthNavigation =
+            prevMonthYear.current.viewYear !== viewYear || prevMonthYear.current.viewMonth !== viewMonth;
+        prevMonthYear.current = { viewYear, viewMonth };
         const mm   = String(viewMonth+1).padStart(2,'0');
         const last = new Date(viewYear, viewMonth+1, 0).getDate();
         db.from('case_sessions')
@@ -74,7 +88,9 @@ function CalendarTab({ cases, clients, onOpenCase, onOpenStandalone, refreshKey 
           .gte('session_date', `${viewYear}-${mm}-01`)
           .lte('session_date', `${viewYear}-${mm}-${String(last).padStart(2,'0')}`)
           .then(({ data }) => {
-              setAllSessions((data || []) as unknown as CalendarSessionRow[]); setLoading(false); setSelectedDay(null);
+              setAllSessions((data || []) as unknown as CalendarSessionRow[]);
+              setLoading(false);
+              if (isMonthNavigation) setSelectedDay(null);
           });
     }, [viewYear, viewMonth, refreshKey]);
 
