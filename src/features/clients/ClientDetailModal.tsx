@@ -12,7 +12,7 @@ interface ClientDetailModalProps {
     cases: MappedCase[];
     onClose: () => void;
     onDelete?: (clientId: string) => void;
-    onEdit?: (clientId: string, form: ClientFormData, idFile?: File | null, poaFile?: File | null) => void;
+    onEdit?: (clientId: string, form: ClientFormData, idFile?: File | null, poaFile?: File | null) => void | boolean | Promise<void | boolean>;
     onOpenCase?: (ca: MappedCase) => void;
     // 🔒 FIX (تقرير الموثوقية — نتيجة 1): بتتمرر لـ EditClientModal عشان
     // تقفل زرار "حفظ التعديلات" أثناء عملية الحفظ — نفس الـ state
@@ -78,7 +78,14 @@ function ClientDetailModal({client:c, cases, onClose, onDelete, onEdit, onOpenCa
                 client:c,
                 saving: savingClient,
                 onClose:()=>setShowEditClient(false),
-                onSave:(form: ClientFormData,idFile?: File | null,poaFile?: File | null)=>{ onEdit?.(c.id, form, idFile, poaFile); setShowEditClient(false); }
+                // 🔒 FIX (تشخيص لوجز E2E — 29 يوليو 2026): كان بيقفل المودال فورًا
+                // من غير ما ينتظر نتيجة onEdit (تكرار الرقم القومي مثلاً بيرفض
+                // التحديث ويعرض توست خطأ، بس المودال كان يقفل برضو). دلوقتي
+                // بننتظر النتيجة ونقفل بس لو نجح فعلاً.
+                onSave: async (form: ClientFormData, idFile?: File | null, poaFile?: File | null) => {
+                    const result = await onEdit?.(c.id, form, idFile, poaFile);
+                    if (result !== false) setShowEditClient(false);
+                }
             }),
 
             React.createElement('div',{className:"px-6 pb-10 space-y-4"},
