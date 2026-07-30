@@ -51,8 +51,14 @@ test('بطاقة اليوم: جلسة النهاردة تظهر على الدا�
   await page.getByTestId('nav-dashboard').click();
 
   // بطاقة "اليوم" مفتوحة افتراضيًا — التأكد من ظهور الجلسة
+  // 🔒 FIX (تحليل لوجز E2E — 30 يوليو 2026): رفعنا المهلة من 15 لـ30 ثانية.
+  // DashboardTab بيعمل remount + refetch تلقائي مع كل رجوع لتاب الداشبورد
+  // (شرط tab==='dashboard' في App.tsx)، فمفيش خطوة كود ناقصة هنا — لوجز
+  // الديباج أظهرت إن استعلام fetchTodaySessions نفسه ممكن ياخد وقت أطول
+  // من 15 ثانية تحت ضغط تستات متوازية على نفس بيئة CI، مش إن حد نسي
+  // ينادي الفانكشن.
   const card = page.getByTestId('dashboard-session-card').filter({ hasText: caseTitle });
-  await card.first().waitFor({ state: 'visible', timeout: 15_000 });
+  await card.first().waitFor({ state: 'visible', timeout: 30_000 });
 
   // تبديل الأكورديون (قفل ثم فتح) من غير ما يكسر عرض الكارت
   await page.getByTestId('dashboard-today-toggle').click();
