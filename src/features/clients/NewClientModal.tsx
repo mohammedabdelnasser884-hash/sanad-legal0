@@ -69,7 +69,17 @@ function NewClientModal({onClose,onSave,loading,initialData,contextLabel}: NewCl
         setPoaPreview(URL.createObjectURL(file));
     };
 
-    return React.createElement('div',{className:"fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm",onClick:(e: React.MouseEvent<HTMLDivElement>) =>{if(e.target===e.currentTarget)onClose();}},
+    // 🔒 FIX (تشخيص لوجز E2E — 30 يوليو 2026): كانت z-50 — بعد فيكس
+    // الـmodal stack في useNavigation.ts (المودال اللي فاتح قبل NewClientModal
+    // بقى فاضل متركب فعليًا بدل ما يتقفل)، أي مودال فاتح NewClientModal من
+    // جواه بـz-[60] (مودال ما بعد حفظ الجلسة المستقلة، تعديل قضية، ربط جلسة
+    // من التفاصيل...) كان بيتقفل فوقه فعليًا (z-index أعلى) ويمنع أي كليك
+    // عليه خالص — ده سبب فشل معدلة توقيت جديدة في standalone-sessions.spec.ts
+    // تست 5/session-update.spec.ts (الكليك على save-client-button نفسه كان
+    // بيعلق). z-[80] أعلى من أي مودال ممكن NewClientModal يتفتح من جواه
+    // (z-50/z-[60]/z-[70])، وأقل من تأكيدات الحذف (z-[90]) وتأكيد الخروج
+    // (z-[9999]) عمدًا — لسه ممكن يظهروا فوقه لو احتاج الأمر.
+    return React.createElement('div',{className:"fixed inset-0 z-[80] flex items-end justify-center bg-black/70 backdrop-blur-sm",onClick:(e: React.MouseEvent<HTMLDivElement>) =>{if(e.target===e.currentTarget)onClose();}},
         React.createElement('div',{className:"bg-premium-card w-full max-w-lg rounded-t-3xl border-t border-white/10 p-6 pb-10 shadow-2xl slide-up max-h-[90vh] overflow-y-auto no-scrollbar"},
             React.createElement('div',{className:"w-10 h-1 bg-white/20 rounded-full mx-auto mb-5"}),
             React.createElement('div',{className:"flex items-center justify-between mb-5"},
