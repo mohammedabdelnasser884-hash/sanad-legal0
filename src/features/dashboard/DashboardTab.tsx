@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { I } from '../../constants';
 import { PartiesLine } from '@/shared/ui/PartiesLine';
 import { formatTime, ServiceStatus } from '../../systemHealth';
@@ -77,6 +77,19 @@ function DashboardTab({
         fetchUpcomingSessions?.();
         fetchMissedSessions?.();
     };
+
+    // 🔒 FIX (تشخيص لوجز E2E — 30 يوليو 2026): تحديث القوائم الثلاثة كان
+    // معتمد بالكامل على onClose/onSaved بتوع الشاشات التانية (تفاصيل
+    // القضية، مودال الجلسة المستقلة) — أي فجوة أو race في استدعاء الدالة
+    // هناك (مثلاً: التاب اتغيّر لـ"dashboard" قبل ما الـfetch يخلّص، أو
+    // profile مش جاهز وقتها) كانت بتسيب بطاقة "اليوم" فاضية لحد ما حاجة
+    // تانية تعمل fetch تاني بالصدفة. الحل الدفاعي: DashboardTab نفسها
+    // بتعمل refresh لنفسها لما تتفتح (mount)، بغض النظر عن مصدر أي تغيير
+    // سابق — صفر اعتماد على تنسيق دقيق بين شاشات تانية وهنا.
+    useEffect(() => {
+        refreshAllSessionLists();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const buildSessionCard = (
         s: SessionFeedItem,
