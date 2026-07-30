@@ -131,7 +131,16 @@ test('4) مودال "تحويل لقضية؟" — إنشاء قضية من بي�
   // لخطوة found/notfound (موكل مش موجود مسبقًا لأن الرقم القومي فريد
   // لكل تشغيل هنا) — بنكمل لحد "done".
   await page.getByTestId('new-session-postsave-create-case').click();
+  // 🔒 FIX: زرار "إضافة الموكل وربطه بالقضية" بقى (خطة توحيد إنشاء الموكل،
+  // Phase 2 — handleAddAndLinkClient في useClientLinking.ts) بيفتح
+  // NewClientModal الموحّد بدل INSERT مباشر يوصّل لـ"تم بنجاح" على طول
+  // (نفس فيكس تست 5 تحت). الاسم والرقم القومي بييجوا متعبيين تلقائيًا من
+  // بيانات الطرف، لكن الهاتف لأ فلازم نتعباه يدوي قبل الحفظ.
   await page.getByTestId('new-session-postsave-add-and-link-notfound').click({ timeout: 10_000 });
+  await page.getByTestId('new-client-name').waitFor({ state: 'visible', timeout: 10_000 });
+  await page.getByTestId('new-client-phone').fill('01000000000');
+  await page.getByTestId('save-client-button').click();
+  await expect(page.getByTestId('new-client-name')).not.toBeVisible({ timeout: 10_000 });
   await expect(page.getByText('تم بنجاح')).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('new-session-postsave-done-close').click();
 
@@ -261,7 +270,14 @@ test('8) تعديل جلسة مستقلة بنجاح', async ({ page }) => {
   await page.getByTestId('edit-standalone-session-save').click();
   await page.getByTestId('edit-standalone-session-modal').waitFor({ state: 'hidden', timeout: 10_000 });
 
-  await openTodayInCalendar(page);
+  // 🔒 FIX (تحليل لوجز E2E — 30 يوليو 2026): كان فيه دوسة تانية هنا على
+  // openTodayInCalendar، بافتراض إن الأكورديون بيتقفل بعد الحفظ. ده كان
+  // بيسبب فشل حقيقي: CalendarTab.tsx كان بيقفل selectedDay (accordion)
+  // تلقائيًا مع أي refetch حتى لو السبب refreshKey بس (تعديل/ربط/حذف)،
+  // مش تنقل شهر حقيقي — واتصلح (راجع تعليق useEffect في CalendarTab.tsx).
+  // دلوقتي اليوم المفتوح بيفضل مفتوح بعد الحفظ، فالدوسة التانية كانت
+  // هتقفله (toggle) بدل ما "تفتحه" زي ما التست كان مفترض. الكارت
+  // المحدَّث المفروض يظهر مباشرة من غير حاجة لإعادة فتح اليوم.
   const updatedCard = page.getByTestId('calendar-session-card').filter({ hasText: newTitle });
   await expect(updatedCard.first()).toBeVisible({ timeout: 10_000 });
 });
