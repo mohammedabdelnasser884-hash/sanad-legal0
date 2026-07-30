@@ -441,7 +441,7 @@ function App() {
             setSelectedCase, setSelectedClient,
             _setDeleteConfirm, _setSelectedClient, _setSelectedCase,
             setCases, setCasesFilter, setCasesPage,
-            fetchCases, fetchTodaySessions, fetchUpcomingSessions,
+            fetchCases, fetchTodaySessions, fetchUpcomingSessions, fetchMissedSessions,
             onStandaloneSessionSaved: bumpSessionsRefreshSignal,
             fetchClients, clientSearch,
             handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleUnlinkClient, handleCreateAndLinkClient: handleOpenCreateClientForCase,
