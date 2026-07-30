@@ -57,7 +57,7 @@ interface CaseDetailViewProps {
     onClose: () => void;
     onUpdate?: (newStatus: string) => void;
     onDelete?: (caseId: string) => void | Promise<void>;
-    onEdit?: (caseId: string, form: CaseFormSubmitData) => void | Promise<void>;
+    onEdit?: (caseId: string, form: CaseFormSubmitData) => void | boolean | Promise<void | boolean>;
     onLinkClient?: (caseId: string, clientId: string) => void | Promise<void>;
     // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 4): زرار "فك الربط" جوه
     // EditCaseModal — بيصفّر client_id بس (handleUnlinkClient في App.tsx).
@@ -213,7 +213,13 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
                 caseData,
                 saving: savingCase,
                 onClose: () => setShowEditCase(false),
-                onSave: (form: CaseFormSubmitData) => { onEdit?.(caseData.id, form); setShowEditCase(false); },
+                // 🔒 FIX (تشخيص لوجز E2E — 29 يوليو 2026): كان بيقفل مودال التعديل
+                // فورًا من غير ما ينتظر نتيجة onEdit (تكرار رقم قيد، فشل فاليديشن
+                // أطراف الدعوى...). دلوقتي بننتظر النتيجة ونقفل بس لو نجح فعلاً.
+                onSave: async (form: CaseFormSubmitData) => {
+                    const result = await onEdit?.(caseData.id, form);
+                    if (result !== false) setShowEditCase(false);
+                },
                 countryCourts: COUNTRY_CONFIGS[country as string]?.courts,
                 countryCaseTypes: COUNTRY_CONFIGS[country as string]?.caseTypes,
                 linkedClient: client,
