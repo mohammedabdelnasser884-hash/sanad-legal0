@@ -41,9 +41,14 @@ test('بطاقة اليوم: جلسة النهاردة تظهر على الدا�
   await createAndOpenCase(page, caseTitle);
   await addCaseSession(page, new Date().getDate(), 'جلسة اختبار E2E - داشبورد اليوم');
 
-  // الرجوع للداشبورد (التاب الافتراضي — إغلاق تفاصيل القضية يرجّعنا له)
+  // 🔒 FIX (تشخيص لوجز E2E — 30 يوليو 2026): قفل تفاصيل القضية مش بيرجّع
+  // التاب لـ"dashboard" تلقائيًا — التاب بيفضل زي ما هو (هنا "cases"،
+  // لأن createAndOpenCase فوق داس على nav-cases). نفس الحالة بالظبط
+  // اتعالجت صح في calendar-month-tab.spec.ts بالرجوع الصريح لـnav-calendar
+  // — هنا لازم نرجع صراحةً لـnav-dashboard قبل ما نتأكد من ظهور الكارت.
   await page.getByTestId('case-detail-close').click();
   await page.getByTestId('case-detail-view').waitFor({ state: 'hidden', timeout: 10_000 });
+  await page.getByTestId('nav-dashboard').click();
 
   // بطاقة "اليوم" مفتوحة افتراضيًا — التأكد من ظهور الجلسة
   const card = page.getByTestId('dashboard-session-card').filter({ hasText: caseTitle });
