@@ -115,6 +115,15 @@ test('4) مودال "تحويل لقضية؟" — إنشاء قضية من بي�
   await page.getByTestId('new-session-plaintiff-0-capacity').fill('مدعي');
   await page.getByTestId('new-session-plaintiff-0-national-id').fill(`3${Date.now()}`.slice(0, 14));
   await page.getByTestId('new-session-plaintiff-subform-save').click();
+  // 🔒 FIX (نفس باج تست 6 — usePartyFields.ts بيبدأ دايمًا بطرف مدعى-عليه
+  // فاضي افتراضيًا حتى لو مالمسناهوش، وفاليديشن casePartiesValidation.ts
+  // بترفض الحفظ لو اسمه فاضي. من غير الملء ده، new-session-save كان بيرجّع
+  // توست تحذير بدل ما يفتح مودال "تحويل لقضية؟"، فـpostsave-create-case
+  // كان بيفضل مستني 60 ثانية من غير ما يظهر أصلاً.
+  await page.getByTestId('party-side-card-defendant').click();
+  await page.getByTestId('new-session-defendant-0-name').fill(`خصم تحويل E2E ${Date.now()}`);
+  await page.getByTestId('new-session-defendant-0-capacity').fill('مدعى عليه');
+  await page.getByTestId('new-session-defendant-subform-save').click();
   await page.getByTestId('new-session-save').click();
 
   // خطوة idle من مودال "تحويل لقضية؟" — الضغط على "إنشاء ملف قضية"
@@ -147,6 +156,12 @@ test('5) إضافة الموكل لقائمة الموكلين فقط من خط�
   await page.getByTestId('new-session-plaintiff-0-capacity').fill('مدعي');
   await page.getByTestId('new-session-plaintiff-0-national-id').fill(`4${Date.now()}`.slice(0, 14));
   await page.getByTestId('new-session-plaintiff-subform-save').click();
+  // 🔒 FIX (نفس باج تست 4 أعلاه وتست 6 — الطرف المدعى-عليه الافتراضي
+  // الفاضي بيفشل الفاليديشن لو متلمسش).
+  await page.getByTestId('party-side-card-defendant').click();
+  await page.getByTestId('new-session-defendant-0-name').fill(`خصم إضافة موكل E2E ${Date.now()}`);
+  await page.getByTestId('new-session-defendant-0-capacity').fill('مدعى عليه');
+  await page.getByTestId('new-session-defendant-subform-save').click();
   await page.getByTestId('new-session-save').click();
 
   // idlePartyList فيها طرف واحد ⭐ → زرار "إضافة X لقائمة الموكلين"
@@ -269,15 +284,23 @@ test('9) ربط الجلسة بقضية جديدة من شاشة التفاصي�
   // (الموكل اللي جه من createStandaloneSession رقمه القومي ثابت
   // '12345678901234' — ممكن يكون اتسجل من تست سابق فيرجع 'found'،
   // فبنتعامل مع الاتنين وصولاً لـ 'done').
+  // 🔒 FIX (تحليل لوجز E2E — 30 يوليو 2026): كانت مهلة الـrace 10 ثواني بس
+  // لكل مسار — لو الاستعلام الحقيقي على Supabase (تقلبات شبكة CI عادية)
+  // استغرق أكتر من كده، الاتنين كانوا بيفشلوا بصمت (catch)، والتست كان
+  // بيفترض غلط إن الحالة "notfound" وبيدوس على زرار لسه مش ظاهر أصلاً —
+  // فيعلّق لحد الـ60 ثانية بتاعة التست كله. رفعنا المهلة لـ20 ثانية، وضفنا
+  // waitFor صريح قبل الدوس على مسار notfound (بدل دوس أعمى) عشان لو لسه
+  // مستني، يفشل برسالة واضحة بدل ما يعلّق لحد نهاية التست.
   const foundLink = page.getByTestId('link-session-found-link-existing');
   const notfoundAdd = page.getByTestId('link-session-notfound-add-and-link');
   await Promise.race([
-    foundLink.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {}),
-    notfoundAdd.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {}),
+    foundLink.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {}),
+    notfoundAdd.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {}),
   ]);
   if (await foundLink.isVisible().catch(() => false)) {
     await foundLink.click();
   } else {
+    await notfoundAdd.waitFor({ state: 'visible', timeout: 10_000 });
     await notfoundAdd.click();
   }
 
