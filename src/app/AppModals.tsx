@@ -69,6 +69,10 @@ interface AppModalsProps {
     fetchCases: (page?: number, filter?: string) => Promise<void>;
     fetchTodaySessions: () => Promise<void>;
     fetchUpcomingSessions: () => Promise<void>;
+    // 🔒 FIX (تشخيص لوجز E2E — 30 يوليو 2026): مطلوبة عشان نقدر نعمل ريفريش
+    // كامل لقوائم جلسات الداشبورد (اليوم/القادم/الفائتة) لما نقفل تفاصيل
+    // القضية — راجع onClose الخاص بـ CaseDetailView تحت.
+    fetchMissedSessions: () => Promise<void>;
     // ⚡ [جديد] عشان SessionsCalendar (في App.tsx) يعمل refresh فوري لما
     // جلسة مستقلة جديدة تتحفظ من هنا — راجع SessionsCalendar.tsx
     // externalRefreshSignal.
@@ -136,7 +140,7 @@ function AppModals({
     setShowLawyerModal, setShowClientModal, setTab,
     setSelectedCase, setSelectedClient, _setDeleteConfirm, _setSelectedClient, _setSelectedCase,
     setCases, setCasesFilter, setCasesPage,
-    fetchCases, fetchTodaySessions, fetchUpcomingSessions, onStandaloneSessionSaved,
+    fetchCases, fetchTodaySessions, fetchUpcomingSessions, fetchMissedSessions, onStandaloneSessionSaved,
     fetchClients, clientSearch,
     handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleUnlinkClient, handleCreateAndLinkClient,
     handleOpenCreateClientForSession, handleOpenCreateClientForSessionCase,
@@ -220,7 +224,13 @@ function AppModals({
             client: clients.find((cl) => cl.id === selectedCase?.client_id) || null,
             clients,
             initialTab: selectedCaseInitialTab,
-            onClose: () => { nav.closeModal('caseDetail'); _setSelectedCase(null); },
+            // 🔒 FIX (تشخيص لوجز E2E — 30 يوليو 2026): إضافة/تعديل/حذف جلسة
+            // جوه تبويب جلسات القضية (CaseDetailView) ما كانش بيرجّع أي إشارة
+            // لداشبورد قوائم الجلسات (اليوم/القادم/الفائتة) — فجلسة اتضافت
+            // النهاردة من جوه القضية كانت تفضل غايبة عن بطاقة "اليوم" في
+            // الداشبورد لحد ما يحصل reload كامل للصفحة (dashboard-tab.spec.ts).
+            // دلوقتي بنعمل ريفريش لتلات القوائم لما نقفل شاشة تفاصيل القضية.
+            onClose: () => { nav.closeModal('caseDetail'); _setSelectedCase(null); fetchTodaySessions(); fetchUpcomingSessions(); fetchMissedSessions(); },
             onUpdate: (newStatus: string) => {
                 setSelectedCase((p) => ({ ...p, status: newStatus } as MappedCase));
                 setCases((prev) => prev.map((c) => c.id === selectedCase?.id ? { ...c, status: newStatus } : c));
