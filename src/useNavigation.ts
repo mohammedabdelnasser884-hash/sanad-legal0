@@ -174,17 +174,36 @@ export function useNavigation(): NavigationState {
   const initialTab = resolveInitialTab();
 
   const [tab, setTabState]       = useState<TabName>(initialTab);
-  const [activeModal, setModal]  = useState<ModalName | null>(null);
+  // 🔒 FIX (تشخيص لوجز E2E — 30 يوليو 2026): activeModal كان قيمة واحدة
+  // بس (ModalName | null)، فـ openModal('newClient') وقت ما 'newSession'
+  // فاتح بالفعل (زرار "إضافة الموكل لقائمة الموكلين فقط" من مودال ما بعد
+  // الحفظ، مثلاً) كان بيستبدل 'newSession' بـ'newClient' تمامًا —
+  // NewStandaloneSessionModal (وclientStep جواه) كانت بتتقفل فعليًا من
+  // الـDOM، فلما NewClientModal يتقفل بعد الحفظ، مفيش رجوع لـ'newSession'
+  // خالص، وأي زرار جواه (زي new-session-postsave-idle-close) يفضل مستحيل
+  // يتلاقي. حولنا activeModal لـstack حقيقي (modalStack) — أي مودال
+  // يتفتح جوه مودال تاني مفتوح فعلاً يتضاف فوقه بدل ما يستبدله، وisOpen()
+  // بيفحص وجوده في الـstack مش يساويه بالظبط. activeModal اتسابت في الـ
+  // return للتوافق الخلفي (تعليقات في أماكن تانية بتتكلم عنها) وبتمثل
+  // آخر مودال اتفتح (قمة الـstack).
+  const [modalStack, setModalStack] = useState<ModalName[]>([]);
+  const activeModal = modalStack.length > 0 ? modalStack[modalStack.length - 1] : null;
   const [showExitConfirm, setShowExitConfirm] = useState(false);
 
   // Refs for use inside event handlers (avoid stale closures)
   const tabRef         = useRef<TabName>(initialTab);
-  const activeModalRef = useRef<ModalName | null>(null);
+  const modalStackRef  = useRef<ModalName[]>([]);
   const exitingRef     = useRef(false);
 
   // Keep refs in sync
   useEffect(() => { tabRef.current = tab; }, [tab]);
-  useEffect(() => { activeModalRef.current = activeModal; }, [activeModal]);
+  useEffect(() => { modalStackRef.current = modalStack; }, [modalStack]);
+
+  // Helper: topmost modal currently open, read from the ref (safe inside
+  // event handlers / callbacks that must avoid stale closures).
+  const activeModalRef = () => modalStackRef.current.length > 0
+    ? modalStackRef.current[modalStackRef.current.length - 1]
+    : null;
 
   // ── Bootstrap ────────────────────────────────────────────────────────
   // Set up a two-entry history stack:
@@ -222,13 +241,13 @@ export function useNavigation(): NavigationState {
         return;
       }
 
-      const currentModal = activeModalRef.current;
+      const currentModal = activeModalRef();
       const currentTab   = tabRef.current;
 
-      // ── Case 1: a modal is open → close it, stay on current tab ──
+      // ── Case 1: a modal is open → close the TOPMOST one only, stay on current tab ──
       if (currentModal) {
-        setModal(null);
-        activeModalRef.current = null;
+        setModalStack((s) => s.slice(0, -1));
+        modalStackRef.current = modalStackRef.current.slice(0, -1);
         // Re-push the current tab entry so the stack stays intact
         window.history.pushState(
           { type: 'tab', tab: currentTab },
@@ -246,8 +265,8 @@ export function useNavigation(): NavigationState {
           // Go to dashboard
           setTabState('dashboard');
           tabRef.current = 'dashboard';
-          setModal(null);
-          activeModalRef.current = null;
+          setModalStack([]);
+          modalStackRef.current = [];
           localStorage.setItem(LS_TAB_KEY, 'dashboard');
           window.history.replaceState({ type: 'anchor' }, '', '/');
         } else {
@@ -263,8 +282,8 @@ export function useNavigation(): NavigationState {
       if (state.type === 'tab' && state.tab) {
         setTabState(state.tab);
         tabRef.current = state.tab;
-        setModal(null);
-        activeModalRef.current = null;
+        setModalStack([]);
+        modalStackRef.current = [];
         localStorage.setItem(LS_TAB_KEY, state.tab);
       }
     };
@@ -276,14 +295,14 @@ export function useNavigation(): NavigationState {
   // ── navigateTo ───────────────────────────────────────────────────────
   const navigateTo = useCallback((newTab: TabName) => {
     const currentTab   = tabRef.current;
-    const currentModal = activeModalRef.current;
+    const currentModal = activeModalRef();
 
     if (newTab === currentTab && !currentModal) return; // no-op
 
-    // Close any open modal silently
+    // Close any open modal(s) silently
     if (currentModal) {
-      setModal(null);
-      activeModalRef.current = null;
+      setModalStack([]);
+      modalStackRef.current = [];
     }
 
     setTabState(newTab);
@@ -308,26 +327,30 @@ export function useNavigation(): NavigationState {
   // ── openModal / closeModal ────────────────────────────────────────────
   // Modals are PURE React state — no history push.
   // Back button is intercepted in popstate before it pops anything.
+  // 🔒 FIX: stack-based — openModal يضيف فوق أي مودال مفتوح بالفعل بدل ما
+  // يستبدله (راجع تعليق modalStack فوق).
   const openModal = useCallback((modal: ModalName) => {
-    if (activeModalRef.current === modal) return;
-    setModal(modal);
-    activeModalRef.current = modal;
+    if (modalStackRef.current.includes(modal)) return;
+    const next = [...modalStackRef.current, modal];
+    modalStackRef.current = next;
+    setModalStack(next);
   }, []);
 
   const closeModal = useCallback((modal: ModalName) => {
-    if (activeModalRef.current !== modal) return;
-    setModal(null);
-    activeModalRef.current = null;
+    if (!modalStackRef.current.includes(modal)) return;
+    const next = modalStackRef.current.filter((m) => m !== modal);
+    modalStackRef.current = next;
+    setModalStack(next);
   }, []);
 
   const closeAllModals = useCallback(() => {
-    setModal(null);
-    activeModalRef.current = null;
+    modalStackRef.current = [];
+    setModalStack([]);
   }, []);
 
   const isOpen = useCallback(
-    (modal: ModalName) => activeModal === modal,
-    [activeModal]
+    (modal: ModalName) => modalStack.includes(modal),
+    [modalStack]
   );
 
   // ── Exit confirm ─────────────────────────────────────────────────────
