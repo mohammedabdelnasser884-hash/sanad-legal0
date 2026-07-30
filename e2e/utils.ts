@@ -15,6 +15,18 @@ export async function login(page: Page): Promise<void> {
     );
   }
 
+  // 🩺 TEMP DEBUG (30 يوليو 2026) — بدون الهوك ده، أي console.error/warn
+  // جوه كود المتصفح (React app) مش بيوصل لنص لوج CI خالص، وبيفضل حبيس
+  // جوه trace.zip/الفيديو (ملفات تقيلة بنتجنب تنزيلها). الهوك ده بيودّي
+  // نص الرسالة لـstdout بتاع Node مباشرة — يعني بيظهر في نفس ملف اللوج
+  // النصي الصغير اللي بنجمعه أصلاً من CI، من غير أي مرفقات إضافية.
+  // ينشال بعد ما نوصل للسبب الجذري في الفشلات المعلّقة.
+  page.on('console', (msg) => {
+    if (msg.type() === 'error' || msg.type() === 'warning') {
+      console.log(`[BROWSER ${msg.type()}] ${msg.text()}`);
+    }
+  });
+
   await page.goto('/');
   await page.getByTestId('login-email').fill(email);
   await page.getByTestId('login-password').fill(password);
