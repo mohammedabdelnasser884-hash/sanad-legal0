@@ -95,6 +95,11 @@ export function useAdminUsers(fetchLawyers: () => void, profile?: ProfileRow | n
       setConfirmDelete(null);
       fetchLawyers();
     } catch (e) {
+      // 🩺 TEMP DEBUG (30 يوليو 2026) — showErrorToast بتعرض رسالة عامة قصدًا
+      // للمستخدم، فمخفية السبب الحقيقي حتى في لوجز CI النصية. السطر ده مؤقت
+      // بس عشان نلقط رسالة admin-actions الحقيقية من نص console (رخيص —
+      // مفيش داعي لـtrace.zip/screenshots). ينشال بعد ما نوصل للسبب الجذري.
+      console.error('[DEBUG admin_delete_user]', e instanceof Error ? e.message : String(e));
       showErrorToast('admin_delete_user', e, 'تعذّر حذف المستخدم. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'حذف مستخدم');
     }
     setSaving(false);
