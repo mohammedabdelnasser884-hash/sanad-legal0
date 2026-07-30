@@ -149,7 +149,7 @@ export function useSessionLinking(
         }, caseTitle, offlineTempId, session.client_id),
         returning: true,
       });
-      console.error('[DEBUG handleLinkCase] 2) بعد INSERT القضية', 'error=' + (error ? error.message : 'لا'), 'offline=' + offline, 'queued=' + queued);
+      console.error('[DEBUG handleLinkCase] 2) بعد INSERT القضية', 'error=' + (error ? (error as { message?: string }).message ?? 'unknown-shape' : 'لا'), 'offline=' + offline, 'queued=' + queued);
       if (error) {
         showErrorToast('case_create', error, 'تعذّر إنشاء القضية. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'إنشاء قضية');
         return;
@@ -181,7 +181,7 @@ export function useSessionLinking(
         id: session.id,
         data: withFkOfflineSentinel(offline, queued, 'case_id', offlineTempId, 'cases', caseTitle, { case_id: realOrTempCaseId }),
       });
-      console.error('[DEBUG handleLinkCase] 6) بعد UPDATE ربط الجلسة بالقضية', 'error=' + (sessionLinkErr ? sessionLinkErr.message : 'لا'));
+      console.error('[DEBUG handleLinkCase] 6) بعد UPDATE ربط الجلسة بالقضية', 'error=' + (sessionLinkErr ? (sessionLinkErr as { message?: string }).message ?? 'unknown-shape' : 'لا'));
       if (sessionLinkErr) {
         showErrorToast('session_case_link', sessionLinkErr, 'تم إنشاء القضية لكن تعذّر ربط الجلسة بها. حاول تحديث الصفحة.', 'ربط الجلسة بالقضية');
       } else {
