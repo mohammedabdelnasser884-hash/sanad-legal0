@@ -141,8 +141,13 @@ test('تحديث جلسة مستقلة مربوطة بموكل — الجلسة 
   await expect(page.getByTestId('save-client-edit-button')).not.toBeVisible({ timeout: 10_000 });
 
   // 4) نرجع للتقويم، نفتح الجلسة، ونستخدم "⚡ تحديث الجلسة"
+  // 🔒 FIX: كان الكود بيندهلك على nav-calendar هنا وهو لسه واقف على
+  // صفحة تفاصيل/تعديل الموكل (خطوة 3 فوق) — يعني calendar-day مكنش
+  // موجود في الـDOM خالص، وده كان بيخلي openDayInCalendar تستنى لحد
+  // ما التست يعدي الـtimeout بتاعه كله (60 ثانية) وبعدين يفشل.
   const { earlierDay } = twoDaysInCurrentMonth();
   const today = new Date().getDate();
+  await page.getByTestId('nav-calendar').click();
   await openDayInCalendar(page, today);
   const sessionCard = page.getByTestId('calendar-session-card').filter({ hasText: sessionTitle });
   await sessionCard.first().click();
