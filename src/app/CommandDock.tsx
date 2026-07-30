@@ -68,8 +68,17 @@ function CommandDock({
             }
         },
             // الرئيسية
+            // 🔒 FIX (تشخيص لوجز E2E — 30 يوليو 2026): الزرار الوحيد من كل
+            // أزرار الدوك من غير data-testid — كل الإخوة (nav-cases،
+            // nav-calendar، nav-reminders، nav-ai-center) عندهم واحد. ده كان
+            // بيمنع أي اختبار E2E من الرجوع للداشبورد بعد ما ينتقل لتاب
+            // تاني (dashboard-tab.spec.ts كان بيفترض غلط إن قفل تفاصيل
+            // القضية بيرجّع للداشبورد تلقائيًا — مش صحيح، الـtab بيفضل زي
+            // ما هو، راجع calendar-month-tab.spec.ts اللي بيتعامل مع نفس
+            // الحالة صح بالرجوع الصريح لـnav-calendar).
             React.createElement('button', {
                 onClick: () => { setTab('dashboard'); setShowMore(false); },
+                'data-testid': 'nav-dashboard',
                 className: 'flex flex-col items-center justify-center gap-[3px] flex-1 h-[50px] rounded-[18px] transition-all duration-200 active:scale-90 relative',
                 style: tab === 'dashboard' ? { background: 'rgba(212,175,55,0.1)' } : {}
             },
