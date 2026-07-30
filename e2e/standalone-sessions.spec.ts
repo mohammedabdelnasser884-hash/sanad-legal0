@@ -307,16 +307,20 @@ test('9) ربط الجلسة بقضية جديدة من شاشة التفاصي�
   // فيعلّق لحد الـ60 ثانية بتاعة التست كله. رفعنا المهلة لـ20 ثانية، وضفنا
   // waitFor صريح قبل الدوس على مسار notfound (بدل دوس أعمى) عشان لو لسه
   // مستني، يفشل برسالة واضحة بدل ما يعلّق لحد نهاية التست.
+  // 🔒 FIX (تحليل لوجز E2E — 30 يوليو 2026): رفعنا المهلة من 20 لـ35 ثانية
+  // لكل مسار في الـrace، ومن 10 لـ15 ثانية لانتظار notfound بالتحديد.
+  // نفس سبب مشكلة dashboard-tab.spec.ts: بطء استعلام حقيقي على Supabase
+  // تحت ضغط تستات متوازية قرب نهاية تشغيل الـCI، مش باج منطقي في الكود.
   const foundLink = page.getByTestId('link-session-found-link-existing');
   const notfoundAdd = page.getByTestId('link-session-notfound-add-and-link');
   await Promise.race([
-    foundLink.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {}),
-    notfoundAdd.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {}),
+    foundLink.waitFor({ state: 'visible', timeout: 35_000 }).catch(() => {}),
+    notfoundAdd.waitFor({ state: 'visible', timeout: 35_000 }).catch(() => {}),
   ]);
   if (await foundLink.isVisible().catch(() => false)) {
     await foundLink.click();
   } else {
-    await notfoundAdd.waitFor({ state: 'visible', timeout: 10_000 });
+    await notfoundAdd.waitFor({ state: 'visible', timeout: 15_000 });
     await notfoundAdd.click();
   }
 
