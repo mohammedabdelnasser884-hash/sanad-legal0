@@ -508,12 +508,18 @@ export function useCaseActions(params: {
     };
 
     // ─ تعديل قضية ─
-    const handleUpdateCase = async (caseId: string, form: CaseFormSubmitData) => {
+    // 🔒 FIX (تشخيص لوجز E2E — 29 يوليو 2026): بترجع boolean دلوقتي (true =
+    // اتحدثت فعلاً، false = فشل التحديث لأي سبب) بدل void — نفس فيكس
+    // handleUpdateClient فوق بالحرف. CaseDetailView.tsx كان بيقفل مودال
+    // التعديل فورًا بمجرد الضغط على "حفظ التعديلات" من غير ما ينتظر النتيجة
+    // الأسينك، فحتى لو فشل الحفظ (تكرار رقم قيد مثلاً)، المودال كان يقفل
+    // برضو والمستخدم يشوف توست الخطأ بس من غير فرصة يصحح البيانات.
+    const handleUpdateCase = async (caseId: string, form: CaseFormSubmitData): Promise<boolean> => {
         // 🔒 نفس فحص handleSaveCase المتزامن — قبل أي setState أو await.
-        if (updatingCaseGuard) return;
+        if (updatingCaseGuard) return false;
         if (!form.title || !form.title.trim()) {
             toast('❌ حقل "موضوع ومسمى الدعوى" مطلوب', true);
-            return;
+            return false;
         }
         // 🔒 FIX (تقرير الموثوقية — نتيجة 1): الدالة دي ما كانش فيها أي
         // حماية دبل كليك خالص (بعكس handleSaveCase اللي فيها setSavingCase).
@@ -533,9 +539,9 @@ export function useCaseActions(params: {
                 showErrorToast('case_number_duplicate_check', e, 'تعذّر التحقق من رقم القيد. حاول مرة أخرى.', 'تعديل قضية');
                 updatingCaseGuard = false;
                 setSavingCase(false);
-                return;
+                return false;
             }
-            if (caseDup.duplicate) { toast(caseDup.message!, true); updatingCaseGuard = false; setSavingCase(false); return; }
+            if (caseDup.duplicate) { toast(caseDup.message!, true); updatingCaseGuard = false; setSavingCase(false); return false; }
 
             // ⚡ NEW (مرحلة 5.2 — خطة تعدد الأطراف، 22 يوليو 2026): نفس فلسفة
             // insertCaseParties في handleSaveCase (فاليديشن سيرفر مكرر أولاً،
@@ -657,7 +663,7 @@ export function useCaseActions(params: {
                 toast('⚠️ هذه القضية عدّلها شخص آخر بعد ما فتحتها — أعد فتحها وحاول التعديل مرة أخرى', true);
                 updatingCaseGuard = false;
                 setSavingCase(false);
-                return;
+                return false;
             } else if (error) {
                 if ((error as { code?: string }).code === '23505') {
                     toast('⚠️ رقم القيد ده مسجل بالفعل لقضية موجودة', true);
@@ -666,7 +672,7 @@ export function useCaseActions(params: {
                 }
                 updatingCaseGuard = false;
                 setSavingCase(false);
-                return;
+                return false;
             } else {
                 // ── تسجيل جلسة جديدة لو تاريخ الجلسة تغيّر ──
                 if (form.date) {
@@ -734,10 +740,12 @@ export function useCaseActions(params: {
             }
             updatingCaseGuard = false;
             setSavingCase(false);
+            return true;
         } catch (e) {
             toast('❌ خطأ في الاتصال، تحقق من الإنترنت وأعد المحاولة', true);
             updatingCaseGuard = false;
             setSavingCase(false);
+            return false;
         }
     };
 
