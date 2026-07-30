@@ -100,7 +100,13 @@ export function useDashboardFeed(profile: ProfileRow | null) {
         // 🩺 TEMP DEBUG (30 يوليو 2026): لوج نجاح كمان (مش بس فشل) — عشان
         // نتأكد هل الاستعلام أصلاً بيرجّع الصف المتوقع من غير error (يعني
         // المشكلة عرض/تايمنج) ولا بيرجّع فاضي (يعني المشكلة استعلام/بيانات).
-        console.error('[DEBUG fetchTodaySessions]', 'todayStr=' + todayStr, 'count=' + (data?.length ?? 0), JSON.stringify((data || []).map((s) => ({ id: s.id, session_date: s.session_date, case_id: s.case_id }))));
+        // 🩺 TEMP DEBUG (30 يوليو 2026 — دفعة 2): ضفنا cases_embed هنا تحديدًا
+        // (الـid والـtitle من العلاقة المدمجة زي ما بترجع فعليًا من Supabase)
+        // عشان نأكد/ننفي فرضية إن الـembed بيرجع null/فاضي لصف الجلسة الجديدة
+        // (سبب محتمل لظهور الكارت بعنوان fallback بدل عنوان القضية الحقيقي،
+        // وبالتالي فشل .filter({hasText: caseTitle}) في التست رغم إن الداتا
+        // نفسها وصلت صح وسريع زي ما أكدنا في تحليل الرن اللي فات).
+        console.error('[DEBUG fetchTodaySessions]', 'todayStr=' + todayStr, 'count=' + (data?.length ?? 0), JSON.stringify((data || []).map((s) => ({ id: s.id, session_date: s.session_date, case_id: s.case_id, cases_embed: Array.isArray(s.cases) ? s.cases.map((c) => ({ id: c.id, title: c.title })) : (s.cases ? { id: s.cases.id, title: s.cases.title } : null) }))));
         setTodaySessions(data || []);
         setLoadingUrgent(false);
     }, [profile]);
