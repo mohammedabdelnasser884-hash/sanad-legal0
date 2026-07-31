@@ -55,19 +55,16 @@ function makeMockDb() {
       };
     }
     if (table === 'case_parties') {
-      // ⚡ NEW (خطة تعدد الأطراف، 7.1/7.2): fetchSessionClientParties
-      // بتستخدم .select().eq().eq().order(...)، وmovePartiesFromSessionToCase
-      // بتستخدم .select().eq(...) بس — نفس kind من object بيغطي السلسلتين،
-      // افتراضيًا [] فاضية (مفيش أطراف إضافية) عشان مسار الاسم الواحد
-      // القديم يفضل شغال زي ما هو في التستات اللي مش بتغطي تعدد الأطراف.
+      // بيغطي استخدامين مختلفين فعليًا في useClientLinking.ts:
+      //   - fetchSessionClientParties (useEffect idlePartyList + handleLinkCase): .select().eq().eq().order()
+      //   - movePartiesFromSessionToCase (جوه handleLinkCase بعد ربط الجلسة): .select('id').eq(...) [يتم await مباشرة]
+      // من غيره: استثناء غير متلقوط جوه useEffect، أو "❌ خطأ غير متوقع"
+      // بدل توست النجاح الحقيقي جوه handleLinkCase (يتلقّط في catch العام).
       const chain = {
-        eq: vi.fn(() => ({
-          eq: vi.fn(() => ({
-            order: vi.fn(() => Promise.resolve(get('case_parties:select', { data: [], error: null }))),
-          })),
-          // movePartiesFromSessionToCase: .select('id').eq('session_id', sessionId) — بس eq واحدة
-          then: (resolve: (r: Result) => void) => resolve(get('case_parties:select', { data: [], error: null })),
-        })),
+        eq: vi.fn(() => chain),
+        order: vi.fn(() => Promise.resolve(get('case_parties:select', { data: [], error: null }))),
+        then: (resolve: (v: Result) => void, reject?: (e: unknown) => void) =>
+          Promise.resolve(get('case_parties:select', { data: [], error: null })).then(resolve, reject),
       };
       return { select: vi.fn(() => chain) };
     }
@@ -403,7 +400,7 @@ describe('useClientLinking', () => {
       act(() => { result.current.handleAddAndLinkClient(); });
 
       expect(onOpenCreateClientForCase).toHaveBeenCalledWith(
-        'case-add-1', 'موكل جديد', '12345', '', undefined,
+        'case-add-1', 'موكل جديد', '12345', '',
         { isOfflineTemp: false, fallbackTitle: undefined },
       );
     });
@@ -421,7 +418,7 @@ describe('useClientLinking', () => {
       act(() => { result.current.handleAddAndLinkClient(); });
 
       expect(onOpenCreateClientForCase).toHaveBeenCalledWith(
-        tempCaseId, 'موكل ب', '', '', undefined,
+        tempCaseId, 'موكل ب', '', '',
         { isOfflineTemp: true, fallbackTitle: 'قضية أوفلاين ب' },
       );
     });
@@ -437,7 +434,7 @@ describe('useClientLinking', () => {
       act(() => { result.current.handleAddAndLinkClient(); });
 
       expect(onOpenCreateClientForCase).toHaveBeenCalledWith(
-        expect.stringMatching(/^tmp-/), 'موكل بدون عنوان', '', '', undefined,
+        expect.stringMatching(/^tmp-/), 'موكل بدون عنوان', '', '',
         { isOfflineTemp: true, fallbackTitle: '30 لسنة 2026' },
       );
     });
