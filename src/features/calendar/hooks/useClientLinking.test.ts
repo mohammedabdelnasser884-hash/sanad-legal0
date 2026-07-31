@@ -400,7 +400,7 @@ describe('useClientLinking', () => {
       act(() => { result.current.handleAddAndLinkClient(); });
 
       expect(onOpenCreateClientForCase).toHaveBeenCalledWith(
-        'case-add-1', 'موكل جديد', '12345', '',
+        'case-add-1', 'موكل جديد', '12345', '', undefined,
         { isOfflineTemp: false, fallbackTitle: undefined },
       );
     });
@@ -418,7 +418,7 @@ describe('useClientLinking', () => {
       act(() => { result.current.handleAddAndLinkClient(); });
 
       expect(onOpenCreateClientForCase).toHaveBeenCalledWith(
-        tempCaseId, 'موكل ب', '', '',
+        tempCaseId, 'موكل ب', '', '', undefined,
         { isOfflineTemp: true, fallbackTitle: 'قضية أوفلاين ب' },
       );
     });
@@ -434,7 +434,7 @@ describe('useClientLinking', () => {
       act(() => { result.current.handleAddAndLinkClient(); });
 
       expect(onOpenCreateClientForCase).toHaveBeenCalledWith(
-        expect.stringMatching(/^tmp-/), 'موكل بدون عنوان', '', '',
+        expect.stringMatching(/^tmp-/), 'موكل بدون عنوان', '', '', undefined,
         { isOfflineTemp: true, fallbackTitle: '30 لسنة 2026' },
       );
     });
