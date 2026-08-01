@@ -32,8 +32,12 @@ interface EditCaseModalProps {
     // زي قضية مش مربوطة (fallback الموكل المحذوف، مرحلة 7 من الخطة، أولوية
     // منخفضة دلوقتي لأنه صفر حالة فعلية حاليًا).
     linkedClient?: ClientRow | null;
-    // زرار "✏️ عدّل من ملف الموكل" — بيفتح تفاصيل الموكل نفسه بدل تصميم جديد.
-    onOpenClientProfile?: () => void;
+    // ⚡ CHANGED (قفل بيانات كل الأطراف المربوطة بموكل حقيقي، لا الطرف
+    // الأساسي بس): بقى بياخد الموكل (ClientRow) المطلوب فتح فورم تعديله —
+    // بيتحدد وقت الضغط حسب party.client_id بتاع الطرف اللي اتضغط عليه، مش
+    // بس linkedClient الأساسي. بيقفل فورم القضية الحالي ويودّي مباشرة لفورم
+    // تعديل الموكل نفسه (مش شاشة تفاصيل بس).
+    onOpenClientProfile?: (client: ClientRow) => void;
     // ⚡ NEW (خطة تطوير أطراف الدعوى — مرحلة 4 خطوة 2، 23 يوليو 2026): قائمة
     // الموكلين + فتح موديل "إنشاء موكل جديد" الموحّد — لأي طرف *غير* الموكل
     // الأصلي المقفول (linkedClient فوق)، زي أي طرف جديد يتضاف أثناء
@@ -295,7 +299,21 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
         const all = [...initialParties.plaintiffs, ...initialParties.defendants];
         return all.find((p) => p.client_id === caseData.client_id)?.id ?? null;
     });
-    const renderPartyReadOnly = (party: PartyFieldValue) => party.id === linkedPartyId;
+    // ⚡ CHANGED (بيانات الموكل مش قابلة للتعديل من داخل القضية): القفل مش
+    // مقتصر على linkedPartyId (الطرف الأساسي بتاع القضية) بس دلوقتي — أي
+    // طرف اتربط بموكل حقيقي (سواء الأساسي أو عن طريق دروب-داون "ربط بموكل
+    // من النظام" جوه renderPartyExtra تحت) بياناته الشخصية تتقفل. الصفة
+    // (capacity) فضلت قابلة للتعديل دايمًا زي ما هي — دي دور الطرف في
+    // القضية دي بالذات، مش بيانات الموكل نفسه.
+    // 🔒 FIX (اكتشفته وقت المراجعة): لو الموكل المربوط بطرف *غير* أساسي
+    // اتمسح (soft-deleted) بعد الربط، client_id فضل موجود على الطرف لكن
+    // مش موجود في `clients` (اللي فيها الموكلين النشطين بس) — لو قفلنا
+    // بس على أساس !!party.client_id، الطرف كان هيتقفل للأبد من غير أي
+    // زرار تعديل (مفيش linkedPartyClient يترجع في renderPartyExtra) —
+    // طريق مسدود فعليًا. الحل: نتأكد إن الموكل قابل للحل فعليًا في
+    // `clients` قبل القفل، بالظبط زي فولباك isOrphaned للطرف الأساسي فوق.
+    const renderPartyReadOnly = (party: PartyFieldValue) =>
+        !!party.client_id && clients.some((c) => c.id === party.client_id);
 
     // ⚡ NEW (خطة تطوير أطراف الدعوى — مرحلة 4 خطوة 2، 23 يوليو 2026): نفس
     // فكرة linkClientToParty في NewCaseModal.tsx بالحرف — بس هنا لأي طرف
@@ -332,7 +350,21 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
     // فوق، مفيش داعي يتعرض له سلوت الربط أصلاً).
     const renderPartyExtra = (party: PartyFieldValue) => {
         if(!party.is_client || party.id === linkedPartyId) return null;
+        // ⚡ NEW: الطرف ده مربوط بموكل حقيقي (client_id) — بياناته مقفولة
+        // دلوقتي (renderPartyReadOnly فوق). دروب-داون الربط فضل موجود
+        // (لسه بيسمح بتغيير الموكل أو فك الربط)، وبنضيف جنبه زرار "عدّل من
+        // ملف الموكل" يوجّهه لفورم تعديل الموكل نفسه مباشرة.
+        const linkedPartyClient = party.client_id ? clients.find((c: ClientRow) => c.id === party.client_id) : null;
         return React.createElement('div',{className:'space-y-2'},
+            party.client_id && onOpenClientProfile && linkedPartyClient && React.createElement('div',{className:'flex items-center justify-between'},
+                React.createElement('p',{className:'text-[9px] text-slate-500'},'🔗 مربوط بموكل من النظام — بيانات الطرف ده بتتقرا من ملف الموكل'),
+                React.createElement('button',{
+                    type:'button',
+                    onClick:()=>onOpenClientProfile(linkedPartyClient),
+                    className:'text-[9px] font-black text-premium-gold shrink-0',
+                    'data-testid':`edit-case-open-client-profile-${party.id}`,
+                },'✏️ عدّل من ملف الموكل')
+            ),
             clients.length>0 && React.createElement(Sel,{
                 label:"ربط بموكل من النظام (اختياري)",
                 value:party.client_id || '',
@@ -498,8 +530,8 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
             isLinked && React.createElement('div', {className:"flex items-center justify-between"},
                 React.createElement('p', {className:"text-[9px] text-slate-500"}, "🔗 مربوط بموكل من النظام — بيانات الطرف ده بتتقرا من ملف الموكل"),
                 React.createElement('div', {className:"flex items-center gap-3 shrink-0"},
-                    onOpenClientProfile && React.createElement('button', {
-                        type:"button", onClick:onOpenClientProfile,
+                    onOpenClientProfile && linkedClient && React.createElement('button', {
+                        type:"button", onClick:()=>onOpenClientProfile(linkedClient),
                         className:"text-[9px] font-black text-premium-gold",
                         'data-testid':'edit-case-open-client-profile'
                     }, "✏️ عدّل من ملف الموكل")
