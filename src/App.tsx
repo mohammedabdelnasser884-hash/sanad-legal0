@@ -100,6 +100,11 @@ function App() {
     const [selectedCase,      _setSelectedCase]  = useState<MappedCase | null>(null);
     const [selectedCaseInitialTab, setSelectedCaseInitialTab] = useState('timeline');
     const [selectedClient,    _setSelectedClient]= useState<MappedClient | null>(null);
+    // ⚡ NEW (بيانات الموكل مش قابلة للتعديل من داخل القضية/الجلسة): لما
+    // زرار "✏️ عدّل من ملف الموكل" يتضغط جوه فورم تعديل قضية/جلسة، عايزين
+    // نفتح تفاصيل الموكل بفورم التعديل شغال على طول (مش شاشة تفاصيل بس
+    // محتاجة ضغطة تانية).
+    const [selectedClientEditMode, setSelectedClientEditMode] = useState(false);
     const [deleteConfirm,     _setDeleteConfirm] = useState<DeleteConfirmState | null>(null);
 
     const { darkMode, toggleTheme } = useThemeMode();
@@ -148,9 +153,9 @@ function App() {
         } else { _setSelectedCase(null); }
     }, [nav]);
 
-    const setSelectedClient = useCallback((clientOrNull: MappedClient | null) => {
-        if (clientOrNull) { _setSelectedClient(clientOrNull); nav.openModal('clientDetail'); }
-        else              { _setSelectedClient(null); }
+    const setSelectedClient = useCallback((clientOrNull: MappedClient | null, openInEditMode: boolean = false) => {
+        if (clientOrNull) { _setSelectedClient(clientOrNull); setSelectedClientEditMode(openInEditMode); nav.openModal('clientDetail'); }
+        else              { _setSelectedClient(null); setSelectedClientEditMode(false); }
     }, [nav]);
 
     const setDeleteConfirm = useCallback((v: DeleteConfirmState | null) => {
@@ -348,7 +353,7 @@ function App() {
         fetchTodaySessions, fetchUpcomingSessions, fetchMissedSessions,
         // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 3): زرار "عدّل من ملف
         // الموكل" جوه EditStandaloneModal — نفس آلية فتح تفاصيل الموكل.
-        onOpenClientProfile: (c) => setSelectedClient(c as MappedClient),
+        onOpenClientProfile: (c) => setSelectedClient(c as MappedClient, true),
     });
     const CasesTabContent   = React.createElement(CasesTab, {
         cases, casesFilter, setCasesFilter, casesPage, setCasesPage,
@@ -400,7 +405,7 @@ function App() {
                     initialTab: sessionsInitialTab ?? undefined,
                     externalRefreshSignal: sessionsRefreshSignal,
                     nav,
-                    onOpenClientProfile: (c) => setSelectedClient(c as MappedClient),
+                    onOpenClientProfile: (c) => setSelectedClient(c as MappedClient, true),
                 })
             ),
             tab === 'fees' && React.createElement(FeesTab, { cases, clients, showSummaryModal: showFeesSummary, setShowSummaryModal: setShowFeesSummary, country, profile, nav }),
@@ -434,7 +439,7 @@ function App() {
             cases, clients, lawyers, profile, country, isAdmin, casesFilter, nav,
             showSearch, showAI, showCaseModal, showNewSessionModal,
             showLawyerModal, showClientModal, savingCase, savingLawyer, savingClient,
-            deleteConfirm, selectedClient, selectedCase, selectedCaseInitialTab,
+            deleteConfirm, selectedClient, selectedClientEditMode, selectedCase, selectedCaseInitialTab,
             clientModalContext, openNewClientModal,
             setShowSearch, setShowAI, setShowCaseModal, setShowNewSessionModal,
             setShowLawyerModal, setShowClientModal, setTab,
