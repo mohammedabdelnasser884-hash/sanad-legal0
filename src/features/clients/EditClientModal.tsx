@@ -40,6 +40,7 @@ interface EditClientModalProps {
 }
 
 function EditClientModal({client: c, onClose, onSave, saving = false}: EditClientModalProps) {
+    const [showImpactWarning, setShowImpactWarning] = useState(false);
     const [form, setForm] = useState<EditClientForm>({
         full_name:   c.full_name   || '',
         type:        c.client_type || c.type || 'individual',
@@ -147,23 +148,46 @@ function EditClientModal({client: c, onClose, onSave, saving = false}: EditClien
                     })
                 ),
 
-                // زر الحفظ
-                React.createElement('button', {
-                    'data-testid': 'save-client-edit-button',
-                    disabled: saving,
-                    onClick: () => {
-                        if(saving) return;
-                        if(!form.full_name || !form.full_name.trim()){ toast('يرجى إدخال اسم الموكل', true); return; }
-                        const nameErr = validateFullNameParts(form.full_name);
-                        if(nameErr){ toast(nameErr, true); return; }
-                        if(!form.phone || !form.phone.trim()){ toast('يرجى إدخال رقم الهاتف', true); return; }
-                        if(!form.type){ toast('يرجى اختيار نوع الموكل', true); return; }
-                        if(!form.national_id || !form.national_id.trim()){ toast('يرجى إدخال الرقم القومي', true); return; }
-                        if(form.national_id.length!==14){ toast('⚠️ الرقم القومي لازم يكون 14 رقم بالظبط', true); return; }
-                        onSave(form, idFile, poaFile);
-                    },
-                    className:"w-full py-3.5 bg-gradient-to-tr from-emerald-500 to-emerald-400 text-white rounded-xl font-black text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform mt-2 disabled:opacity-60"
-                }, React.createElement(I.Check), saving ? "⏳ جاري الحفظ..." : "حفظ التعديلات")
+                // ⚡ NEW (بيانات الموكل مش قابلة للتعديل من داخل القضية/الجلسة):
+                // بعد الفاليديشن، بدل ما نحفظ على طول، بنعرض تنبيه يوضّح إن
+                // التعديل ده هيتطبق في كل مكان الموكل ده ظاهر فيه (قضايا/
+                // جلسات/أتعاب...) قبل ما نأكد الحفظ فعليًا.
+                showImpactWarning
+                    ? React.createElement('div', {className:"space-y-2 mt-2", 'data-testid':'edit-client-impact-warning'},
+                        React.createElement('p', {className:"text-[10px] text-amber-400 text-center leading-relaxed bg-amber-500/10 border border-amber-500/20 rounded-xl p-3"},
+                            "⚠️ التعديل ده هيتطبق في كل مكان الموكل ده ظاهر فيه — القضايا، الجلسات، الأتعاب، وأي مكان تاني مرتبط بيه. متأكد إنك عايز تكمل؟"
+                        ),
+                        React.createElement('div', {className:"flex gap-2"},
+                            React.createElement('button', {
+                                'data-testid': 'edit-client-impact-confirm',
+                                disabled: saving,
+                                onClick: () => { onSave(form, idFile, poaFile); },
+                                className:"flex-1 py-3 bg-gradient-to-tr from-emerald-500 to-emerald-400 text-white rounded-xl font-black text-xs disabled:opacity-60"
+                            }, saving ? "⏳ جاري الحفظ..." : "نعم، احفظ في كل مكان"),
+                            React.createElement('button', {
+                                'data-testid': 'edit-client-impact-cancel',
+                                disabled: saving,
+                                onClick: () => setShowImpactWarning(false),
+                                className:"flex-1 py-3 bg-white/5 border border-white/10 text-slate-300 rounded-xl font-black text-xs disabled:opacity-60"
+                            }, "تراجع")
+                        )
+                      )
+                    : React.createElement('button', {
+                        'data-testid': 'save-client-edit-button',
+                        disabled: saving,
+                        onClick: () => {
+                            if(saving) return;
+                            if(!form.full_name || !form.full_name.trim()){ toast('يرجى إدخال اسم الموكل', true); return; }
+                            const nameErr = validateFullNameParts(form.full_name);
+                            if(nameErr){ toast(nameErr, true); return; }
+                            if(!form.phone || !form.phone.trim()){ toast('يرجى إدخال رقم الهاتف', true); return; }
+                            if(!form.type){ toast('يرجى اختيار نوع الموكل', true); return; }
+                            if(!form.national_id || !form.national_id.trim()){ toast('يرجى إدخال الرقم القومي', true); return; }
+                            if(form.national_id.length!==14){ toast('⚠️ الرقم القومي لازم يكون 14 رقم بالظبط', true); return; }
+                            setShowImpactWarning(true);
+                        },
+                        className:"w-full py-3.5 bg-gradient-to-tr from-emerald-500 to-emerald-400 text-white rounded-xl font-black text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform mt-2 disabled:opacity-60"
+                      }, React.createElement(I.Check), "حفظ التعديلات")
             )
         )),
         document.body
