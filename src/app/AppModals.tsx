@@ -41,6 +41,7 @@ interface AppModalsProps {
     savingClient: boolean;
     deleteConfirm: DeleteConfirmState | null;
     selectedClient: MappedClient | null;
+    selectedClientEditMode?: boolean;
     selectedCase: MappedCase | null;
     selectedCaseInitialTab: string;
     // ⚡ NEW: سياق فتح موديل "إنشاء موكل جديد" من جوه قضية/جلسة —
@@ -57,7 +58,7 @@ interface AppModalsProps {
     setShowClientModal: (v: boolean) => void;
     setTab: (tab: TabName) => void;
     setSelectedCase: (caseOrUpdater: React.SetStateAction<MappedCase | null>, initialTab?: string) => void;
-    setSelectedClient: (clientOrNull: MappedClient | null) => void;
+    setSelectedClient: (clientOrNull: MappedClient | null, openInEditMode?: boolean) => void;
     _setDeleteConfirm: React.Dispatch<React.SetStateAction<DeleteConfirmState | null>>;
     _setSelectedClient: React.Dispatch<React.SetStateAction<MappedClient | null>>;
     _setSelectedCase: React.Dispatch<React.SetStateAction<MappedCase | null>>;
@@ -134,7 +135,7 @@ function AppModals({
     cases, clients, lawyers, profile, country, isAdmin, casesFilter, nav,
     showSearch, showAI, showCaseModal, showNewSessionModal,
     showLawyerModal, showClientModal, savingCase, savingLawyer, savingClient,
-    deleteConfirm, selectedClient, selectedCase, selectedCaseInitialTab,
+    deleteConfirm, selectedClient, selectedClientEditMode, selectedCase, selectedCaseInitialTab,
     clientModalContext, openNewClientModal,
     setShowSearch, setShowAI, setShowCaseModal, setShowNewSessionModal,
     setShowLawyerModal, setShowClientModal, setTab,
@@ -217,6 +218,10 @@ function AppModals({
             // NewClientModal فوق (نفس الـ state، الاتنين بيستخدموا
             // handleSaveClient/handleUpdateClient من useClientActions.ts).
             savingClient,
+            // ⚡ NEW (بيانات الموكل مش قابلة للتعديل من داخل القضية/الجلسة):
+            // لو جينا هنا عن طريق زرار "✏️ عدّل من ملف الموكل"، نفتح فورم
+            // التعديل على طول بدل ما المستخدم يحتاج يضغط تاني.
+            initialEditMode: !!selectedClientEditMode,
             onOpenCase: (ca) => { nav.closeModal('clientDetail'); _setSelectedClient(null); setSelectedCase(ca); }
         }),
         selectedCase && nav.isOpen('caseDetail') && React.createElement(CaseDetailView, {
@@ -258,7 +263,7 @@ function AppModals({
             // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 2): نفس آلية
             // onOpenClient المستخدمة فوق في UniversalSearchModal — بنقفل
             // تفاصيل القضية الحالية ونفتح تفاصيل الموكل.
-            onOpenClientProfile: (c) => { nav.closeModal('caseDetail'); setSelectedClient(c as MappedClient); setTab('clients'); },
+            onOpenClientProfile: (c) => { nav.closeModal('caseDetail'); setSelectedClient(c as MappedClient, true); setTab('clients'); },
         }),
     );
 }
