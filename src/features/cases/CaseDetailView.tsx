@@ -223,7 +223,7 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
                 countryCourts: COUNTRY_CONFIGS[country as string]?.courts,
                 countryCaseTypes: COUNTRY_CONFIGS[country as string]?.caseTypes,
                 linkedClient: client,
-                onOpenClientProfile: client ? () => { setShowEditCase(false); onOpenClientProfile?.(client); } : undefined,
+                onOpenClientProfile: onOpenClientProfile ? (c: ClientRow) => { setShowEditCase(false); onOpenClientProfile(c); } : undefined,
                 // ⚡ NEW (مرحلة 4 خطوة 2): لربط/إنشاء موكل لأي طرف جديد يتضاف
                 // أثناء التعديل (بخلاف linkedClient الأصلي المقفول بالفعل).
                 clients,
