@@ -163,6 +163,34 @@ describe('validateParties', () => {
         expect(result.warnings).toEqual([]);
     });
 
+    it('مش بيفرض فحص الاسم الثلاثي على مدعي مربوط بموكل حقيقي (client_id) حتى لو اسمه قديم مش ثلاثي — تجنب حجب تعديل قضايا قديمة', () => {
+        const parties = [
+            party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد', capacity: 'مدعي', national_id: '12345678901234', client_id: 'real-client-uuid-1' }),
+            party({ id: 'd1', side: 'defendant', is_client: false, name: 'محمود سعيد إبراهيم', capacity: 'مدعى عليه' }),
+        ];
+        const result = validateParties(parties);
+        expect(result.valid).toBe(true);
+    });
+
+    it('مش بيفرض فحص/تحذير اسم الخصم لو مربوط بموكل حقيقي (client_id) حتى لو is_client=false ومش ثلاثي', () => {
+        const parties = [
+            party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد محمد علي', capacity: 'مدعي', national_id: '12345678901234' }),
+            party({ id: 'd1', side: 'defendant', is_client: false, name: 'محمود', capacity: 'مدعى عليه', client_id: 'real-client-uuid-2' }),
+        ];
+        const result = validateParties(parties);
+        expect(result.valid).toBe(true);
+        expect(result.warnings).toEqual([]);
+    });
+
+    it('لو الطرف مربوط بـclient_id لكن الاسم فاضي، لسه بيرفض (فحص الفراغ سابق على استثناء client_id)', () => {
+        const parties = [
+            party({ id: 'p1', side: 'plaintiff', is_client: true, name: '', capacity: 'مدعي', national_id: '12345678901234', client_id: 'real-client-uuid-3' }),
+        ];
+        const result = validateParties(parties);
+        expect(result.valid).toBe(false);
+        expect(result.errors.some((e) => e.partyId === 'p1' && e.field === 'name')).toBe(true);
+    });
+
     it('بيرفض تكرار نفس الرقم القومي بين طرفين في نفس القضية (قسم 7-أ — منع تام)', () => {
         const parties = [
             party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد محمد علي', capacity: 'مدعي', national_id: '12345678901234' }),
