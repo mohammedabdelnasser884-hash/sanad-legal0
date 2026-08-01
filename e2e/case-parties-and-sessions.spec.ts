@@ -160,11 +160,18 @@ test('ضغط زرار حفظ التعديلات مرتين بسرعة (دبل-ك
 // case_sessions بترجع مرتبة تنازليًا بالتاريخ (session_date DESC)، فالجلسة
 // بالتاريخ الأحدث بتبقى index 0 ("آخر جلسة" — زرار تحديث بس)، والتانية
 // (الأقدم) بتاخد زراير تعديل/حذف اللي التست ده محتاجها.
+// 🔒 FIX (تشخيص لوجز E2E — 1 أغسطس 2026): نفس الباج المصلّح في
+// session-update.spec.ts — النسخة القديمة كانت بترجّع earlierDay===todayDay
+// لو اليوم الحالي هو أول يوم في الشهر (min(1, otherDay) بيرجع 1 دايمًا).
+// هنا مش نفس أعراض session-update.spec.ts بالظبط (التستات دي مبتفتحش
+// أكورديون "اليوم" بشكل منفصل)، لكن الدالة نفسها لسه غلط منطقيًا — بنصلحها
+// عشان تضمن يومين مختلفين عن بعض وعن اليوم الحالي في كل الحالات.
 function twoDaysInCurrentMonth(): { earlierDay: number; laterDay: number } {
   const today = new Date();
   const todayDay = today.getDate();
-  const otherDay = todayDay === 1 ? 2 : todayDay - 1;
-  return { earlierDay: Math.min(todayDay, otherDay), laterDay: Math.max(todayDay, otherDay) };
+  const dayA = todayDay <= 2 ? todayDay + 1 : todayDay - 1;
+  const dayB = todayDay <= 2 ? todayDay + 2 : todayDay - 2;
+  return { earlierDay: Math.min(dayA, dayB), laterDay: Math.max(dayA, dayB) };
 }
 
 test('تعديل جلسة غير الأخيرة في تبويب الجلسات', async ({ page }) => {
