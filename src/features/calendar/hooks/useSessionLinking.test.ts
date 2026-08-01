@@ -60,29 +60,10 @@ function makeDbWriteMock() {
 let dbWrite = makeDbWriteMock();
 
 // mock بسيط لـ db (باراميتر مُحقَن) — بيغطي بس البحث عن موكل مطابق (read-only)
-function makeMockDb(
-  clientsSelectResult: { data?: unknown; error?: unknown } = { data: [], error: null },
-  casePartiesResult: { data?: unknown; error?: unknown } = { data: [], error: null },
-) {
+function makeMockDb(clientsSelectResult: { data?: unknown; error?: unknown } = { data: [], error: null }) {
   const ilikeSpy = vi.fn();
   return {
     from: vi.fn((table: string) => {
-      // fetchSessionClientParties: بتتنادى فعليًا جوه handleLinkCase (سطر
-      // clientPartiesBeforeMove) — لازم شكل Promise سليم دايمًا، حتى في
-      // التستات اللي مش مركّزة على wizard الأطراف (case_parties فاضية
-      // افتراضيًا = مسار "جلسة قديمة" القديم بالظبط).
-      if (table === 'case_parties') {
-        // شكل chainable/thenable بيغطي السلسلتين المختلفتين فعليًا في الكود:
-        //   - movePartiesFromSessionToCase: .select('id').eq('session_id',..) [يتم await مباشرة]
-        //   - fetchSessionClientParties: .select(...).eq(...).eq(...).order(...)
-        const chain = {
-          eq: vi.fn(() => chain),
-          order: vi.fn(() => Promise.resolve(casePartiesResult)),
-          then: (resolve: (v: typeof casePartiesResult) => void, reject?: (e: unknown) => void) =>
-            Promise.resolve(casePartiesResult).then(resolve, reject),
-        };
-        return { select: vi.fn(() => chain) };
-      }
       if (table === 'clients') {
         return {
           select: vi.fn(() => ({
@@ -106,6 +87,24 @@ function makeMockDb(
             })),
           })),
         };
+      }
+      if (table === 'case_parties') {
+        // ⚡ NEW (خطة تعدد الأطراف، 7.1/7.2): fetchSessionClientParties
+        // بتستخدم .select().eq().eq().order(...)، وmovePartiesFromSessionToCase
+        // بتستخدم .select().eq(...) بس (awaited مباشرة) — نفس شكل object
+        // بيغطي السلسلتين، افتراضيًا [] فاضية (مفيش أطراف إضافية) عشان
+        // مسار الاسم الواحد القديم يفضل شغال زي ما هو في التستات اللي
+        // مش بتغطي تعدد الأطراف.
+        const chain = {
+          eq: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              order: vi.fn(() => Promise.resolve({ data: [], error: null })),
+            })),
+            then: (resolve: (v: { data: unknown; error: unknown }) => void, reject?: (e: unknown) => void) =>
+              Promise.resolve({ data: [], error: null }).then(resolve, reject),
+          })),
+        };
+        return { select: vi.fn(() => chain) };
       }
       return {};
     }),
@@ -149,7 +148,10 @@ describe('useSessionLinking', () => {
       expect(recalcNextHearing).toHaveBeenCalledWith(mockDb, 'case-real-1');
       expect(toast).toHaveBeenCalledWith('✅ تم إنشاء ملف القضية');
       expect(result.current.createdCaseId).toBe('case-real-1');
-      expect(onDone).toHaveBeenCalled();
+      // 🔒 FIX (1 أغسطس 2026): onDone() اتأجّل عمدًا لحد ما المستخدم يقفل
+      // المودال فعليًا (زرار "إغلاق" في خطوة done) — قبل كده كان بينادى هنا
+      // فورًا فيقفل المودال كامل قبل ما خطوة found/notfound تتعرض للمستخدم.
+      expect(onDone).not.toHaveBeenCalled();
     });
 
     it('🆕 (المرحلة 2) أوفلاين بالكامل: القضية بترجع queued من غير id حقيقي → createdCaseId = تمبيد، UPDATE الجلسة بيتبعت بـ _offlineFkTempId (case_id بالتمبيد)، ومفيش recalcNextHearing', async () => {
@@ -224,7 +226,9 @@ describe('useSessionLinking', () => {
       }));
       expect(mockDb.ilikeSpy).not.toHaveBeenCalled();
       expect(result.current.clientStep).toBe('done');
-      expect(onDone).toHaveBeenCalled();
+      // 🔒 FIX (1 أغسطس 2026): onDone() اتأجّل لحد ما المستخدم يقفل المودال
+      // فعليًا — نفس السبب في التست اللي فوق.
+      expect(onDone).not.toHaveBeenCalled();
     });
   });
 
