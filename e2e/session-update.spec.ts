@@ -20,11 +20,22 @@ async function openDayInCalendar(page: import('@playwright/test').Page, day: num
 
 // نفس هيلبر case-parties-and-sessions.spec.ts — يومين مختلفين في نفس
 // الشهر الحالي بلا تنقل بين الشهور في الـDatePicker.
+// 🔒 FIX (تشخيص لوجز E2E — 1 أغسطس 2026): النسخة القديمة كانت بتحسب
+// otherDay = (اليوم===1 ? 2 : اليوم-1) وبعدين earlierDay = min(اليوم, otherDay).
+// لما "اليوم" نفسه = 1 (أول يوم في الشهر)، الـmin بيرجّع 1 دايمًا — يعني
+// earlierDay === todayDay فعليًا! في التستات هنا، الجلسة الأصلية بتتعمل
+// دايمًا بتاريخ "النهاردة" (createStandaloneSession)، والتست بيفتح يوم
+// "النهاردة" في التقويم (أكورديون بيتفتح)، وبعدين لما earlierDay===today
+// يحاول يفتحه "تاني" — لكن لأنه مفتوح بالفعل، الضغطة التانية بتقفله
+// (toggle) بدل ما تعرض الجلسة الجديدة، فالتست بيفشل بـTimeout كل مرة في
+// أول يوم من الشهر. الحل: نضمن إن earlierDay/laterDay دايمًا مختلفين عن
+// "اليوم" نفسه كمان، مش بس عن بعض.
 function twoDaysInCurrentMonth(): { earlierDay: number; laterDay: number } {
   const today = new Date();
   const todayDay = today.getDate();
-  const otherDay = todayDay === 1 ? 2 : todayDay - 1;
-  return { earlierDay: Math.min(todayDay, otherDay), laterDay: Math.max(todayDay, otherDay) };
+  const dayA = todayDay <= 2 ? todayDay + 1 : todayDay - 1;
+  const dayB = todayDay <= 2 ? todayDay + 2 : todayDay - 2;
+  return { earlierDay: Math.min(dayA, dayB), laterDay: Math.max(dayA, dayB) };
 }
 
 test('فاليديشن: منع الحفظ من غير تاريخ الجلسة القادمة', async ({ page }) => {
