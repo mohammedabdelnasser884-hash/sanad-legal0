@@ -208,8 +208,18 @@ export function useSessionLinking(
           console.error('[DEBUG handleLinkCase] 10) بعد recalcNextHearing');
         }
       }
-      onDone();
-      console.error('[DEBUG handleLinkCase] 11) بعد onDone()، قبل تحديد found/notfound');
+      // 🔒 FIX (تشخيص لوجز E2E — 1 أغسطس 2026): onDone() هنا كان بيتنادى فورًا
+      // بعد إنشاء القضية وربط الجلسة بيها — قبل ما نوصل لتحديد خطوة
+      // found/notfound/done. المشكلة إن onDone() (زي ما بيتبعت من
+      // SessionsCalendar.tsx/CalendarTab.tsx/DashboardTab.tsx) بيعمل
+      // setStandaloneTarget(null) اللي بيقفل StandaloneSessionDetailModal
+      // كامل فورًا — يعني useSessionLinking بيتفكك (unmount) قبل ما أي
+      // setClientStep('found'/'notfound') تحت يتنفذ فعليًا، فالمستخدم (والتست)
+      // مش بيشوف خطوة "لقينا موكل مطابق" ولا "إضافة موكل جديد" خالص —
+      // المودال بيقفل فجأة بعد توست "تم إنشاء ملف القضية" بس. الحل: onDone()
+      // لازم يتنادى بس لما الويزارد يخلص فعليًا (زرار "إغلاق" في خطوة done
+      // بينده onFullClose اللي بالفعل بينده onDone() — راجع أسفل الملف).
+      console.error('[DEBUG handleLinkCase] 11) بعد إنشاء القضية وربطها، قبل تحديد found/notfound (onDone مؤجل لحد ما الويزارد يخلص)');
       // ⚡ FIX: لو session.client_id موجود بالفعل، القضية الجديدة اتربطت
       // بيه أوتوماتيك من صف الـ INSERT فوق — مفيش داعي ندوّر تاني بالاسم
       // ونعرض خطوة "لقينا موكل مطابق"، ده هيكرر نفس الربط أو يلخبط
@@ -595,7 +605,10 @@ export function useSessionLinking(
       } else {
         toast('✅ تم ربط الجلسة بالموكل');
       }
-      onDone();
+      // 🔒 FIX (نفس فئة باج handleLinkCase أعلاه — 1 أغسطس 2026): onDone()
+      // كان بيتنادى *قبل* setClientStep('done')، فبيقفل المودال كامل قبل
+      // ما شاشة "🎉 تم بنجاح" تتعرض خالص. onDone() هيتنادى لما المستخدم
+      // يدوس "إغلاق" (onFullClose بيندهه).
       setClientStep('done');
     } catch { toast('❌ خطأ غير متوقع', true); }
     finally { setLinkingExisting(false); }
