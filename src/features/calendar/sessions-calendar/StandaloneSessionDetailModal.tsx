@@ -63,7 +63,13 @@ interface EditStandaloneModalProps {
     // أصلاً (مؤكد من الخطة). لو الموكل محذوف/orphaned، linkedClient بتوصل
     // null والحقول تفضل حرة (fallback المرحلة السابعة).
     linkedClient?: ClientRow | null;
-    onOpenClientProfile?: () => void;
+    // ⚡ CHANGED (قفل بيانات كل الأطراف المربوطة بموكل حقيقي، لا الطرف
+    // الأساسي بس): نفس التغيير اللي حصل في EditCaseModal.tsx — بياخد
+    // الموكل (ClientRow) بتاع الطرف اللي اتضغط عليه تحديدًا.
+    onOpenClientProfile?: (client: ClientRow) => void;
+    // ⚡ NEW: لازمة عشان نلاقي بيانات أي موكل مربوط بطرف *غير* الأساسي
+    // (client_id بتاعه بيتحط وقت إنشاء الجلسة عن طريق الربط لكل طرف على حدة).
+    clients?: ClientRow[];
 }
 
 interface StandaloneEditForm {
@@ -136,7 +142,7 @@ interface EditStandaloneModalFormProps extends EditStandaloneModalProps {
     existingPartyRows: CasePartyRow[];
 }
 
-function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient = null, onOpenClientProfile, existingPartyRows }: EditStandaloneModalFormProps) {
+function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient = null, onOpenClientProfile, existingPartyRows, clients = [] }: EditStandaloneModalFormProps) {
     // ⚡ NEW: الجلسة مربوطة فعليًا بموكل حي لو linkedClient موصول (مش null).
     const isLinked = !!linkedClient;
     // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 7 — fallback الموكل
@@ -234,7 +240,31 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
         const all = [...initialParties.plaintiffs, ...initialParties.defendants];
         return all.find((p) => p.client_id === session.client_id)?.id ?? null;
     });
-    const renderPartyReadOnly = (party: PartyFieldValue) => party.id === linkedPartyId;
+    // ⚡ CHANGED (بيانات الموكل مش قابلة للتعديل من داخل الجلسة): القفل
+    // بقى على أي طرف عنده client_id (مش بس الطرف الأساسي المرتبط بـ
+    // session.client_id) — نفس التغيير اللي حصل في EditCaseModal.tsx.
+    // 🔒 FIX (نفس اكتشاف EditCaseModal.tsx وقت المراجعة): لو الموكل
+    // المربوط بطرف غير أساسي اتمسح، منقفلش من غير ما يبقى قابل للحل في
+    // `clients` — وإلا طريق مسدود (مقفول للأبد من غير زرار تعديل).
+    const renderPartyReadOnly = (party: PartyFieldValue) =>
+        !!party.client_id && clients.some((c) => c.id === party.client_id);
+    // ⚡ NEW: زرار "عدّل من ملف الموكل" لأي طرف *غير* الأساسي مربوط بموكل
+    // حقيقي (client_id جاله من case_parties وقت إنشاء الجلسة عن طريق ربط
+    // لكل طرف على حدة) — نفس فكرة renderPartyExtra في EditCaseModal.tsx.
+    const renderPartyExtra = (party: PartyFieldValue) => {
+        if (party.id === linkedPartyId || !party.client_id) return null;
+        const linkedPartyClient = clients.find((c) => c.id === party.client_id);
+        if (!onOpenClientProfile || !linkedPartyClient) return null;
+        return React.createElement('div', { className: 'flex items-center justify-between' },
+            React.createElement('p', { className: 'text-[9px] text-slate-500' }, '🔗 مربوط بموكل من النظام — بيانات الطرف ده بتتقرا من ملف الموكل'),
+            React.createElement('button', {
+                type: 'button',
+                onClick: () => onOpenClientProfile(linkedPartyClient),
+                className: 'text-[9px] font-black text-premium-gold shrink-0',
+                'data-testid': `edit-standalone-session-open-client-profile-${party.id}`,
+            }, '✏️ عدّل من ملف الموكل')
+        );
+    };
 
     // ⚡ NEW (مرحلة 6.4): مزامنة الحفظ الفعلي في case_parties — نفس فلسفة
     // syncCaseParties في useCaseActions.ts (مرحلة 5.2) بالحرف، بس بـ
@@ -408,8 +438,8 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
                     // بموكل حي (linkedPartyId فوق) بيتقفل (readOnly).
                     isLinked && React.createElement('div', { className: 'flex items-center justify-between' },
                         React.createElement('p', { className: 'text-[9px] text-slate-500' }, '🔗 مربوط بموكل من النظام — بيانات الطرف ده بتتقرا من ملف الموكل'),
-                        onOpenClientProfile && React.createElement('button', {
-                            type: 'button', onClick: onOpenClientProfile,
+                        onOpenClientProfile && linkedClient && React.createElement('button', {
+                            type: 'button', onClick: () => onOpenClientProfile(linkedClient),
                             className: 'text-[9px] font-black text-premium-gold shrink-0'
                         }, '✏️ عدّل من ملف الموكل')
                     ),
@@ -421,7 +451,7 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
                             '⚠️ الموكل محذوف — البيانات دي آخر ما هو معروف عن الموكل، وبقت قابلة للتعديل الحر.'
                         )
                     ),
-                    React.createElement(PartyFieldsGroup, { controller: partyFields, testIdPrefix: 'edit-standalone-session', renderPartyReadOnly }),
+                    React.createElement(PartyFieldsGroup, { controller: partyFields, testIdPrefix: 'edit-standalone-session', renderPartyReadOnly, renderPartyExtra }),
                     React.createElement('div', { className: 'border-t border-white/5 my-1' }),
                     React.createElement(Inp, { label: 'الإجراء القادم', value: form.next_action, onChange: set('next_action'), placeholder: 'مثال: تقديم مذكرة دفاع' }),
                     React.createElement('div', { className: 'h-4' })
@@ -1007,7 +1037,8 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
             onClose: () => setShowEdit(false),
             onSaved: () => { onDone(); onClose(); },
             linkedClient,
-            onOpenClientProfile: linkedClient ? () => { setShowEdit(false); onOpenClientProfile?.(linkedClient); } : undefined,
+            clients,
+            onOpenClientProfile: onOpenClientProfile ? (c: ClientRow) => { setShowEdit(false); onOpenClientProfile(c); } : undefined,
         }),
         showUpdate && React.createElement(SessionUpdateModal, {
             session, caseData, db,
