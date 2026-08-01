@@ -139,6 +139,16 @@ function DashboardTab({
                 ),
                 // المحتوى
                 React.createElement('div',{className:'flex-1 min-w-0'},
+                    // 🔒 FIX (تشخيص لوجز E2E — 1 أغسطس 2026): لما الطرفين (مدعي/مدعى
+                    // عليه) موجودين، PartiesLine بترجّع سطر "فلان ضد علان" وتتجاهل
+                    // fallback (اللي بيحمل عنوان القضية) تمامًا — يعني عنوان القضية
+                    // كان بيختفي بالكامل من كارت الداشبورد أي وقت فيه طرفين، عكس نمط
+                    // case-card في CasesTab.tsx (بيعرض العنوان دايمًا كـh4 بغض النظر
+                    // عن وجود الأطراف). هنا بنفس المنطق: نعرض عنوان القضية كسطر
+                    // مستقل فوق سطر الأطراف، مش بديل عنه.
+                    displayTitle && React.createElement('p',{
+                        className:'text-[9px] font-bold text-slate-300 truncate leading-tight'
+                    },displayTitle),
                     React.createElement('div',{className:'flex items-center justify-between gap-1'},
                         React.createElement(PartiesLine,{
                             plaintiff: displayPlaintiff, defendant: displayDefendant,
