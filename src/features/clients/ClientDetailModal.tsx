@@ -18,12 +18,17 @@ interface ClientDetailModalProps {
     // تقفل زرار "حفظ التعديلات" أثناء عملية الحفظ — نفس الـ state
     // (savingClient) المستخدمة أصلاً في NewClientModal.
     savingClient?: boolean;
+    // ⚡ NEW (بيانات الموكل مش قابلة للتعديل من داخل القضية/الجلسة): لو
+    // true، فورم تعديل الموكل بيفتح على طول من غير ما المستخدم يحتاج يضغط
+    // زرار "تعديل" مرة تانية — مستخدم لما نيجي هنا عن طريق زرار "✏️ عدّل
+    // من ملف الموكل" جوه فورم قضية/جلسة مقفولة.
+    initialEditMode?: boolean;
 }
 
-function ClientDetailModal({client:c, cases, onClose, onDelete, onEdit, onOpenCase, savingClient}: ClientDetailModalProps){
+function ClientDetailModal({client:c, cases, onClose, onDelete, onEdit, onOpenCase, savingClient, initialEditMode = false}: ClientDetailModalProps){
     const typeLabel=c.type==='individual'?'فرد':c.type==='company'?'شركة':c.type==='government'?'جهة حكومية':c.type||'فرد';
     const [imgViewer,setImgViewer]=useState<string|null>(null);
-    const [showEditClient, setShowEditClient]=useState(false);
+    const [showEditClient, setShowEditClient]=useState(initialEditMode);
     // ⚠️ client-docs باكت private — الرابط المتخزن في contact_info ممكن
     // يكون منتهي/رابط عام قديم، فبنولّد رابط موقّع طازة وقت فتح المودال.
     const contactInfo = c.contact_info as ClientContactInfo | null;
