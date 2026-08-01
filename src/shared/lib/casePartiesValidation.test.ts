@@ -54,7 +54,7 @@ describe('validateParties', () => {
     it('بيقبل طرف مش موكل (is_client=false) من غير رقم قومي خالص', () => {
         const parties = [
             party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد محمد علي', capacity: 'مدعي', national_id: '12345678901234' }),
-            party({ id: 'p2', side: 'plaintiff', is_client: false, name: 'كريم', capacity: 'منضم' }),
+            party({ id: 'p2', side: 'plaintiff', is_client: false, name: 'كريم عادل حسن', capacity: 'منضم' }),
         ];
         // شخصان تحت "مدعي" — لازم مسمى قانوني (قاعدة 6 الجديدة)
         const result = validateParties(parties, { plaintiff: 'الشركاء', defendant: '' });
@@ -64,7 +64,7 @@ describe('validateParties', () => {
     it('بيرفض لو طرف مش موكل كتب رقم قومي لكن مش 14 رقم بالظبط', () => {
         const parties = [
             party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد محمد علي', capacity: 'مدعي', national_id: '12345678901234' }),
-            party({ id: 'p2', side: 'plaintiff', is_client: false, name: 'كريم', capacity: 'منضم', national_id: '999' }),
+            party({ id: 'p2', side: 'plaintiff', is_client: false, name: 'كريم عادل حسن', capacity: 'منضم', national_id: '999' }),
         ];
         const result = validateParties(parties);
         expect(result.valid).toBe(false);
@@ -99,32 +99,68 @@ describe('validateParties', () => {
         expect(result.valid).toBe(true);
     });
 
-    it('بيرفض اسم مدعى عليه (مش موكل) أقل من ثلاثي', () => {
+    // ══════════════════════════════════════════════════════════
+    // 🆕 تحديث "تفرقة اسم الطرف الأول عن الخصم" — 1 أغسطس 2026:
+    // الطرف الأول (المدعي) ثلاثي إلزامي دايمًا، والطرف الثاني (الخصم)
+    // يكفيه ثنائي كحد أدنى + تحذير غير مانع لو ثنائي بالظبط.
+    // ══════════════════════════════════════════════════════════
+    it('بيفرض فحص الاسم الثلاثي على الطرف الأول (المدعي) دايمًا، حتى لو is_client=false', () => {
         const parties = [
             party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد محمد علي', capacity: 'مدعي', national_id: '12345678901234' }),
-            party({ id: 'd1', side: 'defendant', is_client: false, name: 'محمود سعيد', capacity: 'مدعى عليه' }),
+            party({ id: 'p2', side: 'plaintiff', is_client: false, name: 'كريم عادل', capacity: 'منضم' }),
+        ];
+        const result = validateParties(parties, { plaintiff: 'الشركاء', defendant: '' });
+        expect(result.valid).toBe(false);
+        expect(result.errors.some((e) => e.partyId === 'p2' && e.field === 'name' && e.message.includes('الطرف الأول'))).toBe(true);
+    });
+
+    it('بيفرض فحص الاسم الثلاثي على الطرف الأول (المدعي) حتى لو is_client=true (الحالة الأساسية: موكل المكتب)', () => {
+        const parties = [
+            party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد محمد', capacity: 'مدعي', national_id: '12345678901234' }),
+        ];
+        const result = validateParties(parties);
+        expect(result.valid).toBe(false);
+        expect(result.errors.some((e) => e.partyId === 'p1' && e.field === 'name')).toBe(true);
+    });
+
+    it('بيرفض اسم مدعى عليه (مش موكل) أقل من ثنائي (كلمة واحدة بس)', () => {
+        const parties = [
+            party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد محمد علي', capacity: 'مدعي', national_id: '12345678901234' }),
+            party({ id: 'd1', side: 'defendant', is_client: false, name: 'محمود', capacity: 'مدعى عليه' }),
         ];
         const result = validateParties(parties);
         expect(result.valid).toBe(false);
         expect(result.errors.some((e) => e.partyId === 'd1' && e.field === 'name')).toBe(true);
     });
 
-    it('مش بيفرض فحص الاسم الثلاثي على مدعى عليه هو نفسه موكل المكتب', () => {
+    it('بيقبل اسم مدعى عليه (مش موكل) ثنائي — بس بيطلع تحذير غير مانع يقترح ثلاثي/رباعي', () => {
+        const parties = [
+            party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد محمد علي', capacity: 'مدعي', national_id: '12345678901234' }),
+            party({ id: 'd1', side: 'defendant', is_client: false, name: 'محمود سعيد', capacity: 'مدعى عليه' }),
+        ];
+        const result = validateParties(parties);
+        expect(result.valid).toBe(true); // ثنائي كافي — مفيش خطأ مانع
+        expect(result.errors.some((e) => e.partyId === 'd1')).toBe(false);
+        expect(result.warnings.some((w) => w.partyId === 'd1' && w.field === 'name')).toBe(true); // بس فيه تحذير
+    });
+
+    it('اسم مدعى عليه ثلاثي أو أكتر: مفيش خطأ ولا تحذير خالص', () => {
+        const parties = [
+            party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد محمد علي', capacity: 'مدعي', national_id: '12345678901234' }),
+            party({ id: 'd1', side: 'defendant', is_client: false, name: 'محمود سعيد إبراهيم', capacity: 'مدعى عليه' }),
+        ];
+        const result = validateParties(parties);
+        expect(result.valid).toBe(true);
+        expect(result.warnings).toEqual([]);
+    });
+
+    it('مش بيفرض أي فحص (خطأ أو تحذير) على مدعى عليه هو نفسه موكل المكتب', () => {
         const parties = [
             party({ id: 'd1', side: 'defendant', is_client: true, name: 'محمود سعيد', capacity: 'مدعى عليه', national_id: '44444444444444' }),
         ];
         const result = validateParties(parties);
         expect(result.valid).toBe(true);
-    });
-
-    it('مش بيفرض فحص الاسم الثلاثي على مدعي مش موكل (الفحص خاص بالمدعى عليه بس)', () => {
-        const parties = [
-            party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد محمد علي', capacity: 'مدعي', national_id: '12345678901234' }),
-            party({ id: 'p2', side: 'plaintiff', is_client: false, name: 'كريم', capacity: 'منضم' }),
-        ];
-        // شخصان تحت "مدعي" — لازم مسمى قانوني (قاعدة 6 الجديدة)
-        const result = validateParties(parties, { plaintiff: 'الشركاء', defendant: '' });
-        expect(result.valid).toBe(true);
+        expect(result.warnings).toEqual([]);
     });
 
     it('بيرفض تكرار نفس الرقم القومي بين طرفين في نفس القضية (قسم 7-أ — منع تام)', () => {
@@ -161,7 +197,7 @@ describe('validateParties', () => {
 
         it('بيرفض لو المدعي شخصان فأكثر والمسمى القانوني فاضي', () => {
             const parties = [
-                party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'محمد أحمد', capacity: 'وارث', national_id: '11111111111111' }),
+                party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'محمد أحمد علي', capacity: 'وارث', national_id: '11111111111111' }),
                 party({ id: 'p2', side: 'plaintiff', is_client: false, name: 'محمود أحمد سعيد', capacity: 'وارث' }),
             ];
             const result = validateParties(parties, { plaintiff: '', defendant: '' });
@@ -171,7 +207,7 @@ describe('validateParties', () => {
 
         it('بيقبل لو المدعي شخصان فأكثر والمسمى القانوني مكتوب', () => {
             const parties = [
-                party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'محمد أحمد', capacity: 'وارث', national_id: '11111111111111' }),
+                party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'محمد أحمد علي', capacity: 'وارث', national_id: '11111111111111' }),
                 party({ id: 'p2', side: 'plaintiff', is_client: false, name: 'محمود أحمد سعيد', capacity: 'وارث' }),
             ];
             const result = validateParties(parties, { plaintiff: 'ورثة المرحوم أحمد علي', defendant: '' });
@@ -193,7 +229,7 @@ describe('validateParties', () => {
 
         it('بيقبل لو الطرفين شخصان فأكثر والمسمى القانوني مكتوب لكل واحد فيهم', () => {
             const parties = [
-                party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'محمد أحمد', capacity: 'مستأنف', national_id: '11111111111111' }),
+                party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'محمد أحمد علي', capacity: 'مستأنف', national_id: '11111111111111' }),
                 party({ id: 'p2', side: 'plaintiff', is_client: false, name: 'محمود أحمد سعيد', capacity: 'مستأنف' }),
                 party({ id: 'd1', side: 'defendant', is_client: false, name: 'كريم سعيد إبراهيم', capacity: 'مستأنف ضده' }),
                 party({ id: 'd2', side: 'defendant', is_client: false, name: 'سعيد إبراهيم علي', capacity: 'مستأنف ضده' }),
