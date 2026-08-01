@@ -16,6 +16,17 @@
 //  لمرحلة 3 ("إدخال البيانات في النماذج") — الدالة هنا جاهزة ومفعّلة،
 //  بس usePartyFields.ts لسه بينادها من غير تمرير legalTitles (بترجع
 //  '' افتراضيًا لحد ما الحقل يتربط في الفورم فعليًا).
+//
+//  🆕 تحديث (طلب "تفرقة اسم الطرف الأول عن الخصم" — 1 أغسطس 2026):
+//  فحص "الاسم الثلاثي" اتقسم لقاعدتين مختلفتين بدل قاعدة واحدة كانت
+//  مقصورة على المدعى عليه بس:
+//  - الطرف الأول (المدعي/الطاعن): الاسم الثلاثي بقى **إلزامي** دايمًا
+//    (خطأ مانع للحفظ) — بغض النظر عن is_client.
+//  - الطرف الثاني (الخصم) اللي مش موكل المكتب: يكفي اسم **ثنائي** كحد
+//    أدنى (خطأ مانع لو أقل من كده)، عشان ممكن يكون جهة اعتبارية زي
+//    "النيابة العامة". لو الاسم ثنائي بالظبط (مش ثلاثي أو أكتر)، بيطلع
+//    **تحذير غير مانع** (warning، مش error) يقول إن الأفضل تسجيله ثلاثي
+//    أو رباعي لتجنب تعارض البيانات مستقبلاً — من غير ما يمنع الحفظ.
 // ══════════════════════════════════════════════════════════════
 
 import { validateFullNameParts } from './clientValidation';
@@ -32,12 +43,26 @@ export interface PartyValidationError {
     message: string;
 }
 
+// 🆕 نفس شكل PartyValidationError بالظبط — بس للتنبيهات غير المانعة
+// (زي "يفضل اسم الخصم يكون ثلاثي")، ما بتأثرش على valid ولا بتمنع الحفظ.
+export type PartyValidationWarning = PartyValidationError;
+
 export interface PartiesValidationResult {
     valid: boolean;
     errors: PartyValidationError[];
+    // 🆕 تنبيهات إرشادية غير مانعة — مش بتأثر على valid خالص.
+    warnings: PartyValidationWarning[];
     // أول رسالة بالترتيب — جاهزة تتحط في toast() واحد زي باقي فورمات
     // القضايا/الجلسات الحالية (toast(msg, true)).
     message?: string;
+}
+
+// أقل عدد "كلمات" مقبول لاسم الخصم (الطرف الثاني) مش موكل المكتب — ثنائي
+// عادي يكفي كحد أدنى إجباري (زي "النيابة العامة").
+const DEFENDANT_MIN_NAME_PARTS = 2;
+
+function countNameParts(name: string): number {
+    return name.trim().split(/\s+/).filter(Boolean).length;
 }
 
 // المسمى القانوني الجامع لكل جهة — مخزّن على مستوى القضية/الجلسة نفسها
@@ -55,24 +80,29 @@ const SIDE_LABEL_AR: Record<'plaintiff' | 'defendant', string> = {
 /**
  * يتحقق من array الأطراف بالكامل (مدعين + مدعى عليهم مع بعض) قبل الحفظ.
  * القواعد بالترتيب (قسم 4 من خطة تعدد الأطراف، + قاعدة 6 من خطة المسمى
- * القانوني):
+ * القانوني، + تحديث "تفرقة اسم الطرف الأول عن الخصم"):
  * 1. الاسم والصفة إجباريين لكل طرف دايمًا.
  * 2. الرقم القومي إجباري (14 رقم بالظبط) بس لو is_client=true؛ لو اتكتب
  *    لطرف مش موكل، برضو لازم يكون 14 رقم بالظبط (فحص صيغة، مش إجبار).
- * 3. اسم أي طرف "مدعى عليه" مش موكل بيتبع فحص الاسم الثلاثي (نفس فحص
- *    الخصم الحالي) — موكلين المكتب (من أي جهة) مستثنين من الشرط ده.
- * 4. لازم طرف واحد على الأقل (في أي الجهتين) يكون is_client=true.
- * 5. ممنوع تكرار نفس الرقم القومي بين طرفين في نفس القضية/الجلسة (قسم 7-أ
+ * 3. 🆕 اسم أي طرف "مدعي" (الطرف الأول) لازم يكون ثلاثي على الأقل —
+ *    إلزامي دايمًا (خطأ مانع)، بغض النظر عن is_client.
+ * 4. 🆕 اسم أي طرف "مدعى عليه" (الطرف الثاني) مش موكل: يكفي ثنائي كحد
+ *    أدنى (خطأ مانع لو أقل من كده) — موكلين المكتب على جهة الخصم
+ *    مستثنين من الشرط ده زي ما كان. لو الاسم ثنائي بالظبط (مش ثلاثي
+ *    فأكتر)، بيطلع تحذير غير مانع (warning) بيقترح التوسع لثلاثي/رباعي.
+ * 5. لازم طرف واحد على الأقل (في أي الجهتين) يكون is_client=true.
+ * 6. ممنوع تكرار نفس الرقم القومي بين طرفين في نفس القضية/الجلسة (قسم 7-أ
  *    — منع تام، مفيش تجاوز/تأكيد).
- * 6. 🆕 لو جهة معينة (مدعي أو مدعى عليه) فيها شخصان فأكثر، المسمى
- *    القانوني الجامع لهذه الجهة (legalTitles.plaintiff/defendant)
- *    إجباري ولازم يكون مكتوب (مش فاضي).
+ * 7. لو جهة معينة (مدعي أو مدعى عليه) فيها شخصان فأكثر، المسمى القانوني
+ *    الجامع لهذه الجهة (legalTitles.plaintiff/defendant) إجباري ولازم
+ *    يكون مكتوب (مش فاضي).
  */
 export function validateParties(
     parties: PartyFieldValue[],
     legalTitles: PartyLegalTitles = { plaintiff: '', defendant: '' },
 ): PartiesValidationResult {
     const errors: PartyValidationError[] = [];
+    const warnings: PartyValidationWarning[] = [];
 
     for (const p of parties) {
         if (!p.name.trim()) {
@@ -90,12 +120,22 @@ export function validateParties(
             errors.push({ partyId: p.id, field: 'national_id', message: '⚠️ الرقم القومي لازم يكون 14 رقم بالظبط لو اتكتب' });
         }
 
-        // فحص الاسم الثلاثي: مدعى عليه مش موكل بس (نفس نطاق فحص الخصم
-        // الحالي في NewCaseModal/EditCaseModal/فورمات الجلسة المستقلة).
-        if (p.side === 'defendant' && !p.is_client && p.name.trim()) {
+        if (!p.name.trim()) continue; // الاسم الفاضي أخد خطأه فوق بالفعل — مفيش داعي نكرر فحص الصيغة عليه
+
+        if (p.side === 'plaintiff') {
+            // 🆕 الطرف الأول: ثلاثي إلزامي دايمًا (خطأ مانع)، بغض النظر عن is_client.
             const nameErr = validateFullNameParts(p.name);
             if (nameErr) {
-                errors.push({ partyId: p.id, field: 'name', message: '⚠️ اسم الطرف لازم يكون ثلاثي على الأقل (الاسم الأول، الأب، الجد)' });
+                errors.push({ partyId: p.id, field: 'name', message: '⚠️ اسم الطرف الأول لازم يكون ثلاثي على الأقل (الاسم الأول، الأب، الجد)' });
+            }
+        } else if (p.side === 'defendant' && !p.is_client) {
+            // 🆕 الطرف الثاني (الخصم) مش موكل المكتب: ثنائي كحد أدنى إجباري
+            // (عشان جهات زي "النيابة العامة")، وتحذير غير مانع لو ثنائي بالظبط.
+            const parts = countNameParts(p.name);
+            if (parts < DEFENDANT_MIN_NAME_PARTS) {
+                errors.push({ partyId: p.id, field: 'name', message: '⚠️ اسم الخصم لازم يكون ثنائي على الأقل' });
+            } else if (parts < 3) {
+                warnings.push({ partyId: p.id, field: 'name', message: 'ℹ️ يفضل تسجيل بيانات الخصم بشكل ثلاثي أو رباعي لتجنب تعارض البيانات (إلا لو جهة اعتبارية زي النيابة العامة)' });
             }
         }
     }
@@ -129,6 +169,6 @@ export function validateParties(
         }
     });
 
-    return { valid: errors.length === 0, errors, message: errors[0]?.message };
+    return { valid: errors.length === 0, errors, warnings, message: errors[0]?.message };
 }
 
