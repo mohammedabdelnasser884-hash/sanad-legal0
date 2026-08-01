@@ -24,6 +24,10 @@ interface PartyFieldsProps {
     onRemove: () => void;
     onToggleIsClient: () => void;
     nationalIdError?: string | null;
+    // ⚡ NEW (تحديث "تفرقة اسم الطرف الأول عن الخصم" — 1 أغسطس 2026):
+    // تحذير غير مانع (مش خطأ) بيتعرض تحت حقل الاسم مباشرة — بيُستخدم
+    // حاليًا لتنبيه "يفضل اسم الخصم يكون ثلاثي/رباعي" لما يكون ثنائي بالظبط.
+    nameWarning?: string | null;
     // بادئة موحّدة لـ data-testid (مثال: 'new-case-plaintiff-0') — اختياري،
     // بيتحدد من الفورم الأب وقت الربط الفعلي (مراحل 4-6).
     testIdPrefix?: string;
@@ -45,7 +49,7 @@ interface PartyFieldsProps {
 const readOnlyInputCls = 'w-full p-3 text-xs rounded-xl border border-white/10 bg-white/5 text-slate-300 placeholder-slate-600 cursor-not-allowed';
 
 export function PartyFields({
-    party, index, sideLabel, canRemove, onChange, onRemove, onToggleIsClient, nationalIdError, testIdPrefix, extraContent, readOnly = false,
+    party, index, sideLabel, canRemove, onChange, onRemove, onToggleIsClient, nationalIdError, nameWarning, testIdPrefix, extraContent, readOnly = false,
 }: PartyFieldsProps) {
     const title = `${sideLabel} ${index + 1}`;
     const tid = (name: string) => (testIdPrefix ? `${testIdPrefix}-${name}` : undefined);
@@ -97,6 +101,7 @@ export function PartyFields({
                 'data-testid': tid('capacity'),
             })
         ),
+        nameWarning && React.createElement('p', { className: 'text-[9px] text-amber-400 -mt-1', 'data-testid': tid('name-warning') }, nameWarning),
 
         // ── العنوان — بيتعرض كـ"إجباري بصريًا" بس لموكل المكتب، فعليًا
         // اختياري في الحالتين (الفاليديشن الحقيقي في usePartyFields) ──
