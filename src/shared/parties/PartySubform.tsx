@@ -44,6 +44,11 @@ export function PartySubform({
     const nationalIdErrorFor = (partyId: string) =>
         validation.errors.find((e) => e.partyId === partyId && e.field === 'national_id')?.message ?? null;
 
+    // ⚡ NEW (تحديث "تفرقة اسم الطرف الأول عن الخصم" — 1 أغسطس 2026): تحذير
+    // غير مانع (warning، مش error) — حاليًا بيظهر بس لاسم خصم ثنائي بالظبط.
+    const nameWarningFor = (partyId: string) =>
+        validation.warnings.find((w) => w.partyId === partyId && w.field === 'name')?.message ?? null;
+
     const sideMarker = side === 'plaintiff' ? '(المدعي)' : '(المدعى عليه)';
     const legalTitleError = validation.errors.find((e) => e.field === 'legal_title' && e.message.includes(sideMarker))?.message ?? null;
 
@@ -58,6 +63,7 @@ export function PartySubform({
             onRemove: () => removeParty(party.id),
             onToggleIsClient: () => toggleIsClient(party.id),
             nationalIdError: nationalIdErrorFor(party.id),
+            nameWarning: nameWarningFor(party.id),
             testIdPrefix: testIdPrefix ? `${testIdPrefix}-${side}-${index}` : undefined,
             extraContent: renderPartyExtra ? renderPartyExtra(party) : undefined,
             readOnly: renderPartyReadOnly ? renderPartyReadOnly(party) : false,
