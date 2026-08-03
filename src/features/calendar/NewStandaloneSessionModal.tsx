@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from '../../shared/lib/notifications';
 import { escapeTelegramHtml } from '../../shared/lib/sanitize';
@@ -9,7 +9,10 @@ import { Inp } from '@/shared/ui/Inp';
 import { Sel } from '@/shared/ui/Sel';
 import { usePartyFields } from '@/shared/parties/usePartyFields';
 import { PartyFieldsGroup } from '@/shared/parties/PartyFieldsGroup';
+import type { PartyFieldValue } from '@/shared/parties/partyTypes';
 import { validateParties } from '@/shared/lib/casePartiesValidation';
+import { useFormDraft } from '@/shared/hooks/useFormDraft';
+import { useUnsavedChangesGuard } from '@/shared/hooks/useUnsavedChangesGuard';
 import type { MappedCase } from '../../hooks/useAppData';
 import { useClientLinking } from './hooks/useClientLinking';
 import { makeOfflineTempId, withFkOfflineSentinel } from './hooks/caseSessionLinkingShared';
@@ -147,6 +150,28 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
     const [linkMode, setLinkMode] = useState<'standalone' | 'existing'>('standalone');
     const [caseSearch, setCaseSearch] = useState('');
     const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
+
+    // ══════════════ حفظ مسودة تلقائي (خطة 1 أغسطس 2026) ══════════════
+    // بيغطي حقول الفورم + وضع الربط (standalone/existing) + القضية
+    // المختارة (existing) + أطراف الجلسة (standalone) — مفتاح واحد ثابت
+    // (مفيش id لسه، الفورم ده دايمًا "جديد"). المسح بيحصل بس عند نجاح
+    // الحفظ الفعلي (مش مجرد الضغط على حفظ زي فورمات القضايا) لأن الدالة
+    // async وفيها مسارات فشل بترجع مبكرًا (return) قبل أي كتابة حقيقية —
+    // هنا قدرنا نحدد نقاط النجاح بدقة فمفيش داعي للتبسيط اللي استخدمناه
+    // هناك.
+    interface SessionDraftData {
+        form: Form;
+        linkMode: 'standalone' | 'existing';
+        selectedCaseId: string | null;
+        parties: PartyFieldValue[];
+        legalTitles: { plaintiff: string; defendant: string };
+    }
+    const draftData: SessionDraftData = { form, linkMode, selectedCaseId, parties: partyFields.parties, legalTitles: partyFields.legalTitles };
+    const isSessionDraftEmpty = (d: SessionDraftData) =>
+        !d.form.title.trim() && !d.form.session_date.trim() && !d.form.case_number.trim() &&
+        d.linkMode === 'standalone' && !d.selectedCaseId &&
+        !d.parties.some((p) => p.name.trim() || p.national_id.trim() || p.address.trim() || p.power_of_attorney.trim() || p.capacity.trim());
+    const draft = useFormDraft<SessionDraftData>({ key: 'new-standalone-session', data: draftData, isEmpty: isSessionDraftEmpty });
     const [saving, setSaving] = useState(false);
     const [postSaveModal, setPostSaveModal] = useState(false);
     // 🆕 (خطة "المسمى القانوني" — بند مؤجل من التقرير): plaintiffLegalTitle/
@@ -176,6 +201,23 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
     const onSkipOrClose = partyList.length > 0 ? handleSkipParty : onClose;
 
     const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((f: Form) => ({ ...f, [k]: e.target.value }));
+
+    useEffect(() => {
+        if (!draft.restoredDraft) return;
+        setForm(draft.restoredDraft.form);
+        setLinkMode(draft.restoredDraft.linkMode);
+        setSelectedCaseId(draft.restoredDraft.selectedCaseId);
+        partyFields.replaceParties(draft.restoredDraft.parties);
+        partyFields.replaceLegalTitles(draft.restoredDraft.legalTitles);
+        toast('📝 تم استرجاع بيانات كنت بتكتبها قبل كده');
+        draft.dismissRestoredDraft();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [draft.restoredDraft]);
+
+    // تحذير قبل الإغلاق — بس لفورم الإدخال الأساسي (مش خطوات الـwizard اللي
+    // بعد الحفظ الناجح، راجع onSkipOrClose/postSave تحت — البيانات هناك
+    // اتحفظت فعليًا فمفيش داعي لتحذير).
+    const guardedClose = useUnsavedChangesGuard(draftData, { form, linkMode, selectedCaseId, parties: partyFields.parties, legalTitles: partyFields.legalTitles }, onClose);
 
     const finalCaseType = form.case_type === 'أخرى' ? (form.case_type_custom || 'أخرى') : form.case_type;
     const finalCourtLevel = form.court_level === 'أخرى' ? (form.court_level_other || '') : form.court_level;
@@ -345,6 +387,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                     );
                 }
                 onSaved();
+                draft.clearDraft();
                 onClose();
                 return;
             }
@@ -408,12 +451,14 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
             if (linkMode === 'existing') {
                 toast('✅ تمت إضافة الجلسة');
                 onSaved();
+                draft.clearDraft();
                 onClose();
                 return;
             }
 
             toast('✅ تمت إضافة الجلسة المستقلة');
             onSaved();
+            draft.clearDraft();
             // ⚡ NEW (مرحلة 6.1): useClientLinking.ts (منطق "تحويل الجلسة
             // لقضية"/"ربط الموكل") لسه بيقرا savedFormData.form.plaintiff/...
             // (حقول مفردة قديمة) — دعم تعدد الأطراف في المسار ده نفسه هيتعمل
@@ -621,7 +666,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
     const modal = React.createElement('div', {
         className: 'fixed inset-0 z-50 flex items-end justify-center',
         style: { background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' },
-        onClick: (e: React.MouseEvent<HTMLDivElement>) => { if (e.target === e.currentTarget) onClose(); }
+        onClick: (e: React.MouseEvent<HTMLDivElement>) => { if (e.target === e.currentTarget) guardedClose(); }
     },
         React.createElement('div', {
             className: 'w-full max-w-lg rounded-t-3xl overflow-hidden',
@@ -640,7 +685,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                     )
                 ),
                 React.createElement('button', {
-                    onClick: onClose,
+                    onClick: guardedClose,
                     className: 'w-8 h-8 flex items-center justify-center rounded-full bg-white/5 text-slate-400 text-sm hover:bg-white/10'
                 }, '✕')
             ),
@@ -854,7 +899,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                 className: 'px-5 py-4 border-t border-white/5 flex gap-3'
             },
                 React.createElement('button', {
-                    onClick: onClose,
+                    onClick: guardedClose,
                     className: 'flex-1 py-3 rounded-2xl text-xs font-bold text-slate-400 bg-white/5 hover:bg-white/10 transition-all'
                 }, 'إلغاء'),
                 React.createElement('button', {
