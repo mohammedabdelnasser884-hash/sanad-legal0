@@ -48,6 +48,12 @@ export interface UsePartyFieldsReturn {
     legalTitles: PartyLegalTitles;
     setLegalTitle: (side: PartySide, value: string) => void;
     validation: PartiesValidationResult;
+    // 🆕 (خطة حفظ المسودات التلقائي — 1 أغسطس 2026): استبدال array
+    // الأطراف بالكامل دفعة واحدة — مستخدمة بس وقت استرجاع مسودة محفوظة
+    // (useFormDraft)، مش جزء من تدفق التعديل اليدوي العادي (اللي بيفضل
+    // يستخدم updateParty/addParty/removeParty زي ما هو).
+    replaceParties: (parties: PartyFieldValue[]) => void;
+    replaceLegalTitles: (titles: PartyLegalTitles) => void;
 }
 
 export function usePartyFields(options: UsePartyFieldsOptions = {}): UsePartyFieldsReturn {
@@ -109,5 +115,16 @@ export function usePartyFields(options: UsePartyFieldsOptions = {}): UsePartyFie
 
     const validation = useMemo(() => validateParties(parties, legalTitles), [parties, legalTitles]);
 
-    return { parties, plaintiffs, defendants, addParty, removeParty, canRemove, updateParty, toggleIsClient, legalTitles, setLegalTitle, validation };
+    // 🆕 (خطة حفظ المسودات التلقائي — 1 أغسطس 2026): استبدال كامل، بلا
+    // فحوصات "أول طرف في الجهة" زي removeParty — الاستدعاء الوحيد المتوقع
+    // ليها هو استرجاع مسودة كاملة كانت اتحفظت من نفس الفورم أصلاً.
+    const replaceParties = useCallback((next: PartyFieldValue[]) => {
+        setParties(next);
+    }, []);
+
+    const replaceLegalTitles = useCallback((next: PartyLegalTitles) => {
+        setLegalTitles(next);
+    }, []);
+
+    return { parties, plaintiffs, defendants, addParty, removeParty, canRemove, updateParty, toggleIsClient, legalTitles, setLegalTitle, validation, replaceParties, replaceLegalTitles };
 }
