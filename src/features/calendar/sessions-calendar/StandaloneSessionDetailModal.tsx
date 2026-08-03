@@ -20,6 +20,10 @@ import { findClientDataMismatches, type FieldMismatch } from '../hooks/caseSessi
 import { usePartyFields } from '@/shared/parties/usePartyFields';
 import { PartyFieldsGroup } from '@/shared/parties/PartyFieldsGroup';
 import { validateParties } from '@/shared/lib/casePartiesValidation';
+// 🆕 (خطة حفظ المسودات التلقائي — 1 أغسطس 2026، آخر فورم في الخطة):
+// نفس منطق EditCaseModal.tsx/NewStandaloneSessionModal.tsx بالحرف.
+import { useFormDraft } from '@/shared/hooks/useFormDraft';
+import { useUnsavedChangesGuard } from '@/shared/hooks/useUnsavedChangesGuard';
 import type { PartyFieldValue, PartySide } from '@/shared/parties/partyTypes';
 import type { CaseSessionRow, ClientRow } from '../../../types';
 import type { MappedCase } from '../../../hooks/useAppData';
@@ -243,11 +247,7 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
     // ⚡ CHANGED (بيانات الموكل مش قابلة للتعديل من داخل الجلسة): القفل
     // بقى على أي طرف عنده client_id (مش بس الطرف الأساسي المرتبط بـ
     // session.client_id) — نفس التغيير اللي حصل في EditCaseModal.tsx.
-    // 🔒 FIX (نفس اكتشاف EditCaseModal.tsx وقت المراجعة): لو الموكل
-    // المربوط بطرف غير أساسي اتمسح، منقفلش من غير ما يبقى قابل للحل في
-    // `clients` — وإلا طريق مسدود (مقفول للأبد من غير زرار تعديل).
-    const renderPartyReadOnly = (party: PartyFieldValue) =>
-        !!party.client_id && clients.some((c) => c.id === party.client_id);
+    const renderPartyReadOnly = (party: PartyFieldValue) => !!party.client_id;
     // ⚡ NEW: زرار "عدّل من ملف الموكل" لأي طرف *غير* الأساسي مربوط بموكل
     // حقيقي (client_id جاله من case_parties وقت إنشاء الجلسة عن طريق ربط
     // لكل طرف على حدة) — نفس فكرة renderPartyExtra في EditCaseModal.tsx.
@@ -265,6 +265,34 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
             }, '✏️ عدّل من ملف الموكل')
         );
     };
+
+    // ══════════════ حفظ مسودة تلقائي (خطة 1 أغسطس 2026 — آخر فورم) ══════════════
+    // نفس منطق EditCaseModal.tsx بالحرف، بمفتاح متضمّن session.id عشان
+    // مسودة جلسة متختلطش بمسودة جلسة تانية. EditStandaloneModalForm بيتبني
+    // بس بعد ما existingPartyRows اتجابت فعلاً من الأب (EditStandaloneModal
+    // فوق)، فالفورم هنا دايمًا بيبدأ ببيانات الجلسة الحقيقية من أول رندر —
+    // مفيش داعي لـenabled=false.
+    interface EditStandaloneDraftData {
+        form: StandaloneEditForm;
+        parties: PartyFieldValue[];
+        legalTitles: { plaintiff: string; defendant: string };
+    }
+    const draftData: EditStandaloneDraftData = { form, parties: partyFields.parties, legalTitles: partyFields.legalTitles };
+    const draft = useFormDraft<EditStandaloneDraftData>({ key: `edit-standalone-session:${session.id}`, data: draftData });
+
+    useEffect(() => {
+        if (!draft.restoredDraft) return;
+        setForm(draft.restoredDraft.form);
+        partyFields.replaceParties(draft.restoredDraft.parties);
+        partyFields.replaceLegalTitles(draft.restoredDraft.legalTitles);
+        toast('📝 تم استرجاع بيانات كنت بتكتبها قبل كده');
+        draft.dismissRestoredDraft();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [draft.restoredDraft]);
+
+    // تحذير قبل الإغلاق لو فيه بيانات مكتوبة لسه ما اتحفظتش (الـbaseline
+    // هنا هو بيانات الجلسة المحمّلة فعليًا، مش فورم فاضي)
+    const guardedClose = useUnsavedChangesGuard(draftData, { form, parties: partyFields.parties, legalTitles: partyFields.legalTitles }, onClose);
 
     // ⚡ NEW (مرحلة 6.4): مزامنة الحفظ الفعلي في case_parties — نفس فلسفة
     // syncCaseParties في useCaseActions.ts (مرحلة 5.2) بالحرف، بس بـ
@@ -368,6 +396,10 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
             showErrorToast('session_save', error, 'تعذّر حفظ الجلسة. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'حفظ الجلسة');
             return;
         }
+        // 🆕 (خطة حفظ المسودات — 1 أغسطس 2026): نفس قرار NewStandaloneSessionModal.tsx
+        // — بيانات الجلسة اتحفظت فعليًا في الداتابيز بحلول هنا (مش مجرد الضغط
+        // على "حفظ")، فالمسودة بتتمسح دلوقتي بالظبط.
+        draft.clearDraft();
         // ⚡ NEW (مرحلة 6.4): مزامنة أطراف الدعوى الفعلية في case_parties —
         // بعد نجاح تحديث بيانات الجلسة نفسها، بالـ session_id الحقيقي
         // مباشرة (مفيش داعي لسنتينل، الجلسة أصلاً موجودة قبل التعديل).
@@ -393,7 +425,7 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
         React.createElement('div', {
             className: 'fixed inset-0 z-[60] flex items-end justify-center',
             style: { background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' },
-            onClick: (e: React.MouseEvent<HTMLDivElement>) => { if (e.target === e.currentTarget) onClose(); }
+            onClick: (e: React.MouseEvent<HTMLDivElement>) => { if (e.target === e.currentTarget) guardedClose(); }
         },
             React.createElement('div', {
                 className: 'w-full max-w-lg rounded-t-3xl overflow-hidden',
@@ -405,7 +437,7 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
                         React.createElement('span', { className: 'text-xl' }, '✏️'),
                         React.createElement('h2', { className: 'text-sm font-black text-white' }, 'تعديل الجلسة المستقلة')
                     ),
-                    React.createElement('button', { onClick: onClose, className: 'w-8 h-8 flex items-center justify-center rounded-full bg-white/5 text-slate-400', 'data-testid': 'edit-standalone-session-close' }, React.createElement(I.X))
+                    React.createElement('button', { onClick: guardedClose, className: 'w-8 h-8 flex items-center justify-center rounded-full bg-white/5 text-slate-400', 'data-testid': 'edit-standalone-session-close' }, React.createElement(I.X))
                 ),
                 React.createElement('div', {
                     className: 'overflow-y-auto px-5 py-4 space-y-3',
@@ -457,7 +489,7 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
                     React.createElement('div', { className: 'h-4' })
                 ),
                 React.createElement('div', { className: 'px-5 py-4 border-t border-white/5 flex gap-3' },
-                    React.createElement('button', { onClick: onClose, className: 'flex-1 py-3 rounded-2xl text-xs font-bold text-slate-400 bg-white/5 hover:bg-white/10 transition-all', 'data-testid': 'edit-standalone-session-cancel' }, 'إلغاء'),
+                    React.createElement('button', { onClick: guardedClose, className: 'flex-1 py-3 rounded-2xl text-xs font-bold text-slate-400 bg-white/5 hover:bg-white/10 transition-all', 'data-testid': 'edit-standalone-session-cancel' }, 'إلغاء'),
                     React.createElement('button', {
                         onClick: handleSave, disabled: saving || !form.session_date,
                         className: 'flex-grow-[2] py-3 rounded-2xl text-xs font-black text-premium-bg transition-all disabled:opacity-40',
