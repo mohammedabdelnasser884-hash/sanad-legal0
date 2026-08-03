@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { toast } from '../../shared/lib/notifications';
 import { validatePhone, validateEmail } from '../../shared/lib/validation';
 import { validateFullNameParts } from '../../shared/lib/clientValidation';
@@ -7,6 +7,8 @@ import { Inp } from '@/shared/ui/Inp';
 import { PoaInput } from '@/shared/ui/PoaInput';
 import { Sel } from '@/shared/ui/Sel';
 import { FileUploadField } from '@/shared/ui/FileUploadField';
+import { useFormDraft } from '@/shared/hooks/useFormDraft';
+import { useUnsavedChangesGuard } from '@/shared/hooks/useUnsavedChangesGuard';
 
 interface NewClientForm {
     full_name: string;
@@ -54,6 +56,39 @@ function NewClientModal({onClose,onSave,loading,initialData,contextLabel}: NewCl
     const [poaPreview,setPoaPreview]=useState<string | null>(null);
     const s=<K extends keyof NewClientForm>(k: K,v: NewClientForm[K])=>setForm((p) =>({...p,[k]:v}));
 
+    // ══════════════ حفظ مسودة تلقائي (خطة 1 أغسطس 2026) ══════════════
+    // بيغطي حقول الفورم النصية بس — ملفات الصور (idFile/poaFile) مش
+    // قابلة للتخزين في localStorage (مش JSON) وبتضيع أصلاً لو التطبيق
+    // اتقفل، فمش جزء من المسودة.
+    // ⚠️ قرار (مش موجود في الخطة الأصلية، اتخد أثناء التنفيذ): لما
+    // الموديل ده بيتفتح بـinitialData (من جوه قضية/جلسة — "إنشاء موكل
+    // جديد من هذه البيانات")، الحفظ التلقائي بيتعطّل تمامًا. السبب: مفيش
+    // معرّف ثابت للسياق ده (مش مرتبط بقضية/جلسة بعينها بمعرّف واحد ثابت)
+    // عشان نبني بيه مفتاح مسودة مميز، فلو سبنا الحفظ شغال بمفتاح عام
+    // ('new-client')، ممكن مسودة اتكتبت وقت إنشاء موكل من طرف في قضية
+    // معينة ترجع تتسترجع غلط وقت إنشاء موكل من سياق مختلف تمامًا.
+    const isContextualFlow = !!initialData && Object.keys(initialData).length > 0;
+    const draftEnabled = !isContextualFlow;
+    const isClientDraftEmpty = (f: NewClientForm) =>
+        !f.full_name.trim() && !f.phone.trim() && !f.phone2.trim() && !f.email.trim() &&
+        !f.address.trim() && !f.notes.trim() && !f.national_id.trim() && !f.cr_number.trim() &&
+        !f.kin_name.trim() && !f.kin_phone.trim();
+    const draft = useFormDraft<NewClientForm>({ key: 'new-client', data: form, enabled: draftEnabled, isEmpty: isClientDraftEmpty });
+
+    useEffect(() => {
+        if (!draft.restoredDraft) return;
+        setForm(draft.restoredDraft);
+        toast('📝 تم استرجاع بيانات كنت بتكتبها قبل كده');
+        draft.dismissRestoredDraft();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [draft.restoredDraft]);
+
+    // تحذير قبل الإغلاق — في السياق المرتبط بقضية/جلسة (initialData) بردو
+    // نفعّله (الفورم ممكن يبقى فيه بيانات مكتوبة/مُحمّلة مسبقًا)، حتى لو
+    // الحفظ التلقائي نفسه معطّل ليه. useUnsavedChangesGuard بياخد أول قيمة
+    // لـform (وقت الفتح) كـbaseline تلقائيًا، مفيش داعي لـstate إضافي.
+    const guardedClose = useUnsavedChangesGuard(form, form, onClose);
+
     const phoneWarn = useMemo(()=>validatePhone(form.phone), [form.phone]);
     const phoneWarn2 = useMemo(()=>validatePhone(form.phone2), [form.phone2]);
     const emailWarn = useMemo(()=>validateEmail(form.email), [form.email]);
@@ -79,7 +114,7 @@ function NewClientModal({onClose,onSave,loading,initialData,contextLabel}: NewCl
     // بيعلق). z-[80] أعلى من أي مودال ممكن NewClientModal يتفتح من جواه
     // (z-50/z-[60]/z-[70])، وأقل من تأكيدات الحذف (z-[90]) وتأكيد الخروج
     // (z-[9999]) عمدًا — لسه ممكن يظهروا فوقه لو احتاج الأمر.
-    return React.createElement('div',{className:"fixed inset-0 z-[80] flex items-end justify-center bg-black/70 backdrop-blur-sm",onClick:(e: React.MouseEvent<HTMLDivElement>) =>{if(e.target===e.currentTarget)onClose();}},
+    return React.createElement('div',{className:"fixed inset-0 z-[80] flex items-end justify-center bg-black/70 backdrop-blur-sm",onClick:(e: React.MouseEvent<HTMLDivElement>) =>{if(e.target===e.currentTarget)guardedClose();}},
         React.createElement('div',{className:"bg-premium-card w-full max-w-lg rounded-t-3xl border-t border-white/10 p-6 pb-10 shadow-2xl slide-up max-h-[90vh] overflow-y-auto no-scrollbar"},
             React.createElement('div',{className:"w-10 h-1 bg-white/20 rounded-full mx-auto mb-5"}),
             React.createElement('div',{className:"flex items-center justify-between mb-5"},
@@ -87,7 +122,7 @@ function NewClientModal({onClose,onSave,loading,initialData,contextLabel}: NewCl
                     React.createElement('span',{className:"w-1 h-4 bg-emerald-400 rounded-full"}),
                     "إضافة موكل جديد"
                 ),
-                React.createElement('button',{onClick:onClose,className:"w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-white active:scale-90 transition-all"},"✕")
+                React.createElement('button',{onClick:guardedClose,className:"w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-white active:scale-90 transition-all"},"✕")
             ),
             // ⚡ NEW: تنبيه الربط التلقائي — بيبان بس لو الموديل اتفتح من
             // جوه قضية/جلسة (contextLabel موجود).
@@ -180,6 +215,9 @@ function NewClientModal({onClose,onSave,loading,initialData,contextLabel}: NewCl
                         const warnings = [phoneWarn, phoneWarn2, emailWarn].filter(Boolean);
                         if(warnings.length>0) toast('⚠️ تنبيه: '+warnings[0]+' — تم الحفظ رغم ذلك');
                         onSave(form,idFile,poaFile);
+                        // 🆕 (خطة حفظ المسودات — 1 أغسطس 2026): نفس قرار فورمات
+                        // القضايا — مسح المسودة بمجرد إرسال طلب الحفظ.
+                        draft.clearDraft();
                     },
                     className:"w-full py-3.5 bg-gradient-to-tr from-emerald-500 to-emerald-400 text-white rounded-xl font-black text-sm shadow-md flex items-center justify-center gap-2 disabled:opacity-60 active:scale-95 transition-transform mt-2"
                 },loading?React.createElement(I.Spin):React.createElement(I.Person),loading?'جاري الرفع والحفظ...':'حفظ الموكل ☁️')
