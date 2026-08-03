@@ -8,6 +8,8 @@ import { PoaInput } from '@/shared/ui/PoaInput';
 import { Sel } from '@/shared/ui/Sel';
 import { FileUploadField } from '@/shared/ui/FileUploadField';
 import { useResolvedStorageUrl } from '../../shared/lib/storage';
+import { useFormDraft } from '@/shared/hooks/useFormDraft';
+import { useUnsavedChangesGuard } from '@/shared/hooks/useUnsavedChangesGuard';
 import type { ClientRow } from '../../types';
 import type { ClientContactInfo } from './hooks/useClientActions';
 
@@ -73,13 +75,33 @@ function EditClientModal({client: c, onClose, onSave, saving = false}: EditClien
 
     const s = <K extends keyof EditClientForm>(k: K, v: EditClientForm[K]) => setForm((p) => ({...p, [k]: v}));
 
+    // ══════════════ حفظ مسودة تلقائي (خطة 1 أغسطس 2026) ══════════════
+    // نفس منطق NewClientModal.tsx — حقول نصية بس (مفيش ملفات)، مفتاح
+    // مميز لكل موكل عشان مسودة موكل متختلطش بمسودة موكل تاني.
+    const isEditClientDraftEmpty = (f: EditClientForm) =>
+        !f.full_name.trim() && !f.phone.trim() && !f.phone2.trim() && !f.email.trim() &&
+        !f.address.trim() && !f.notes.trim() && !f.national_id.trim() && !f.cr_number.trim() &&
+        !f.kin_name.trim() && !f.kin_phone.trim();
+    const draft = useFormDraft<EditClientForm>({ key: `edit-client:${c.id}`, data: form, isEmpty: isEditClientDraftEmpty });
+
+    useEffect(() => {
+        if (!draft.restoredDraft) return;
+        setForm(draft.restoredDraft);
+        toast('📝 تم استرجاع بيانات كنت بتكتبها قبل كده');
+        draft.dismissRestoredDraft();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [draft.restoredDraft]);
+
+    // تحذير قبل الإغلاق — الـbaseline هنا بيانات الموكل المحمّلة فعليًا
+    const guardedClose = useUnsavedChangesGuard(form, form, onClose);
+
     const pickId  = (file: File | null | undefined) => { if(!file) return; setIdFile(file);  setIdPreview(URL.createObjectURL(file)); };
     const pickPoa = (file: File | null | undefined) => { if(!file) return; setPoaFile(file); setPoaPreview(URL.createObjectURL(file)); };
 
     return createPortal(
         React.createElement('div', {
             className:"fixed inset-0 z-[70] flex items-end justify-center bg-black/80 backdrop-blur-sm",
-            onClick: (e: React.MouseEvent<HTMLDivElement>) => { if(e.target===e.currentTarget) onClose(); }
+            onClick: (e: React.MouseEvent<HTMLDivElement>) => { if(e.target===e.currentTarget) guardedClose(); }
         },
         React.createElement('div', {className:"bg-premium-card w-full max-w-lg rounded-t-3xl border-t border-white/10 p-6 pb-10 shadow-2xl slide-up max-h-[90vh] overflow-y-auto no-scrollbar"},
             React.createElement('div', {className:"w-10 h-1 bg-white/20 rounded-full mx-auto mb-5"}),
@@ -88,7 +110,7 @@ function EditClientModal({client: c, onClose, onSave, saving = false}: EditClien
                     React.createElement('span', {className:"w-1 h-4 bg-emerald-400 rounded-full"}),
                     "تعديل بيانات الموكل"
                 ),
-                React.createElement('button', {onClick:onClose, className:"w-8 h-8 rounded-xl bg-white/5 flex items-center justify-center text-slate-400"}, "✕")
+                React.createElement('button', {onClick:guardedClose, className:"w-8 h-8 rounded-xl bg-white/5 flex items-center justify-center text-slate-400"}, "✕")
             ),
             React.createElement('div', {className:"space-y-4"},
                 // الاسم ونوع الموكل
@@ -161,7 +183,7 @@ function EditClientModal({client: c, onClose, onSave, saving = false}: EditClien
                             React.createElement('button', {
                                 'data-testid': 'edit-client-impact-confirm',
                                 disabled: saving,
-                                onClick: () => { onSave(form, idFile, poaFile); },
+                                onClick: () => { onSave(form, idFile, poaFile); draft.clearDraft(); },
                                 className:"flex-1 py-3 bg-gradient-to-tr from-emerald-500 to-emerald-400 text-white rounded-xl font-black text-xs disabled:opacity-60"
                             }, saving ? "⏳ جاري الحفظ..." : "نعم، احفظ في كل مكان"),
                             React.createElement('button', {
