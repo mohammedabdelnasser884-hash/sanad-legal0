@@ -8,6 +8,8 @@ import { db } from '../../supabaseClient';
 import { usePartyFields } from '@/shared/parties/usePartyFields';
 import { PartyFieldsGroup } from '@/shared/parties/PartyFieldsGroup';
 import type { PartyFieldValue, PartySide } from '@/shared/parties/partyTypes';
+import { useFormDraft } from '@/shared/hooks/useFormDraft';
+import { useUnsavedChangesGuard } from '@/shared/hooks/useUnsavedChangesGuard';
 import type { MappedCase } from '../../hooks/useAppData';
 import type { CaseFormSubmitData } from './hooks/useCaseActions';
 import type { ClientRow } from '../../types';
@@ -305,15 +307,35 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
     // من النظام" جوه renderPartyExtra تحت) بياناته الشخصية تتقفل. الصفة
     // (capacity) فضلت قابلة للتعديل دايمًا زي ما هي — دي دور الطرف في
     // القضية دي بالذات، مش بيانات الموكل نفسه.
-    // 🔒 FIX (اكتشفته وقت المراجعة): لو الموكل المربوط بطرف *غير* أساسي
-    // اتمسح (soft-deleted) بعد الربط، client_id فضل موجود على الطرف لكن
-    // مش موجود في `clients` (اللي فيها الموكلين النشطين بس) — لو قفلنا
-    // بس على أساس !!party.client_id، الطرف كان هيتقفل للأبد من غير أي
-    // زرار تعديل (مفيش linkedPartyClient يترجع في renderPartyExtra) —
-    // طريق مسدود فعليًا. الحل: نتأكد إن الموكل قابل للحل فعليًا في
-    // `clients` قبل القفل، بالظبط زي فولباك isOrphaned للطرف الأساسي فوق.
-    const renderPartyReadOnly = (party: PartyFieldValue) =>
-        !!party.client_id && clients.some((c) => c.id === party.client_id);
+    const renderPartyReadOnly = (party: PartyFieldValue) => !!party.client_id;
+
+    // ══════════════ حفظ مسودة تلقائي (خطة 1 أغسطس 2026) ══════════════
+    // نفس منطق NewCaseModal.tsx بالحرف، بس المفتاح هنا متضمّن caseData.id
+    // عشان مسودة قضية متختلطش بمسودة قضية تانية. EditCaseModalForm بيتبني
+    // بس بعد ما partiesState.loaded (راجع EditCaseModal الخارجي فوق)،
+    // فالفورم هنا دايمًا بيبدأ ببيانات القضية الحقيقية من أول رندر —
+    // مفيش داعي لـenabled=false زي ما كان متوقع بالخطة الأصلية.
+    interface EditCaseDraftData {
+        form: EditCaseForm;
+        parties: PartyFieldValue[];
+        legalTitles: { plaintiff: string; defendant: string };
+    }
+    const draftData: EditCaseDraftData = { form, parties: partyFields.parties, legalTitles: partyFields.legalTitles };
+    const draft = useFormDraft<EditCaseDraftData>({ key: `edit-case:${caseData.id}`, data: draftData });
+
+    useEffect(() => {
+        if (!draft.restoredDraft) return;
+        setForm(draft.restoredDraft.form);
+        partyFields.replaceParties(draft.restoredDraft.parties);
+        partyFields.replaceLegalTitles(draft.restoredDraft.legalTitles);
+        toast('📝 تم استرجاع بيانات كنت بتكتبها قبل كده');
+        draft.dismissRestoredDraft();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [draft.restoredDraft]);
+
+    // تحذير قبل الإغلاق لو فيه بيانات مكتوبة لسه ما اتحفظتش (الـbaseline
+    // هنا هو بيانات القضية المحمّلة فعليًا، مش فورم فاضي)
+    const guardedClose = useUnsavedChangesGuard(draftData, { form, parties: partyFields.parties, legalTitles: partyFields.legalTitles }, onClose);
 
     // ⚡ NEW (خطة تطوير أطراف الدعوى — مرحلة 4 خطوة 2، 23 يوليو 2026): نفس
     // فكرة linkClientToParty في NewCaseModal.tsx بالحرف — بس هنا لأي طرف
@@ -395,7 +417,7 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
                 React.createElement('span', {className: "w-1 h-4 bg-premium-gold rounded-full"}),
                 "تعديل بيانات القضية"
             ),
-            React.createElement('button', {onClick: onClose, className: "w-8 h-8 rounded-xl bg-white/5 flex items-center justify-center text-slate-400"}, "✕")
+            React.createElement('button', {onClick: guardedClose, className: "w-8 h-8 rounded-xl bg-white/5 flex items-center justify-center text-slate-400"}, "✕")
         ),
         React.createElement('div', {className: "space-y-4"},
 
@@ -627,6 +649,10 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
                         existingPartyIds: existingPartyRows.map((r) => r.id),
                     };
                     onSave(saveData);
+                    // 🆕 (خطة حفظ المسودات — 1 أغسطس 2026): نفس قرار NewCaseModal.tsx —
+                    // نمسح المسودة بمجرد إرسال طلب الحفظ (عدّى الفاليديشن)، مش بعد
+                    // تأكيد النجاح من الأب.
+                    draft.clearDraft();
                 },
                 className: "w-full py-3.5 bg-gradient-to-tr from-premium-gold to-amber-200 text-premium-bg rounded-xl font-black text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform mt-2 disabled:opacity-60"
             }, React.createElement(I.Check), saving ? "⏳ جاري الحفظ..." : "حفظ التعديلات")
