@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { toast } from '../../shared/lib/notifications';
 import { I } from '../../constants';
 import { Inp } from '@/shared/ui/Inp';
@@ -7,6 +7,8 @@ import DatePicker from '@/shared/ui/DatePicker';
 import { usePartyFields } from '@/shared/parties/usePartyFields';
 import { PartyFieldsGroup } from '@/shared/parties/PartyFieldsGroup';
 import type { PartyFieldValue } from '@/shared/parties/partyTypes';
+import { useFormDraft } from '@/shared/hooks/useFormDraft';
+import { useUnsavedChangesGuard } from '@/shared/hooks/useUnsavedChangesGuard';
 import type { ClientRow, ProfileRow } from '../../types';
 import type { CaseFormSubmitData } from './hooks/useCaseActions';
 import type { ClientModalContext } from '../clients/hooks/useClientActions';
@@ -55,6 +57,35 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
     // ⚡ NEW (مرحلة 4 — خطة تعدد الأطراف): array أطراف الدعوى (مدعين
     // ومدعى عليهم، بلا حدود) بدل حقلي "الموكل"/"الخصم" المفردين القدامى.
     const partyFields = usePartyFields();
+
+    // ══════════════ حفظ مسودة تلقائي (خطة 1 أغسطس 2026) ══════════════
+    // بيحفظ حقول الفورم + أطراف الدعوى + المسمى القانوني في localStorage
+    // أثناء الكتابة، عشان لو المستخدم خرج من التطبيق فجأة قبل الحفظ
+    // (مكالمة، تطبيق تاني، إغلاق من النظام) ميرجعش يلاقي الفورم فاضي.
+    interface CaseDraftData {
+        form: NewCaseForm;
+        parties: PartyFieldValue[];
+        legalTitles: { plaintiff: string; defendant: string };
+    }
+    const draftData: CaseDraftData = { form, parties: partyFields.parties, legalTitles: partyFields.legalTitles };
+    const isCaseDraftEmpty = (d: CaseDraftData) =>
+        !d.form.title.trim() &&
+        !d.parties.some((p) => p.name.trim() || p.national_id.trim() || p.address.trim() || p.power_of_attorney.trim() || p.capacity.trim()) &&
+        !d.legalTitles.plaintiff.trim() && !d.legalTitles.defendant.trim();
+    const draft = useFormDraft<CaseDraftData>({ key: 'new-case', data: draftData, isEmpty: isCaseDraftEmpty });
+
+    useEffect(() => {
+        if (!draft.restoredDraft) return;
+        setForm(draft.restoredDraft.form);
+        partyFields.replaceParties(draft.restoredDraft.parties);
+        partyFields.replaceLegalTitles(draft.restoredDraft.legalTitles);
+        toast('📝 تم استرجاع بيانات كنت بتكتبها قبل كده');
+        draft.dismissRestoredDraft();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [draft.restoredDraft]);
+
+    // تحذير قبل الإغلاق لو فيه بيانات مكتوبة لسه ما اتحفظتش
+    const guardedClose = useUnsavedChangesGuard(draftData, { form, parties: partyFields.parties, legalTitles: partyFields.legalTitles }, onClose);
 
     // ربط طرف بعينه بموكل موجود من النظام — بيملى الاسم/الرقم القومي/
     // التوكيل/العنوان دفعة واحدة من بيانات الموكل الحقيقية (نفس سلوك
@@ -115,7 +146,7 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
     const inputCls = "w-full p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600 transition-colors";
     const inpStyle = {fontFamily:'Cairo,sans-serif'};
 
-    return React.createElement('div',{className:"fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm",onClick:(e: React.MouseEvent<HTMLDivElement>) =>{if(e.target===e.currentTarget)onClose();}},
+    return React.createElement('div',{className:"fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm",onClick:(e: React.MouseEvent<HTMLDivElement>) =>{if(e.target===e.currentTarget)guardedClose();}},
         React.createElement('div',{className:"bg-premium-card w-full max-w-lg rounded-t-3xl border-t border-white/10 p-6 pb-10 shadow-2xl slide-up max-h-[90vh] overflow-y-auto no-scrollbar"},
             React.createElement('div',{className:"w-10 h-1 bg-white/20 rounded-full mx-auto mb-5"}),
             React.createElement('div',{className:"flex items-center justify-between mb-5"},
@@ -123,7 +154,7 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
                     React.createElement('span',{className:"w-1 h-4 bg-premium-gold rounded-full"}),
                     "تقييد دعوى جديدة في سند"
                 ),
-                React.createElement('button',{onClick:onClose,className:"w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 active:scale-90 transition-all shrink-0"},React.createElement(I.X))
+                React.createElement('button',{onClick:guardedClose,className:"w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 active:scale-90 transition-all shrink-0"},React.createElement(I.X))
             ),
             React.createElement('div',{className:"space-y-4"},
 
@@ -302,6 +333,13 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
                             // الأعمدة القديمة فوق من الطرف الأساسي بس).
                             parties: partyFields.parties,
                         });
+                        // 🆕 (خطة حفظ المسودات — 1 أغسطس 2026): وصلنا هنا يعني عدّى
+                        // فاليديشن العميل وبدأ فعليًا محاولة الحفظ — نمسح المسودة.
+                        // لو الحفظ فشل سيرفريًا بعد كده (رقم مكرر/شبكة)، المودال
+                        // بيفضل مفتوح وبيانات الفورم في الذاكرة زي ما هي (مفيش فقدان
+                        // فعلي)، بس مش هترجع تتسترجع تلقائيًا لو قفل التطبيق فجأة قبل
+                        // إعادة المحاولة — قرار مقصود لتبسيط الخطوة الأولى.
+                        draft.clearDraft();
                     },
                     className:"w-full py-3.5 bg-gradient-to-tr from-premium-gold to-amber-200 text-premium-bg rounded-xl font-black text-sm shadow-md flex items-center justify-center gap-2 disabled:opacity-60 active:scale-95 transition-transform mt-2"
                 },loading?React.createElement(I.Spin):React.createElement(I.Plus),loading?'جاري الحفظ...':'حفظ وتقييد الدعوى')
