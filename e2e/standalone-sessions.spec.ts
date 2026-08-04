@@ -368,7 +368,13 @@ test('10) ربط طرف من جلسة مستقلة بموكل موجود بال�
   // مختلفة عن الموكل المختار) — زرار "تأكيد الربط" لازم يربط على طول.
   await page.getByTestId('link-existing-client-confirm').click();
   const partyName = 'موكل جلسة مستقلة E2E';
-  await expectToast(page, `✅ تم ربط "${partyName}" بـ"${clientName}"`);
+  // 🔒 FIX (تحليل لوجز CI — 4 أغسطس 2026): confirmLinkToExistingClient
+  // (مسار الطرف المحدد الجديد) بتعمل كتابتين متتاليتين على Supabase
+  // (case_parties UPDATE ثم case_sessions UPDATE لأنه الطرف الأساسي) بدل
+  // كتابة واحدة زي المسار القديم. مهلة expectToast الافتراضية (5 ثواني)
+  // كانت بتفشل قبل ما الكتابة التانية تخلص تحت ضغط شبكة الـCI — نفس نمط
+  // البطء الموثّق في تعليقات تست 9 فوق. رفعناها لـ15 ثانية.
+  await expectToast(page, `✅ تم ربط "${partyName}" بـ"${clientName}"`, 15_000);
 
   // الزرار المستقل بتاع الطرف ده لازم يختفي فورًا (linkedIdlePartyIds)
   // والموديل يرجع لخطوة idle (مش يتقفل) — يقدر يربط طرف تاني لو موجود.
