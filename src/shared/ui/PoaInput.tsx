@@ -28,18 +28,27 @@ const onlyArabicLetters = (v: string, max: number) => v.replace(/[^\u0600-\u06FF
  * البيانات القديمة متضيعش، والمستخدم يقدر يعيد صياغتها بالتقسيم الجديد.
  */
 export function parsePoaString(v: string | null | undefined): PoaValue {
-    const raw = (v || '').trim();
-    if (!raw) return { number: '', letters: '', year: '', office: '' };
+    // 🔒 FIX (3 أغسطس 2026): كان .trim() هنا بيتطبّق على السلسلة كلها،
+    // ومكتب التوثيق هو آخر جزء فيها — فأي مسافة يكتبها المستخدم داخل
+    // اسم المكتب (بين كلمتين) كانت تقع آخر حرف في السلسلة كلها لحظيًا
+    // وتُمسح فورًا في كل re-render، فيتحول "مكتب الشهر" إلى "مكتبالشهر"
+    // بلا مسافة أبدًا. الـ.trim() دلوقتي بس لفحص الفراغ، مش بيعدّل raw
+    // نفسها المستخدمة في split.
+    const raw = v || '';
+    if (!raw.trim()) return { number: '', letters: '', year: '', office: '' };
     const parts = raw.split('/');
     if (parts.length === 4) {
         return {
             number: onlyDigitsN(parts[0], 5),
             letters: onlyArabicLetters(parts[1], 2),
             year: onlyDigitsN(parts[2], 4),
-            office: parts[3].trim(),
+            // بلا .trim() هنا — نفس السبب فوق؛ التنظيف من مسافات زايدة في
+            // الطرفين (لو حصلت) بيحصل وقت الحفظ الفعلي في الفورم الأب،
+            // مش هنا في كل ضغطة مفتاح.
+            office: parts[3],
         };
     }
-    return { number: '', letters: '', year: '', office: raw };
+    return { number: '', letters: '', year: '', office: raw.trim() };
 }
 
 /** يجمّع الـ 4 أجزاء في نص واحد جاهز للتخزين في عمود الداتابيز */
