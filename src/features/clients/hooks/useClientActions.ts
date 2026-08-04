@@ -138,13 +138,16 @@ export function useClientActions(params: {
     // شكل form/idFile/poaFile بييجي من NewClientModal — بنسيبه مرن هنا
     // (بيتغير حسب حقول الفورم)، وكل استخدام لعمود DB حقيقي في payload
     // اتوصل بنوع جدول clients الحقيقي.
-    const handleSaveClient = async (form: ClientFormData, idFile: File | null, poaFile: File | null) => {
+    // 🔒 FIX (قرارات مفتوحة — خطة حفظ المسودات، 3 أغسطس 2026): بترجع
+    // Promise<boolean> دلوقتي (كانت من غير return صريح) — عشان
+    // NewClientModal.tsx يمسح مسودة الفورم بس لو نجح الحفظ فعلًا.
+    const handleSaveClient = async (form: ClientFormData, idFile: File | null, poaFile: File | null): Promise<boolean> => {
         if (!form.full_name || !form.full_name.trim()) {
             toast('❌ حقل "اسم الموكل" مطلوب', true);
-            return;
+            return false;
         }
         const nameErr = validateFullNameParts(form.full_name);
-        if (nameErr) { toast(nameErr, true); return; }
+        if (nameErr) { toast(nameErr, true); return false; }
         // 🔒 FIX (تقرير الموثوقية — نتيجة 0): الزرار بيتقفل هنا فورًا، قبل
         // فحص التكرار اللي هو استعلام على النت وممكن ياخد وقت لو النت
         // بطيء. قبل الفيكس ده كان setSavingClient(true) بعد الفحص، فلو
@@ -162,9 +165,9 @@ export function useClientActions(params: {
         } catch (e) {
             showErrorToast('client_duplicate_check', e, 'تعذّر التحقق من بيانات الموكل. حاول مرة أخرى.', 'إضافة موكل');
             setSavingClient(false);
-            return;
+            return false;
         }
-        if (dup.duplicate) { toast(dup.message!, true); setSavingClient(false); return; }
+        if (dup.duplicate) { toast(dup.message!, true); setSavingClient(false); return false; }
         // رفع الصور على Storage (يحتاج نت — مش بنحفظه offline)
         let idUrl: string | null = null, poaUrl: string | null = null;
         if (navigator.onLine) {
@@ -233,7 +236,7 @@ export function useClientActions(params: {
             } else {
                 toast('❌ فشل حفظ بيانات الموكل — تحقق من الاتصال وأعد المحاولة', true);
             }
-            return;
+            return false;
         } else {
             toast('✅ تم إضافة الموكل بنجاح!');
             logActivity(db, 'إضافة موكل', { userName: _userName, entity_type: 'client', details: form.full_name || null, client_name: form.full_name || null });
@@ -345,6 +348,7 @@ export function useClientActions(params: {
         }
 
         setShowClientModal(false);
+        return true;
     };
 
     // ─ حذف موكل نهائيًا من قاعدة البيانات (مرحلة 2 — مكتمل، مفيش كود إضافي مطلوب) ─
