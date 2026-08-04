@@ -104,13 +104,13 @@ function buildChecklist(
 
     plaintiffOk = sidePartiesOk('plaintiff', partyFields, legalTitles, errors);
     defendantOk = sidePartiesOk('defendant', partyFields, legalTitles, errors);
-    plaintiffHint = 'بيانات طرف المدعي/الطاعن ناقصة (اسم/صفة/رقم قومي لأحد الأشخاص، أو المسمى القانوني الجامع)';
-    defendantHint = 'بيانات طرف المدعى عليه/المطعون ضده ناقصة (اسم/صفة/رقم قومي لأحد الأشخاص، أو المسمى القانوني الجامع)';
+    plaintiffHint = 'بيانات الطرف الأول ناقصة (اسم/صفة/رقم قومي لأحد الأشخاص، أو المسمى القانوني الجامع)';
+    defendantHint = 'بيانات الطرف الثاني ناقصة (اسم/صفة/رقم قومي لأحد الأشخاص، أو المسمى القانوني الجامع)';
   } else {
     plaintiffOk = isFilled(caseData.plaintiff);
-    plaintiffHint = 'طرف الدعوى الأول (المدعي/الطاعن) غير مسجّل';
+    plaintiffHint = 'الطرف الأول غير مسجّل';
     defendantOk = isFilled(caseData.defendant);
-    defendantHint = 'طرف الدعوى الثاني (المدعى عليه/المطعون ضده) غير مسجّل';
+    defendantHint = 'الطرف الثاني غير مسجّل';
   }
 
   return [
@@ -140,7 +140,7 @@ function buildChecklist(
     },
     {
       id: 'plaintiff',
-      label: 'اسم المدعي / الطاعن',
+      label: 'اسم الطرف الأول',
       ok: plaintiffOk,
       severity: 'critical',
       hint: plaintiffHint,
@@ -148,7 +148,7 @@ function buildChecklist(
     },
     {
       id: 'defendant',
-      label: 'اسم المدعى عليه / المطعون ضده',
+      label: 'اسم الطرف الثاني',
       ok: defendantOk,
       severity: 'critical',
       hint: defendantHint,
