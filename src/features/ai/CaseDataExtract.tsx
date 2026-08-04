@@ -34,11 +34,11 @@ function buildSummaryText(c: MappedCase, client: MappedClient | null, counts: Ca
   const plaintiffParties = caseParties.filter((p) => p.side === 'plaintiff');
   const defendantParties = caseParties.filter((p) => p.side === 'defendant');
   const plaintiffLine = plaintiffParties.length >= 2
-    ? `المدعي/الطاعن (${plaintiffParties.length} أشخاص):\n${buildFullPartiesText(plaintiffParties)}`
-    : `المدعي/الطاعن: ${val(c.plaintiff_legal_title || c.plaintiff)}${c.plaintiff_role ? ' (' + c.plaintiff_role + ')' : ''}`;
+    ? `الطرف الأول (${plaintiffParties.length} أشخاص):\n${buildFullPartiesText(plaintiffParties)}`
+    : `الطرف الأول: ${val(c.plaintiff_legal_title || c.plaintiff)}${c.plaintiff_role ? ' (' + c.plaintiff_role + ')' : ''}`;
   const defendantLine = defendantParties.length >= 2
-    ? `المدعى عليه (${defendantParties.length} أشخاص):\n${buildFullPartiesText(defendantParties)}`
-    : `المدعى عليه: ${val(c.defendant_legal_title || c.defendant)}${c.defendant_role ? ' (' + c.defendant_role + ')' : ''}`;
+    ? `الطرف الثاني (${defendantParties.length} أشخاص):\n${buildFullPartiesText(defendantParties)}`
+    : `الطرف الثاني: ${val(c.defendant_legal_title || c.defendant)}${c.defendant_role ? ' (' + c.defendant_role + ')' : ''}`;
   const lines = [
     `القضية: ${val(c.title)}`,
     `رقم القيد: ${val(c.number)} — سنة ${val(c.year)}`,
@@ -138,15 +138,15 @@ function CaseDataExtract({ cases, clients }: CaseDataExtractProps) {
                   );
                 return React.createElement(React.Fragment, null,
                   plaintiffParties.length >= 2
-                    ? multiPersonBlock('المدعي/الطاعن', plaintiffParties.length, buildFullPartiesText(plaintiffParties))
+                    ? multiPersonBlock('الطرف الأول', plaintiffParties.length, buildFullPartiesText(plaintiffParties))
                     : React.createElement(React.Fragment, null,
-                        React.createElement(InfoRow, { label: 'المدعي / الطاعن', value: val(selectedCase.plaintiff_legal_title || selectedCase.plaintiff) }),
+                        React.createElement(InfoRow, { label: 'الطرف الأول', value: val(selectedCase.plaintiff_legal_title || selectedCase.plaintiff) }),
                         React.createElement(InfoRow, { label: 'صفته', value: val(selectedCase.plaintiff_role) }),
                       ),
                   defendantParties.length >= 2
-                    ? multiPersonBlock('المدعى عليه', defendantParties.length, buildFullPartiesText(defendantParties))
+                    ? multiPersonBlock('الطرف الثاني', defendantParties.length, buildFullPartiesText(defendantParties))
                     : React.createElement(React.Fragment, null,
-                        React.createElement(InfoRow, { label: 'المدعى عليه', value: val(selectedCase.defendant_legal_title || selectedCase.defendant) }),
+                        React.createElement(InfoRow, { label: 'الطرف الثاني', value: val(selectedCase.defendant_legal_title || selectedCase.defendant) }),
                         React.createElement(InfoRow, { label: 'صفته', value: val(selectedCase.defendant_role) }),
                       ),
                 );
