@@ -149,6 +149,11 @@ test('تحديث جلسة مستقلة مربوطة بموكل — الجلسة 
   await page.getByTestId('client-edit-trigger').click();
   await page.getByTestId('edit-client-name').fill(updatedClientName);
   await page.getByTestId('save-client-edit-button').click();
+  // 🔒 FIX (تحليل لوجز CI — 4 أغسطس 2026): ضغطة save-client-edit-button
+  // بقت بتفتح شاشة تأكيد الأثر بس (مش بتحفظ على طول) من غير ما التست ده
+  // يتحدّث — نفس الفيكس اللي في clients.spec.ts. المودال كان بيفضل فاتح
+  // ويقفل الضغط على nav-calendar بعدها (خطوة 4) فيعلّق لحد الـtimeout.
+  await page.getByTestId('edit-client-impact-confirm').click();
   await expect(page.getByTestId('save-client-edit-button')).not.toBeVisible({ timeout: 10_000 });
 
   // 4) نرجع للتقويم، نفتح الجلسة، ونستخدم "⚡ تحديث الجلسة"
