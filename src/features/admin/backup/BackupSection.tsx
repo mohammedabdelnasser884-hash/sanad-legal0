@@ -11,7 +11,7 @@ interface BackupSectionProps {
   fetchBackups: () => void | Promise<void>;
   loadingBackups: boolean;
   backups: BackupRow[];
-  handleDownloadBackup: (backup: BackupRow) => void;
+  handleDownloadBackup: (backup: BackupRow) => void | Promise<void>;
   setConfirmRestore: React.Dispatch<React.SetStateAction<BackupRow | null>>;
 }
 
