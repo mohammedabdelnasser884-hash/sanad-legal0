@@ -177,6 +177,37 @@ export default async function globalTeardown(): Promise<void> {
     if (clientsErr) console.warn('  ⚠️ فشل حذف من clients:', clientsErr.message);
     counts.clients = clientsCount ?? 0;
 
+    // 🔒 NEW (تنظيف تلقائي لجدول backups — 1 أغسطس 2026): admin-backup.spec.ts
+    // بيعمل نسخة احتياطية حقيقية (export كامل لكل جداول التينانت) في كل
+    // تشغيلة CI، وصفوف backups مالهاش عمود عنوان/اسم بيحمل ماركر "اختبار E2E"
+    // زي باقي الجداول فوق — يعني كانت بتتراكم من غير أي تنظيف تلقائي، بتزيد
+    // صف واحد على الأقل (أو أكتر) كل رن، لحد ما تصبح مشكلة أداء حقيقية على
+    // مدار الوقت. بدل ما نحذف بـ`.gte('created_at', startTime)` لوحده (خطر:
+    // ممكن يمسح نسخة حقيقية عملها أدمن فعلي بالصدفة في نفس اللحظة)، بنحدد
+    // الـtenant_id بتاع حساب E2E_TEST_EMAIL نفسه أولاً عن طريق profiles —
+    // فالحذف مقصور على نسخ التينانت التجريبي فقط، بالإضافة لشرط الوقت.
+    const e2eEmail = process.env.E2E_TEST_EMAIL;
+    if (!e2eEmail) {
+      console.warn('  ⚠️ E2E_TEST_EMAIL مش موجود — تخطّي تنظيف backups.');
+    } else {
+      const { data: e2eProfile, error: profileErr } = await supabase
+        .from('profiles')
+        .select('tenant_id')
+        .eq('email', e2eEmail)
+        .maybeSingle();
+      if (profileErr || !e2eProfile?.tenant_id) {
+        console.warn('  ⚠️ تعذر تحديد tenant_id بتاع حساب E2E — تخطّي تنظيف backups.');
+      } else {
+        const { error: backupsErr, count: backupsCount } = await supabase
+          .from('backups')
+          .delete({ count: 'exact' })
+          .eq('tenant_id', e2eProfile.tenant_id)
+          .gte('created_at', startTime);
+        if (backupsErr) console.warn('  ⚠️ فشل حذف من backups:', backupsErr.message);
+        counts.backups = backupsCount ?? 0;
+      }
+    }
+
     console.log('[global-teardown] تم التنظيف:');
     for (const [table, n] of Object.entries(counts)) {
       if (n > 0) console.log(`  - ${table}: ${n}`);
