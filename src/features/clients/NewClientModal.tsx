@@ -26,7 +26,7 @@ interface NewClientForm {
 
 interface NewClientModalProps {
     onClose: () => void;
-    onSave: (form: NewClientForm, idFile: File | null, poaFile: File | null) => void;
+    onSave: (form: NewClientForm, idFile: File | null, poaFile: File | null) => void | boolean | Promise<void | boolean>;
     loading?: boolean;
     // ⚡ NEW: بيانات مبدئية بتيجي من قضية/جلسة مستقلة (اسم المدعي، رقمه
     // القومي، رقم توكيله) — بتتعمل بيها pre-fill للفورم بدل ما يبدأ فاضي.
@@ -87,7 +87,7 @@ function NewClientModal({onClose,onSave,loading,initialData,contextLabel}: NewCl
     // نفعّله (الفورم ممكن يبقى فيه بيانات مكتوبة/مُحمّلة مسبقًا)، حتى لو
     // الحفظ التلقائي نفسه معطّل ليه. useUnsavedChangesGuard بياخد أول قيمة
     // لـform (وقت الفتح) كـbaseline تلقائيًا، مفيش داعي لـstate إضافي.
-    const guardedClose = useUnsavedChangesGuard(form, form, onClose);
+    const { guardedClose, confirmModal } = useUnsavedChangesGuard(form, form, onClose);
 
     const phoneWarn = useMemo(()=>validatePhone(form.phone), [form.phone]);
     const phoneWarn2 = useMemo(()=>validatePhone(form.phone2), [form.phone2]);
@@ -114,7 +114,9 @@ function NewClientModal({onClose,onSave,loading,initialData,contextLabel}: NewCl
     // بيعلق). z-[80] أعلى من أي مودال ممكن NewClientModal يتفتح من جواه
     // (z-50/z-[60]/z-[70])، وأقل من تأكيدات الحذف (z-[90]) وتأكيد الخروج
     // (z-[9999]) عمدًا — لسه ممكن يظهروا فوقه لو احتاج الأمر.
-    return React.createElement('div',{className:"fixed inset-0 z-[80] flex items-end justify-center bg-black/70 backdrop-blur-sm",onClick:(e: React.MouseEvent<HTMLDivElement>) =>{if(e.target===e.currentTarget)guardedClose();}},
+    return React.createElement(React.Fragment, null,
+    confirmModal,
+    React.createElement('div',{className:"fixed inset-0 z-[80] flex items-end justify-center bg-black/70 backdrop-blur-sm",onClick:(e: React.MouseEvent<HTMLDivElement>) =>{if(e.target===e.currentTarget)guardedClose();}},
         React.createElement('div',{className:"bg-premium-card w-full max-w-lg rounded-t-3xl border-t border-white/10 p-6 pb-10 shadow-2xl slide-up max-h-[90vh] overflow-y-auto no-scrollbar"},
             React.createElement('div',{className:"w-10 h-1 bg-white/20 rounded-full mx-auto mb-5"}),
             React.createElement('div',{className:"flex items-center justify-between mb-5"},
@@ -204,7 +206,7 @@ function NewClientModal({onClose,onSave,loading,initialData,contextLabel}: NewCl
                 React.createElement('button',{
                     disabled:loading,
                     'data-testid':'save-client-button',
-                    onClick:()=>{
+                    onClick:async ()=>{
                         if(!form.full_name.trim()){toast('يرجى إدخال اسم الموكل',true);return;}
                         const nameErr = validateFullNameParts(form.full_name);
                         if(nameErr){toast(nameErr,true);return;}
@@ -214,16 +216,17 @@ function NewClientModal({onClose,onSave,loading,initialData,contextLabel}: NewCl
                         if(form.national_id.length!==14){toast('⚠️ الرقم القومي لازم يكون 14 رقم بالظبط',true);return;}
                         const warnings = [phoneWarn, phoneWarn2, emailWarn].filter(Boolean);
                         if(warnings.length>0) toast('⚠️ تنبيه: '+warnings[0]+' — تم الحفظ رغم ذلك');
-                        onSave(form,idFile,poaFile);
-                        // 🆕 (خطة حفظ المسودات — 1 أغسطس 2026): نفس قرار فورمات
-                        // القضايا — مسح المسودة بمجرد إرسال طلب الحفظ.
-                        draft.clearDraft();
+                        const result = await onSave(form,idFile,poaFile);
+                        // 🔒 FIX (قرارات مفتوحة — خطة حفظ المسودات، 3 أغسطس 2026):
+                        // بننتظر نتيجة onSave ونمسح المسودة بس لو نجح الحفظ فعلاً
+                        // (result !== false)، مش بمجرد الضغط على الزرار زي الأول.
+                        if (result !== false) draft.clearDraft();
                     },
                     className:"w-full py-3.5 bg-gradient-to-tr from-emerald-500 to-emerald-400 text-white rounded-xl font-black text-sm shadow-md flex items-center justify-center gap-2 disabled:opacity-60 active:scale-95 transition-transform mt-2"
                 },loading?React.createElement(I.Spin):React.createElement(I.Person),loading?'جاري الرفع والحفظ...':'حفظ الموكل ☁️')
             )
         )
-    );
+    ));
 }
 
 export default NewClientModal;
