@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { login, createCase, createStandaloneSession, expectToast } from './utils';
+import { login, createCase, createStandaloneSession, createClient, expectToast } from './utils';
 
 // المرحلة 2 من خطة تنفيذ اختبارات E2E المقسمة — الجلسة المستقلة
 // (NewStandaloneSessionModal.tsx + StandaloneSessionDetailModal.tsx).
@@ -331,3 +331,48 @@ test('9) ربط الجلسة بقضية جديدة من شاشة التفاصي�
   // شاشة التفاصيل (شرط !hasCase في الفوتر).
   await expect(page.getByTestId('standalone-session-link-trigger')).not.toBeVisible({ timeout: 10_000 });
 });
+
+// 🆕 (Phase 3 + Phase 4 — خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026):
+// "🔗 ربط بموكل موجود بالفعل" بقى بيربط الطرف (المدعي ⭐ من
+// createStandaloneSession — الطرف الوحيد في idlePartyList هنا) بموكل موجود
+// فعلاً بالفعل، عن طريق linkClientToSessionParty (case_parties.client_id +
+// case_sessions.client_id لأنه الطرف الأساسي) — بدل تحديث الجلسة كلها
+// بحقول حرة زي المسار القديم. بيغطي الزرار الجديد (idlePartyList-per-party)
+// وخطوة searching (بدون تعارض لأن مفيش بيانات حرة قديمة في case_parties)
+// وصولاً لتوست النجاح.
+test('10) ربط طرف من جلسة مستقلة بموكل موجود بالفعل (🔗 ربط بموكل موجود)', async ({ page }) => {
+  await login(page);
+  const clientName = `موكل E2E جاهز للربط - ${Date.now()}`;
+  await createClient(page, clientName);
+
+  const title = `اختبار E2E - ربط بموكل موجود - ${Date.now()}`;
+  await createStandaloneSession(page, title);
+
+  await openTodayInCalendar(page);
+  const card = page.getByTestId('calendar-session-card').filter({ hasText: title });
+  await card.first().click();
+  await expect(page.getByTestId('standalone-session-link-trigger')).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('standalone-session-link-trigger').click();
+  await page.getByTestId('link-session-modal').waitFor({ state: 'visible', timeout: 10_000 });
+
+  // idlePartyList فيها طرف واحد بس (المدعي ⭐ اللي عمله createStandaloneSession)
+  // → single=true، فالـ testid ليه لاحقة id الطرف بس النص زي القديم بالظبط.
+  await page.locator('[data-testid^="link-session-search-existing"]').first().click();
+
+  await page.getByTestId('link-session-client-search').fill(clientName);
+  const clientOption = page.locator('[data-testid^="link-session-client-option-"]').filter({ hasText: clientName });
+  await clientOption.first().waitFor({ state: 'visible', timeout: 10_000 });
+  await clientOption.first().click();
+
+  // مفيش تنبيه تعارض متوقّع هنا (case_parties لسه مفيهاش بيانات حرة قديمة
+  // مختلفة عن الموكل المختار) — زرار "تأكيد الربط" لازم يربط على طول.
+  await page.getByTestId('link-existing-client-confirm').click();
+  const partyName = 'موكل جلسة مستقلة E2E';
+  await expectToast(page, `✅ تم ربط "${partyName}" بـ"${clientName}"`);
+
+  // الزرار المستقل بتاع الطرف ده لازم يختفي فورًا (linkedIdlePartyIds)
+  // والموديل يرجع لخطوة idle (مش يتقفل) — يقدر يربط طرف تاني لو موجود.
+  await expect(page.getByTestId('link-session-modal')).toBeVisible();
+  await expect(page.locator('[data-testid^="link-session-search-existing"]')).toHaveCount(0);
+});
+
