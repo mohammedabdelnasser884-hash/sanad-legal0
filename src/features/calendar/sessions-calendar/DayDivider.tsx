@@ -6,10 +6,9 @@ interface DayDividerProps {
     monthName: string;
     isToday: boolean;
     sessCount: number;
-    isConflict: boolean;
 }
 
-function DayDivider({ dayName, dayNum, monthName, isToday, sessCount, isConflict }: DayDividerProps) {
+function DayDivider({ dayName, dayNum, monthName, isToday, sessCount }: DayDividerProps) {
     const goldColor = isToday ? 'rgba(212,175,55,0.9)' : 'rgba(212,175,55,0.4)';
     const lineStyle = {
         position: 'absolute' as const,
@@ -54,10 +53,6 @@ function DayDivider({ dayName, dayNum, monthName, isToday, sessCount, isConflict
             ),
             // badges
             React.createElement('div', { className: "flex items-center gap-1.5" },
-                isConflict && React.createElement('span', {
-                    className: "text-[9px] font-black px-2 py-1 rounded-lg",
-                    style: { background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }
-                }, "⚠️ تعارض"),
                 React.createElement('span', {
                     className: "text-[10px] font-bold px-2.5 py-1 rounded-lg",
                     style: {
