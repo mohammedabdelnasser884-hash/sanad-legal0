@@ -217,7 +217,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
     // تحذير قبل الإغلاق — بس لفورم الإدخال الأساسي (مش خطوات الـwizard اللي
     // بعد الحفظ الناجح، راجع onSkipOrClose/postSave تحت — البيانات هناك
     // اتحفظت فعليًا فمفيش داعي لتحذير).
-    const guardedClose = useUnsavedChangesGuard(draftData, { form, linkMode, selectedCaseId, parties: partyFields.parties, legalTitles: partyFields.legalTitles }, onClose);
+    const { guardedClose, confirmModal } = useUnsavedChangesGuard(draftData, { form, linkMode, selectedCaseId, parties: partyFields.parties, legalTitles: partyFields.legalTitles }, onClose);
 
     const finalCaseType = form.case_type === 'أخرى' ? (form.case_type_custom || 'أخرى') : form.case_type;
     const finalCourtLevel = form.court_level === 'أخرى' ? (form.court_level_other || '') : form.court_level;
@@ -501,8 +501,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
             style: { background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)' }
         },
             React.createElement('div', {
-                className: 'w-full max-w-sm rounded-3xl p-6 space-y-4',
-                style: { background: '#0f1623', border: '1px solid rgba(255,255,255,0.08)' }
+                className: 'w-full max-w-sm rounded-3xl p-6 space-y-4 bg-premium-card border border-white/8',
             },
 
                 // ── Step 1: الخيارات الأساسية (قبل إنشاء القضية) ──
@@ -669,8 +668,8 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
         onClick: (e: React.MouseEvent<HTMLDivElement>) => { if (e.target === e.currentTarget) guardedClose(); }
     },
         React.createElement('div', {
-            className: 'w-full max-w-lg rounded-t-3xl overflow-hidden',
-            style: { background: '#0f1623', border: '1px solid rgba(255,255,255,0.08)', maxHeight: '92vh' },
+            className: 'w-full max-w-lg rounded-t-3xl overflow-hidden bg-premium-card border border-white/8',
+            style: { maxHeight: '92vh' },
             'data-testid': 'new-session-modal'
         },
             // ── هيدر ──
@@ -915,6 +914,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
 
     return React.createElement(React.Fragment, null,
         createPortal(modal, document.body),
-        postSave
+        postSave,
+        confirmModal
     );
 }
