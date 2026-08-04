@@ -4,7 +4,7 @@ import { logActivity } from '../../../shared/lib/dataAccess';
 import { checkCaseNumberDuplicate } from '../../../shared/lib/caseValidation';
 import { showErrorToast } from '../../../shared/lib/errorReporting';
 import { db } from '../../../supabaseClient';
-import { withFkOfflineSentinel } from '../../calendar/hooks/caseSessionLinkingShared';
+import { withFkOfflineSentinel, linkClientToParty } from '../../calendar/hooks/caseSessionLinkingShared';
 import type { Dispatch, SetStateAction } from 'react';
 import type { ClientRow, ProfileRow } from '../../../types';
 import type { NavigationState } from '../../../useNavigation';
@@ -145,13 +145,18 @@ export function useCaseActions(params: {
     // Record<string, any> — بيغطي بالظبط الحقول اللي NewCaseModal بيبعتها،
     // وكل استخدام لعمود DB حقيقي (زي payload تحت) موصول بنوع الجدول الحقيقي
     // من database.types.ts.
-    const handleSaveCase = async (form: CaseFormSubmitData) => {
+    // 🔒 FIX (قرارات مفتوحة — خطة حفظ المسودات، 3 أغسطس 2026): بترجع
+    // Promise<boolean> دلوقتي (كانت من غير return صريح، يعني undefined في
+    // كل الحالات) — عشان NewCaseModal.tsx يعرف فعليًا نجح الحفظ ولا لأ،
+    // ويمسح المسودة بس لو نجح (نفس فلسفة handleUpdateCase تحت اللي كانت
+    // بترجع boolean من الأول).
+    const handleSaveCase = async (form: CaseFormSubmitData): Promise<boolean> => {
         // 🔒 فحص متزامن أولًا — قبل أي setState أو await — عشان يمنع دخول
         // ثاني نداء لو دبل-كليك سريع حصل فعليًا قبل ما disabled يتفعّل.
-        if (creatingCaseGuard) return;
+        if (creatingCaseGuard) return false;
         if (!form.title || !form.title.trim()) {
             toast('❌ حقل "موضوع ومسمى الدعوى" مطلوب', true);
-            return;
+            return false;
         }
         creatingCaseGuard = true;
         setSavingCase(true);
@@ -170,9 +175,9 @@ export function useCaseActions(params: {
             showErrorToast('case_number_duplicate_check', e, 'تعذّر التحقق من رقم القيد. حاول مرة أخرى.', 'إضافة قضية');
             creatingCaseGuard = false;
             setSavingCase(false);
-            return;
+            return false;
         }
-        if (caseDup.duplicate) { toast(caseDup.message!, true); creatingCaseGuard = false; setSavingCase(false); return; }
+        if (caseDup.duplicate) { toast(caseDup.message!, true); creatingCaseGuard = false; setSavingCase(false); return false; }
         // 🔒 FIX (تتبع زر "إضافة قضية" — 18 يوليو 2026): معرّف مؤقت client-side
         // فريد لكل عملية إضافة قضية أوفلاين. بيتبعت مع القضية نفسها (وبيتشال
         // قبل أي INSERT حقيقي — شوف stripOfflineSentinels في offlineQueue.ts)،
@@ -326,7 +331,7 @@ export function useCaseActions(params: {
             }
             creatingCaseGuard = false;
             setSavingCase(false);
-            return;
+            return false;
         } else {
             // ── تسجيل الجلسة الأولى في case_sessions لو فيه تاريخ ──
             // بناخد id القضية مباشرة من نتيجة الإدراج (بدل التخمين
@@ -387,8 +392,8 @@ export function useCaseActions(params: {
             caseMsg += `📂 <b>التصنيف:</b> ${escapeTelegramHtml(form.type || '—')}\n`;
             // ⚡ FIX: الصفة بقت حقل منفصل (plaintiff_role/defendant_role) بدل ما تكون
             // متضمنة جوه نص plaintiff/defendant — نضيفها هنا صراحةً عشان الرسالة متفقدش المعلومة.
-            if (form.plaintiff) caseMsg += `🟢 <b>المدعي:</b> ${escapeTelegramHtml(form.plaintiff)}${form.plaintiff_role ? ' — ' + escapeTelegramHtml(form.plaintiff_role) : ''}\n`;
-            if (form.defendant) caseMsg += `🔴 <b>المدعى عليه:</b> ${escapeTelegramHtml(form.defendant)}${form.defendant_role ? ' — ' + escapeTelegramHtml(form.defendant_role) : ''}\n`;
+            if (form.plaintiff) caseMsg += `🟢 <b>الطرف الأول:</b> ${escapeTelegramHtml(form.plaintiff)}${form.plaintiff_role ? ' — ' + escapeTelegramHtml(form.plaintiff_role) : ''}\n`;
+            if (form.defendant) caseMsg += `🔴 <b>الطرف الثاني:</b> ${escapeTelegramHtml(form.defendant)}${form.defendant_role ? ' — ' + escapeTelegramHtml(form.defendant_role) : ''}\n`;
             if (form.date) caseMsg += `📆 <b>أقرب جلسة:</b> ${escapeTelegramHtml(form.date)}\n`;
             sendTelegram(caseMsg);
             fetchCases(0, casesFilter);
@@ -396,6 +401,7 @@ export function useCaseActions(params: {
         creatingCaseGuard = false;
         setSavingCase(false);
         setShowCaseModal(false);
+        return true;
     };
 
     // ─ حذف قضية نهائيًا من قاعدة البيانات (مرحلة 2 — كاسكيد كامل، ومرحلة 3 — M-3: عكس الترتيب) ─
@@ -732,8 +738,8 @@ export function useCaseActions(params: {
                 updMsg += `📋 <b>رقم القيد:</b> ${escapeTelegramHtml(form.number || '—')}\n`;
                 updMsg += `📌 <b>الموضوع:</b> ${escapeTelegramHtml(form.title)}\n`;
                 updMsg += `🏛 <b>المحكمة:</b> ${escapeTelegramHtml(form.court || '—')}\n`;
-                if (form.plaintiff) updMsg += `🟢 <b>المدعي:</b> ${escapeTelegramHtml(form.plaintiff)}${form.plaintiff_role ? ' — ' + escapeTelegramHtml(form.plaintiff_role) : ''}\n`;
-                if (form.defendant) updMsg += `🔴 <b>المدعى عليه:</b> ${escapeTelegramHtml(form.defendant)}${form.defendant_role ? ' — ' + escapeTelegramHtml(form.defendant_role) : ''}\n`;
+                if (form.plaintiff) updMsg += `🟢 <b>الطرف الأول:</b> ${escapeTelegramHtml(form.plaintiff)}${form.plaintiff_role ? ' — ' + escapeTelegramHtml(form.plaintiff_role) : ''}\n`;
+                if (form.defendant) updMsg += `🔴 <b>الطرف الثاني:</b> ${escapeTelegramHtml(form.defendant)}${form.defendant_role ? ' — ' + escapeTelegramHtml(form.defendant_role) : ''}\n`;
                 if (form.date) updMsg += `📆 <b>الجلسة القادمة:</b> ${escapeTelegramHtml(form.date)}\n`;
                 sendTelegram(updMsg);
                 fetchCases(0, casesFilter);
@@ -808,6 +814,39 @@ export function useCaseActions(params: {
         fetchCases(0, casesFilter);
     };
 
+    // ─ ربط طرف بعينه (case_parties) بموكل موجود ─ (خطة توحيد منطق إنشاء/
+    // ربط الموكل، Phase 3 — 4 أغسطس 2026)
+    // ⚡ NEW: نفس فكرة handleLinkClient فوق، بس بيستخدم linkClientToParty
+    // المشتركة (case_parties.client_id للطرف ده بس + cases.client_id لو
+    // الطرف أساسي فقط) بدل ما يحدّث القضية كلها زي موكل واحد — بيسمح بربط
+    // موكل موجود لأي طرف من أطراف القضية (مش بس أول طرف)، بنفس فلسفة
+    // onCreateAndLinkClientForParty (إنشاء موكل جديد لطرف بعينه) الموجودة
+    // بالفعل. caseId لازم يكون id حقيقي دايمًا (الزرار بيظهر بس جوه
+    // InfoSection.tsx لقضية محفوظة بالفعل). onAfterLink بتتنادى بعد نجاح
+    // الربط عشان caseParties تتحدّث فورًا (نفس نمط onCreateAndLinkClientForParty
+    // في CaseDetailView.tsx).
+    const handleLinkClientForParty = async (caseId: string, partyId: string, clientId: string, isPrimaryParty: boolean, onAfterLink: () => void) => {
+        const existingCase = cases.find((c) => c.id === caseId);
+        const linkedClient = clients.find((cl) => cl.id === clientId);
+        const result = await linkClientToParty(partyId, clientId, isPrimaryParty, caseId, existingCase?.title || undefined);
+        if (!result.ok) {
+            showErrorToast('party_client_link', new Error('link party to existing client failed'), 'تعذّر ربط الموكل بهذا الطرف. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'ربط طرف بموكل');
+            return;
+        }
+        toast('✅ تم ربط الطرف بالموكل' + (linkedClient?.full_name ? ` "${linkedClient.full_name}"` : ''));
+        logActivity(db, 'ربط طرف بموكل', {
+            userName: _userName,
+            entity_type: 'case', entity_id: caseId, details: existingCase?.title || null,
+            case_name: existingCase?.title || null,
+            client_name: linkedClient?.full_name || null,
+        });
+        // ⚡ لو الطرف أساسي، cases.client_id اتحدّث كمان جوه linkClientToParty —
+        // بنعمل fetchCases عشان أي مكان تاني بيعرض القضية (زي الليستة) يتحدّث،
+        // بنفس فلسفة handleLinkClient فوق.
+        if (isPrimaryParty) fetchCases(0, casesFilter);
+        onAfterLink();
+    };
+
     // ─ فك ربط قضية عن موكلها ─
     // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 4): عكس handleLinkClient
     // بالظبط — بتصفّر عمود client_id بس (ترجعه NULL) من غير ما تلمس أي
@@ -859,5 +898,5 @@ export function useCaseActions(params: {
     // الزرار بتاعها في InfoSection.tsx بقى بيستدعي onCreateAndLinkClient
     // اللي هو دلوقتي مجرد فتح-موديل، مش عملية حفظ.
 
-    return { handleLogout, handleSaveCase, handleDeleteCase, handlePermanentDeleteCase, handleRestoreCase, handleUpdateCase, handleLinkClient, handleUnlinkClient };
+    return { handleLogout, handleSaveCase, handleDeleteCase, handlePermanentDeleteCase, handleRestoreCase, handleUpdateCase, handleLinkClient, handleLinkClientForParty, handleUnlinkClient };
 }
