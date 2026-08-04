@@ -177,11 +177,12 @@ export function validateParties(
     (['plaintiff', 'defendant'] as const).forEach((side) => {
         const countOnSide = parties.filter((p) => p.side === side).length;
         if (countOnSide >= 2 && !legalTitles[side].trim()) {
+            const sideLabel = side === 'plaintiff' ? 'الطرف الأول (المدعي)' : 'الطرف الثاني (المدعى عليه)';
             errors.push({
                 partyId: '',
                 field: 'legal_title',
                 side,
-                message: '⚠️ يُكتب فقط في حالة كون أي من الطرفين الأول أو الثاني أكثر من شخص (مثل الورثة أو الشركاء أو متهمين أو مدعيين)',
+                message: `⚠️ ${sideLabel} فيه أكثر من شخص — لازم تكتب "المسمى القانوني" الجامع لهذا الطرف`,
             });
         }
     });
