@@ -84,7 +84,7 @@ export function useAIDocumentGenerator({
                 if (sideParties.length < 2) return '';
                 const list = buildFullPartiesText(sideParties);
                 if (!list) return '';
-                const sideLabel = side === 'plaintiff' ? 'المدعي/الطاعن' : 'المدعى عليه';
+                const sideLabel = side === 'plaintiff' ? 'الطرف الأول' : 'الطرف الثاني';
                 return `قائمة كاملة بأشخاص طرف ${sideLabel} (لازم ذكر كل شخص منهم بالاسم صراحةً في المستند، مش المسمى الجامع بس):\n${list}`;
             })
             .filter(Boolean)
@@ -304,8 +304,8 @@ ${PDF_FONT_LINK}
   </div>
 
   <div class="meta-grid">
-    <div class="meta-row"><span class="meta-label">المدعي:</span><span class="meta-value">${escapeHtml(docFields.plaintiff || '—')}</span></div>
-    <div class="meta-row"><span class="meta-label">المدعى عليه:</span><span class="meta-value">${escapeHtml(docFields.defendant || '—')}</span></div>
+    <div class="meta-row"><span class="meta-label">الموكل:</span><span class="meta-value">${escapeHtml(docFields.plaintiff || '—')}${docFields.plaintiffRole ? ' — ' + escapeHtml(docFields.plaintiffRole) : ''}</span></div>
+    <div class="meta-row"><span class="meta-label">الخصم:</span><span class="meta-value">${escapeHtml(docFields.defendant || '—')}${docFields.defendantRole ? ' — ' + escapeHtml(docFields.defendantRole) : ''}</span></div>
     <div class="meta-row"><span class="meta-label">رقم الدعوى:</span><span class="meta-value">${escapeHtml(docFields.caseNumber || selectedCase?.number || '—')}</span></div>
     <div class="meta-row"><span class="meta-label">المحكمة:</span><span class="meta-value">${escapeHtml(docFields.court || selectedCase?.court || activeCfg?.courts?.[0] || '—')}</span></div>
     <div class="meta-row"><span class="meta-label">تاريخ الجلسة:</span><span class="meta-value">${escapeHtml(today)}</span></div>
