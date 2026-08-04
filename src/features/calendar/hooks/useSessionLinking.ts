@@ -616,7 +616,8 @@ export function useSessionLinking(
   };
 
   const confirmLinkToExistingClient = async () => {
-    if (!selectedExistingClient) return;
+    console.error('[DEBUG confirmLinkToExistingClient] 0) دخول الدالة', 'selectedExistingClient=' + (selectedExistingClient ? selectedExistingClient.id : 'null'), 'existingClientTargetPartyId=' + existingClientTargetPartyId);
+    if (!selectedExistingClient) { console.error('[DEBUG confirmLinkToExistingClient] 0.1) رجوع مبكر — مفيش selectedExistingClient'); return; }
     setLinkingExisting(true);
     try {
       // ⚡ NEW (Phase 3 — 4 أغسطس 2026): existingClientTargetPartyId متحدد
@@ -630,14 +631,20 @@ export function useSessionLinking(
       const targetParty = existingClientTargetPartyId
         ? idlePartyList.find((p) => p.id === existingClientTargetPartyId)
         : undefined;
+      console.error('[DEBUG confirmLinkToExistingClient] 1) بعد حساب targetParty', 'found=' + (targetParty ? targetParty.id : 'undefined'), 'idlePartyListIds=' + idlePartyList.map((p) => p.id).join(','));
       if (targetParty) {
         const isPrimary = idlePartyList[0]?.id === targetParty.id;
+        console.error('[DEBUG confirmLinkToExistingClient] 2) قبل linkClientToSessionParty', 'isPrimary=' + isPrimary);
         const result = await linkClientToSessionParty(targetParty.id, selectedExistingClient.id, isPrimary, session.id);
+        console.error('[DEBUG confirmLinkToExistingClient] 3) بعد linkClientToSessionParty', 'ok=' + result.ok);
         if (!result.ok) {
+          console.error('[DEBUG confirmLinkToExistingClient] 3.1) result.ok=false — هيعرض showErrorToast');
           showErrorToast('session_client_link', new Error('link party to existing client failed'), `تعذّر ربط "${targetParty.name}" بالموكل. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.`, 'ربط طرف بموكل');
           return;
         }
+        console.error('[DEBUG confirmLinkToExistingClient] 4) قبل toast النجاح');
         toast(`✅ تم ربط "${targetParty.name}" بـ"${selectedExistingClient.client_name || selectedExistingClient.full_name || '—'}"`);
+        console.error('[DEBUG confirmLinkToExistingClient] 5) بعد toast النجاح');
         setLinkedIdlePartyIds((prev) => new Set(prev).add(targetParty.id));
         setExistingClientTargetPartyId(null);
         setClientSearch(''); setSearchResults([]); setSelectedExistingClient(null);
@@ -682,7 +689,7 @@ export function useSessionLinking(
       // ما شاشة "🎉 تم بنجاح" تتعرض خالص. onDone() هيتنادى لما المستخدم
       // يدوس "إغلاق" (onFullClose بيندهه).
       setClientStep('done');
-    } catch { toast('❌ خطأ غير متوقع', true); }
+    } catch (e) { console.error('[DEBUG confirmLinkToExistingClient] EXCEPTION', e); toast('❌ خطأ غير متوقع', true); }
     finally { setLinkingExisting(false); }
   };
 
