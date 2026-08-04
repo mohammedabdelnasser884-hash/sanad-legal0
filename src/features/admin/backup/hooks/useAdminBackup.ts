@@ -91,11 +91,22 @@ export function useAdminBackup(profile?: ProfileRow | null) {
   const [restoreConfirmText, setRestoreConfirmText] = useState('');
   const [restoringBackup, setRestoringBackup] = useState(false);
 
+  // 🔒 FIX (تشخيص لوجز CI — 4 أغسطس 2026): كانت بتعمل select('*') وده
+  // بيجيب عمود data كمان (اللي فيه نسخة JSON كاملة من كل جداول المكتب —
+  // ممكن يكون ميجابايتات لكل صف). مع تراكم صفوف backups بمرور الوقت (الجدول
+  // ده مش متضمن في أي تنظيف دوري)، الكويري البسيطة دي بقت بتاخد وقت طويل
+  // كفاية إنها تضرب statement timeout في بوستجرس (راجع "canceling statement
+  // due to statement timeout" في Supabase logs) — مجرد عرض قائمة النسخ كان
+  // بيجر كل بيانات كل نسخة من غير أي داعي. الحل: القايمة بتجيب الأعمدة
+  // الخفيفة بس (من غير data)، وأي عملية محتاجة المحتوى الكامل (تنزيل/استعادة)
+  // بتجيبه لوحده بصف واحد وقت الحاجة الفعلية (راجع handleDownloadBackup/
+  // handleRestoreBackup تحت).
   const fetchBackups = useCallback(async () => {
     setLoadingBackups(true);
     const { data } = await db.from('backups')
-      .select('*').order('created_at', { ascending: false }).limit(20);
-    if (data) setBackups(data);
+      .select('id,created_at,created_by,created_by_name,tables_count,rows_count,size_kb')
+      .order('created_at', { ascending: false }).limit(20);
+    if (data) setBackups(data as unknown as BackupRow[]);
     setLoadingBackups(false);
   }, []);
 
@@ -167,13 +178,23 @@ export function useAdminBackup(profile?: ProfileRow | null) {
   };
 
   // ── تنزيل نسخة ──
-  const handleDownloadBackup = (backup: BackupRow) => {
-    const json = JSON.stringify(backup.data, null, 2);
+  // 🔒 FIX (تشخيص لوجز CI — 4 أغسطس 2026): backup الجاي من القايمة (fetchBackups)
+  // بقى مش فيه عمود data (راجع تعليق fetchBackups فوق) — بنجيبه هنا بصف واحد بس
+  // (select على id محدد) وقت الحاجة الفعلية للتنزيل، مش مع كل القايمة.
+  const handleDownloadBackup = async (backup: BackupRow) => {
+    toast('⏳ جاري تجهيز الملف...');
+    const { data: fullBackup, error } = await db.from('backups')
+      .select('data,created_at')
+      .eq('id', backup.id)
+      .single();
+    if (error || !fullBackup) { toast('❌ تعذر تنزيل النسخة الاحتياطية', true); return; }
+
+    const json = JSON.stringify(fullBackup.data, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
     a.href = url;
-    a.download = `sanad-backup-${new Date(backup.created_at as string).toISOString().slice(0,10)}.json`;
+    a.download = `sanad-backup-${new Date(fullBackup.created_at as string).toISOString().slice(0,10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
     toast('📥 جاري التنزيل...');
@@ -200,7 +221,17 @@ export function useAdminBackup(profile?: ProfileRow | null) {
       return;
     }
     setRestoringBackup(true);
-    const snapshot = backup.data as BackupSnapshot | null;
+    // 🔒 FIX (تشخيص لوجز CI — 4 أغسطس 2026): نفس ملحوظة handleDownloadBackup —
+    // backup.data مش متجاب مع القايمة دلوقتي، فبنجيبه هنا بصف واحد قبل ما نبدأ
+    // أي حذف فعلي (لو فشل الجلب، بنوقف من غير ما نلمس أي بيانات موجودة).
+    const { data: fullBackup, error: fetchErr } = await db.from('backups')
+      .select('data').eq('id', backup.id).single();
+    if (fetchErr || !fullBackup) {
+      setRestoringBackup(false);
+      toast('❌ تعذر جلب بيانات النسخة الاحتياطية — لم يتم حذف أو تعديل أي شيء', true);
+      return;
+    }
+    const snapshot = fullBackup.data as BackupSnapshot | null;
     let restoredTables = 0;
     let failed = false;
 
