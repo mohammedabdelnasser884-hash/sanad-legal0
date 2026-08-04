@@ -152,6 +152,7 @@ interface InfoRowProps { label: string; value: string }
 export function InfoRow({ label, value }: InfoRowProps) {
   return React.createElement('div', { className: 'flex items-center justify-between gap-3 py-2 border-b border-white/5 last:border-b-0' },
     React.createElement('span', { className: 'text-[10px] font-bold text-slate-500' }, label),
+    ' ',
     React.createElement('span', { className: 'text-xs font-black text-white text-left' }, value)
   );
 }
