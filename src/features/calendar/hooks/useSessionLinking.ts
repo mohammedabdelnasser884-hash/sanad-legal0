@@ -101,15 +101,25 @@ export function useSessionLinking(
   // مخصص له بس عبر linkClientToSessionParty، بنفس فلسفة handleAddClientOnlyForParty.
   const [existingClientTargetPartyId, setExistingClientTargetPartyId] = useState<string | null>(null);
 
+  // 🔒 FIX (تحليل لوجز CI — 4 أغسطس 2026): idlePartyList بيتجاب async، وطول
+  // ما الجلب لسه شغال بيفضل [] — نفس شكل "جلسة قديمة من غير case_parties"
+  // تمامًا. من غير العلامة دي، دوسة سريعة على زرار "ربط بموكل موجود" قبل ما
+  // الجلب يخلص كانت بتشغّل مسار legacy (startExistingClientSearch(null))
+  // بدل مسار الطرف المحدد، فـ existingClientTargetPartyId يفضل عالق على null
+  // حتى بعد ما الأطراف توصل (لأن الخطوة بقت 'searching' مش 'idle' فمفيش
+  // إعادة تقييم للأزرار) — وده سبب فشل confirmLinkToExistingClient بالظبط.
+  const [idlePartyListLoaded, setIdlePartyListLoaded] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     setIdlePartyList([]);
     setLinkedIdlePartyIds(new Set());
+    setIdlePartyListLoaded(false);
     fetchSessionClientParties(db, session.id).then((parties) => {
       // ⚡ فلترة الأطراف اللي اتربطت بالفعل (client_id مش فاضي) — عكس
       // useClientLinking.ts، الجلسة هنا already محفوظة فممكن يكون فيها
       // أطراف اتربطت من قبل (عبر إعادة فتح موديل "🔗 ربط" أكتر من مرة).
-      if (!cancelled) setIdlePartyList(parties.filter((p) => !p.client_id));
+      if (!cancelled) { setIdlePartyList(parties.filter((p) => !p.client_id)); setIdlePartyListLoaded(true); }
     });
     return () => { cancelled = true; };
   }, [db, session.id]);
@@ -147,10 +157,6 @@ export function useSessionLinking(
       // 🆕 المرحلة 2 (خطة توسيع الأوفلاين): نفس نمط useClientLinking.ts —
       // معرّف مؤقت client-side بيتبعت مع القضية بغض النظر عن حالة الاتصال.
       const offlineTempId = makeOfflineTempId();
-      // 🩺 TEMP DEBUG (30 يوليو 2026 — دفعة 2): علامات خطوة-بخطوة لتحديد
-      // بالظبط أي await جوه handleLinkCase بيتعلّق فعليًا (التست 9 وقف
-      // 53 ثانية من غير أي أثر في الكونسول ومن غير ما الـcatch يتفعّل).
-      console.error('[DEBUG handleLinkCase] 1) قبل INSERT القضية');
       const { error, offline, queued, data: insertedCase } = await window.__dbWrite({
         type: 'INSERT',
         table: 'cases',
@@ -194,7 +200,6 @@ export function useSessionLinking(
         }, caseTitle, offlineTempId, session.client_id),
         returning: true,
       });
-      console.error('[DEBUG handleLinkCase] 2) بعد INSERT القضية', 'error=' + (error ? (error as { message?: string }).message ?? 'unknown-shape' : 'لا'), 'offline=' + offline, 'queued=' + queued);
       if (error) {
         showErrorToast('case_create', error, 'تعذّر إنشاء القضية. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'إنشاء قضية');
         return;
@@ -213,20 +218,16 @@ export function useSessionLinking(
       // تحت — الدالة دي بتحدّث الصفوف نفسها (session_id → null، case_id →
       // القضية الجديدة)، فلو استنينا وقريناها بعدين بـ session_id مش هنلاقي
       // حاجة. session.id حقيقي دايمًا هنا (نفس افتراض movePartiesFromSessionToCase).
-      console.error('[DEBUG handleLinkCase] 3) قبل fetchSessionClientParties', 'realOrTempCaseId=' + realOrTempCaseId);
       const clientPartiesBeforeMove = await fetchSessionClientParties(db, session.id);
-      console.error('[DEBUG handleLinkCase] 4) بعد fetchSessionClientParties', 'count=' + clientPartiesBeforeMove.length);
       // ⚠️ session.id هنا حقيقي دايمًا (الجلسة already موجودة فعليًا في
       // القاعدة، بعكس useClientLinking.ts اللي ممكن تكون لسه بيانات form) —
       // فمحتاجش أي تمبيد لـ id الجلسة نفسها، بس case_id ممكن يكون تمبيد.
-      console.error('[DEBUG handleLinkCase] 5) قبل UPDATE ربط الجلسة بالقضية');
       const { error: sessionLinkErr } = await window.__dbWrite({
         type: 'UPDATE',
         table: 'case_sessions',
         id: session.id,
         data: withFkOfflineSentinel(offline, queued, 'case_id', offlineTempId, 'cases', caseTitle, { case_id: realOrTempCaseId }),
       });
-      console.error('[DEBUG handleLinkCase] 6) بعد UPDATE ربط الجلسة بالقضية', 'error=' + (sessionLinkErr ? (sessionLinkErr as { message?: string }).message ?? 'unknown-shape' : 'لا'));
       if (sessionLinkErr) {
         showErrorToast('session_case_link', sessionLinkErr, 'تم إنشاء القضية لكن تعذّر ربط الجلسة بها. حاول تحديث الصفحة.', 'ربط الجلسة بالقضية');
       } else {
@@ -236,11 +237,9 @@ export function useSessionLinking(
         // session.id هنا حقيقي دايمًا (الجلسة already موجودة)، فمفيش داعي
         // لأي تمبيد على جنب المصدر — بس realOrTempCaseId (الوجهة) ممكن
         // يكون لسه تمبيد لو أوفلاين.
-        console.error('[DEBUG handleLinkCase] 7) قبل movePartiesFromSessionToCase');
         const moveResult = await movePartiesFromSessionToCase(
           db, session.id, realOrTempCaseId, offline, queued, offlineTempId, caseTitle,
         );
-        console.error('[DEBUG handleLinkCase] 8) بعد movePartiesFromSessionToCase', 'ok=' + moveResult.ok);
         if (!moveResult.ok) {
           toast('⚠️ تم إنشاء القضية وربط الجلسة، لكن حصل خطأ في نقل بعض أطراف الدعوى الإضافية — راجعها يدويًا', true);
         }
@@ -248,9 +247,7 @@ export function useSessionLinking(
           // ⚡ FIX: نفس إصلاح useClientLinking.ts — next_hearing كان بيفضل فاضي.
           // 🆕 المرحلة 2: أونلاين بس — أوفلاين هتتحسب تلقائيًا بعد المزامنة
           // (المرحلة 4 القادمة، لسه ما اتنفذتش).
-          console.error('[DEBUG handleLinkCase] 9) قبل recalcNextHearing');
           await recalcNextHearing(db, realOrTempCaseId);
-          console.error('[DEBUG handleLinkCase] 10) بعد recalcNextHearing');
         }
       }
       // 🔒 FIX (تشخيص لوجز E2E — 1 أغسطس 2026): onDone() هنا كان بيتنادى فورًا
@@ -264,7 +261,6 @@ export function useSessionLinking(
       // المودال بيقفل فجأة بعد توست "تم إنشاء ملف القضية" بس. الحل: onDone()
       // لازم يتنادى بس لما الويزارد يخلص فعليًا (زرار "إغلاق" في خطوة done
       // بينده onFullClose اللي بالفعل بينده onDone() — راجع أسفل الملف).
-      console.error('[DEBUG handleLinkCase] 11) بعد إنشاء القضية وربطها، قبل تحديد found/notfound (onDone مؤجل لحد ما الويزارد يخلص)');
       // ⚡ FIX: لو session.client_id موجود بالفعل، القضية الجديدة اتربطت
       // بيه أوتوماتيك من صف الـ INSERT فوق — مفيش داعي ندوّر تاني بالاسم
       // ونعرض خطوة "لقينا موكل مطابق"، ده هيكرر نفس الربط أو يلخبط
@@ -276,9 +272,7 @@ export function useSessionLinking(
       // قرار مستقل (ربط بموجود / إضافة جديد / تخطي)، والطرف الأساسي بس
       // (partyIndex === 0) بيحدّث cases.client_id القديم كمان (linkClientToParty).
       if (clientPartiesBeforeMove.length > 0) {
-        console.error('[DEBUG handleLinkCase] 12) قبل matchClientsForParties');
         const matches = await matchClientsForParties(db, clientPartiesBeforeMove);
-        console.error('[DEBUG handleLinkCase] 13) بعد matchClientsForParties', 'matches=' + matches.length);
         setPartyList(clientPartiesBeforeMove);
         setPartyMatches(matches);
         setPartyIndex(0);
@@ -298,9 +292,7 @@ export function useSessionLinking(
       if (!plaintiffName) { setClientStep('notfound'); return; }
       // ⚡ FIX (توحيد): findMatchingClientByName بدل استعلام + حساب matchType
       // يدوي هنا — نفس المنطق بالظبط اللي في useClientLinking.ts.
-      console.error('[DEBUG handleLinkCase] 14) قبل findMatchingClientByName (مسار fallback قديم)');
       const match = await findMatchingClientByName(db, plaintiffName);
-      console.error('[DEBUG handleLinkCase] 15) بعد findMatchingClientByName');
       if (match) {
         setFoundClient(match.client);
         setFoundClientMatchType(match.matchType);
@@ -308,14 +300,7 @@ export function useSessionLinking(
       } else {
         setClientStep('notfound');
       }
-    } catch (e) {
-      // 🩺 TEMP DEBUG (30 يوليو 2026) — الـcatch ده كان بيبلع أي استثناء
-      // حقيقي (مفيش console.error ولا recordError) ويعرض بس توست عام،
-      // وده بالظبط ممكن يفسّر تست 9 (ربط جلسة بقضية من التفاصيل): لو
-      // استثناء حصل هنا (في matchClientsForParties أو movePartiesFromSessionToCase
-      // أو غيرهم)، الدالة بترجع من غير ما توصل لـsetClientStep('found'/'notfound')
-      // خالص — فزراري found/notfound فعلاً ما بيظهروش أبدًا، مش مجرد تايمنج.
-      console.error('[DEBUG handleLinkCase]', e instanceof Error ? (e.stack || e.message) : String(e));
+    } catch {
       toast('❌ خطأ غير متوقع', true);
     }
     finally { setLinkingCase(false); }
@@ -616,8 +601,7 @@ export function useSessionLinking(
   };
 
   const confirmLinkToExistingClient = async () => {
-    console.error('[DEBUG confirmLinkToExistingClient] 0) دخول الدالة', 'selectedExistingClient=' + (selectedExistingClient ? selectedExistingClient.id : 'null'), 'existingClientTargetPartyId=' + existingClientTargetPartyId);
-    if (!selectedExistingClient) { console.error('[DEBUG confirmLinkToExistingClient] 0.1) رجوع مبكر — مفيش selectedExistingClient'); return; }
+    if (!selectedExistingClient) return;
     setLinkingExisting(true);
     try {
       // ⚡ NEW (Phase 3 — 4 أغسطس 2026): existingClientTargetPartyId متحدد
@@ -631,20 +615,14 @@ export function useSessionLinking(
       const targetParty = existingClientTargetPartyId
         ? idlePartyList.find((p) => p.id === existingClientTargetPartyId)
         : undefined;
-      console.error('[DEBUG confirmLinkToExistingClient] 1) بعد حساب targetParty', 'found=' + (targetParty ? targetParty.id : 'undefined'), 'idlePartyListIds=' + idlePartyList.map((p) => p.id).join(','));
       if (targetParty) {
         const isPrimary = idlePartyList[0]?.id === targetParty.id;
-        console.error('[DEBUG confirmLinkToExistingClient] 2) قبل linkClientToSessionParty', 'isPrimary=' + isPrimary);
         const result = await linkClientToSessionParty(targetParty.id, selectedExistingClient.id, isPrimary, session.id);
-        console.error('[DEBUG confirmLinkToExistingClient] 3) بعد linkClientToSessionParty', 'ok=' + result.ok);
         if (!result.ok) {
-          console.error('[DEBUG confirmLinkToExistingClient] 3.1) result.ok=false — هيعرض showErrorToast');
           showErrorToast('session_client_link', new Error('link party to existing client failed'), `تعذّر ربط "${targetParty.name}" بالموكل. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.`, 'ربط طرف بموكل');
           return;
         }
-        console.error('[DEBUG confirmLinkToExistingClient] 4) قبل toast النجاح');
         toast(`✅ تم ربط "${targetParty.name}" بـ"${selectedExistingClient.client_name || selectedExistingClient.full_name || '—'}"`);
-        console.error('[DEBUG confirmLinkToExistingClient] 5) بعد toast النجاح');
         setLinkedIdlePartyIds((prev) => new Set(prev).add(targetParty.id));
         setExistingClientTargetPartyId(null);
         setClientSearch(''); setSearchResults([]); setSelectedExistingClient(null);
@@ -689,7 +667,7 @@ export function useSessionLinking(
       // ما شاشة "🎉 تم بنجاح" تتعرض خالص. onDone() هيتنادى لما المستخدم
       // يدوس "إغلاق" (onFullClose بيندهه).
       setClientStep('done');
-    } catch (e) { console.error('[DEBUG confirmLinkToExistingClient] EXCEPTION', e); toast('❌ خطأ غير متوقع', true); }
+    } catch { toast('❌ خطأ غير متوقع', true); }
     finally { setLinkingExisting(false); }
   };
 
@@ -754,7 +732,7 @@ export function useSessionLinking(
     // linkedIdlePartyIds لعرض زرار مستقل لكل طرف في خطوة "idle" (قبل
     // إنشاء القضية)، وhandleAddClientOnlyForParty لفتح NewClientModal
     // الموحّد لطرف بعينه بدل INSERT مباشر.
-    idlePartyList, linkedIdlePartyIds, handleAddClientOnlyForParty,
+    idlePartyList, linkedIdlePartyIds, handleAddClientOnlyForParty, idlePartyListLoaded,
     // ⚡ NEW (Phase 3 — 4 أغسطس 2026): existingClientTargetPartyId (null =
     // مسار الجلسة كلها القديم) + startExistingClientSearch/
     // cancelExistingClientSearch لفتح/إغلاق خطوة "searching" مخصصة لطرف
