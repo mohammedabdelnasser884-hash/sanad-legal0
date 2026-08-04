@@ -13,7 +13,6 @@ interface DayCardProps {
     isToday: boolean;
     isFriday: boolean;
     sessCount: number;
-    isConflict: boolean;
     daySess: CalendarSessionRow[];
     dayTasks: TaskFeedItem[];
     cases: MappedCase[];
@@ -24,7 +23,7 @@ interface DayCardProps {
     onOpenStandalone?: (s: CalendarSessionRow) => void;
 }
 
-function DayCard({ dayName, dayNum, monthName, isToday, isFriday, sessCount, isConflict, daySess, dayTasks, cases, clients, onOpenCase, onOpenReminders, handleGoogleExport, onOpenStandalone }: DayCardProps) {
+function DayCard({ dayName, dayNum, monthName, isToday, isFriday, sessCount, daySess, dayTasks, cases, clients, onOpenCase, onOpenReminders, handleGoogleExport, onOpenStandalone }: DayCardProps) {
     const [open, setOpen] = useState(false);
     const goldColor = isToday ? 'rgba(212,175,55,0.9)' : 'rgba(212,175,55,0.4)';
     const lineStyle = {
@@ -78,10 +77,6 @@ function DayCard({ dayName, dayNum, monthName, isToday, isFriday, sessCount, isC
 
             // badges + سهم الفتح/الغلق
             React.createElement('div', { className: "flex items-center gap-1.5" },
-                isConflict && React.createElement('span', {
-                    className: "text-[9px] font-black px-2 py-1 rounded-lg",
-                    style: { background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }
-                }, "⚠️ تعارض"),
                 hasItems
                     ? React.createElement('span', {
                         className: "text-[10px] font-bold px-2.5 py-1 rounded-lg",
