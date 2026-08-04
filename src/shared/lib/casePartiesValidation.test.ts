@@ -250,9 +250,9 @@ describe('validateParties', () => {
             ];
             const result = validateParties(parties, { plaintiff: '', defendant: '' });
             expect(result.valid).toBe(false);
-            expect(result.errors.some((e) => e.field === 'legal_title' && e.message.includes('المدعى عليه'))).toBe(true);
+            expect(result.errors.some((e) => e.field === 'legal_title' && e.side === 'defendant')).toBe(true);
             // طرف المدعي (شخص واحد بس) ما يفروضش عليه مسمى قانوني
-            expect(result.errors.some((e) => e.field === 'legal_title' && e.message.includes('المدعي)'))).toBe(false);
+            expect(result.errors.some((e) => e.field === 'legal_title' && e.side === 'plaintiff')).toBe(false);
         });
 
         it('بيقبل لو الطرفين شخصان فأكثر والمسمى القانوني مكتوب لكل واحد فيهم', () => {
