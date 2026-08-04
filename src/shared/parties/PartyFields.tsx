@@ -1,12 +1,21 @@
 import React from 'react';
 import { Inp } from '../ui/Inp';
 import { PoaInput } from '../ui/PoaInput';
-import type { PartyFieldValue } from './partyTypes';
+import type { PartyFieldValue, PartySide } from './partyTypes';
 
 // نفس هيلبر "أرقام فقط بحد أقصى" المستخدم في NewCaseModal.tsx/
 // NewStandaloneSessionModal.tsx — مكرر هنا محليًا (بدون export) عشان
 // المكوّن ده يفضل مستقل بمعزل عن أي فورم، زي المطلوب في قسم 6 خطوة 2.
 const onlyDigits = (v: string, max = 14) => v.replace(/\D/g, '').slice(0, max);
+
+// 🆕 (خطة "تبسيط عرض أطراف الدعوى" — 3 أغسطس 2026): ترقيم ترتيبي لعنوان
+// كارت كل شخص جوه نفس الطرف (بدل "مدعي 1"/"مدعي 2" اللي كانت بتفترض إن
+// الصفة دايمًا مدعي/مدعى عليه). fallback رقمي لو العدد كبير جدًا (حالة
+// نادرة عمليًا — نادرًا ما يتعدى طرف واحد أكتر من بضعة أشخاص).
+const ORDINALS_AR = ['الأول', 'الثاني', 'الثالث', 'الرابع', 'الخامس', 'السادس', 'السابع', 'الثامن', 'التاسع', 'العاشر'];
+function ordinalAr(n: number): string {
+    return ORDINALS_AR[n - 1] ?? `رقم ${n}`;
+}
 
 // الحقول النصية اللي البطاقة دي فعليًا بتعدّلها — is_client ليها
 // onToggleIsClient خاص بيها، وclient_id مش متاح للتعديل من الفورم في
@@ -15,10 +24,14 @@ type EditablePartyField = 'name' | 'capacity' | 'address' | 'national_id' | 'pow
 
 interface PartyFieldsProps {
     party: PartyFieldValue;
-    // ترتيب الطرف جوه جهته (0-based) — بيتحدد بيه العنوان "مدعي ١/٢/...".
+    // ترتيب الطرف جوه جهته (0-based) — بيتحدد بيه العنوان الترتيبي
+    // ("الأول"/"الثاني"/...، من غير أي ذكر لـ"مدعي"/"مدعى عليه").
     index: number;
-    // "مدعي" أو "مدعى عليه" (مفرد، من غير رقم — الرقم بيتضاف من index).
-    sideLabel: string;
+    // 🆕 (خطة "تبسيط عرض أطراف الدعوى" — 3 أغسطس 2026): الطرف الأول أو
+    // الثاني صراحةً — بيُستخدم فقط لتنويع أمثلة placeholder حقل "صفته"
+    // (بدل الاعتماد على مقارنة نص sideLabel بكلمة "مدعي" حرفيًا، اللي
+    // كانت بتنكسر لو النص اتعمم).
+    side: PartySide;
     canRemove: boolean;
     onChange: (field: EditablePartyField, value: string) => void;
     onRemove: () => void;
@@ -49,9 +62,9 @@ interface PartyFieldsProps {
 const readOnlyInputCls = 'w-full p-3 text-xs rounded-xl border border-white/10 bg-white/5 text-slate-300 placeholder-slate-600 cursor-not-allowed';
 
 export function PartyFields({
-    party, index, sideLabel, canRemove, onChange, onRemove, onToggleIsClient, nationalIdError, nameWarning, testIdPrefix, extraContent, readOnly = false,
+    party, index, side, canRemove, onChange, onRemove, onToggleIsClient, nationalIdError, nameWarning, testIdPrefix, extraContent, readOnly = false,
 }: PartyFieldsProps) {
-    const title = `${sideLabel} ${index + 1}`;
+    const title = ordinalAr(index + 1);
     const tid = (name: string) => (testIdPrefix ? `${testIdPrefix}-${name}` : undefined);
 
     return React.createElement('div', { className: 'rounded-2xl border border-white/10 bg-white/5 p-3 mb-2 space-y-2', 'data-testid': tid('card') },
@@ -96,11 +109,14 @@ export function PartyFields({
                 label: 'صفته',
                 value: party.capacity,
                 onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChange('capacity', e.target.value),
-                placeholder: sideLabel === 'مدعي' ? 'مثال: مدعي' : 'مثال: مدعى عليه',
+                placeholder: side === 'plaintiff' ? 'مثال: مدعي، مستأنف، طالب...' : 'مثال: مدعى عليه، متهم، مطعون ضده...',
                 required: true,
                 'data-testid': tid('capacity'),
             })
         ),
+        // 🆕 توضيح إن الأمثلة في placeholder مجرد اقتراح، مش قائمة مقفولة —
+        // ممكن تتكتب أي صفة تانية تناسب هذا الطرف فعليًا.
+        React.createElement('p', { className: 'text-[9px] text-slate-500 -mt-1' }, 'مجرد أمثلة — اكتب أي صفة تناسب هذا الطرف فعليًا'),
         nameWarning && React.createElement('p', { className: 'text-[9px] text-amber-400 -mt-1', 'data-testid': tid('name-warning') }, nameWarning),
 
         // ── العنوان — بيتعرض كـ"إجباري بصريًا" بس لموكل المكتب، فعليًا
