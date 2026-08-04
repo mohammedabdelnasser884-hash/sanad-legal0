@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from '../../../shared/lib/notifications';
 import { safeUpdate } from '../../../shared/lib/dataAccess';
-import { copySessionPartiesToNewSession } from '../hooks/caseSessionLinkingShared';
+import { copySessionPartiesToNewSession, makeSessionGroupId } from '../hooks/caseSessionLinkingShared';
 import { escapeTelegramHtml } from '../../../shared/lib/sanitize';
 import DatePicker from '@/shared/ui/DatePicker';
 import { I } from '../../../constants';
@@ -45,9 +45,20 @@ function SessionUpdateModal({ session, caseData, db, onClose, onDone, onNotify, 
         if (!nextDate) { toast('⚠️ حدد تاريخ الجلسة القادمة', true); return; }
         setSaving(true);
 
+        const isStandalone = !caseData.id;
+        // 🆕 (خطة تسلسل الجلسة المستقلة، 3 أغسطس 2026): session_group_id
+        // بيربط كل الجلسات اللي نتجت عن نفس الجلسة المستقلة الأصلية عبر
+        // سلسلة "تحديث الجلسة" المتكررة — لتفريقه عن case_id (اللي مش
+        // موجود للمستقلة أصلاً). أول مرة السلسلة دي بتتحدّث، الجلسة
+        // الحالية مفيش عندها session_group_id لسه، فبنولّد واحد جديد
+        // ونحطه على الجلسة القديمة (تحت) والجديدة (تحت) معًا. لو الجلسة
+        // الحالية أصلاً جزء من سلسلة سابقة، بنستخدم نفس المعرّف الموجود.
+        const groupId = isStandalone ? (session.session_group_id || makeSessionGroupId()) : null;
+
         // 1. حدّث الجلسة الحالية بـ "ما تم" — مع Optimistic Lock
         const { conflict } = await safeUpdate(db, 'case_sessions', session.id, {
             result: whatHappened || null,
+            ...(isStandalone && !session.session_group_id ? { session_group_id: groupId } : {}),
         }, session.updated_at || null);
         // 🔒 FIX (تقرير الموثوقية — القسم 12، Concurrent Editing): توست بدل السكوت التام.
         if (conflict) { setSaving(false); toast('⚠️ هذه الجلسة عدّلها شخص آخر بعد ما فتحتها — أعد المحاولة', true); return; }
@@ -58,7 +69,6 @@ function SessionUpdateModal({ session, caseData, db, onClose, onDone, onNotify, 
         // نفسه. من غير نسخها هنا، الجلسة الجديدة كانت هتتولد فاضية تمامًا
         // (بس تاريخ ومطلوب) وتفقد كل هويتها. القضايا الحقيقية مش محتاجة
         // النسخ ده لأن البيانات بتتجاب من جدول cases عن طريق case_id.
-        const isStandalone = !caseData.id;
         const { data: newSessionRow, error } = await db.from('case_sessions').insert([{
             case_id: caseData.id,
             session_date: nextDate,
@@ -98,6 +108,9 @@ function SessionUpdateModal({ session, caseData, db, onClose, onDone, onNotify, 
                 // كانت بتتولد "مش مربوطة" بالموكل حتى لو الجلسة الحالية
                 // كانت مربوطة، وده باج فقدان ربط كامل مش بس بيانات قديمة.
                 client_id: session.client_id || null,
+                // 🆕 (خطة تسلسل الجلسة المستقلة، 3 أغسطس 2026): راجع تعليق
+                // groupId فوق — نفس المعرّف بالحرف على الجلسة الجديدة.
+                session_group_id: groupId,
             } : {}),
         }]).select('id').single();
 
