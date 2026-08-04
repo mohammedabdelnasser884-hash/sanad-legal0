@@ -9,6 +9,9 @@ import type { MappedCase, MappedClient } from '../../hooks/useAppData';
 import type { SessionFeedItem, TaskFeedItem, SessionCaseEmbed } from '@/shared/hooks/useDashboardFeed';
 import type { CaseSessionRow } from '../../types';
 import type { TabName } from '../../useNavigation';
+// ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): نوع الكول-باك
+// بتاع فتح NewClientModal الموحّد لطرف بعينه من جلسة مستقلة.
+import type { OpenCreateClientForSessionParty } from '@/features/calendar/hooks/useClientLinking';
 
 // linkedCase بييجي من مصدرين مختلفين فعليًا في الكود تحت: إما `cases.find(...)` (شكله MappedCase)
 // أو الكائن المدمج `s.cases` جوه استعلام الجلسة (شكله SessionCaseEmbed) — الكود بيتعامل مع
@@ -51,6 +54,10 @@ interface DashboardTabProps {
   // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 3): زرار "✏️ عدّل من
   // ملف الموكل" جوه EditStandaloneModal (عبر StandaloneSessionDetailModal).
   onOpenClientProfile?: (client: MappedClient) => void;
+  // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): بتتوصّل لـ
+  // StandaloneSessionDetailModal تحت — نفس handleOpenCreateClientForSessionPartyOnly
+  // في App.tsx المستخدمة أصلاً في NewStandaloneSessionModal.tsx.
+  onOpenCreateClientForSessionParty?: OpenCreateClientForSessionParty;
 }
 
 function DashboardTab({
@@ -64,7 +71,7 @@ function DashboardTab({
   setTab, setRemindersInitialFilter, setSessionsInitialTab,
   dbOnline, healthErrors, setHealthErrors,
   fetchTodaySessions, fetchUpcomingSessions, fetchMissedSessions,
-  onOpenClientProfile,
+  onOpenClientProfile, onOpenCreateClientForSessionParty,
 }: DashboardTabProps) {
 
     // ── جلسة مستقلة مفتوحة حالياً (لعرض المودال) ──
@@ -530,6 +537,7 @@ function DashboardTab({
             onDone: () => { refreshAllSessionLists(); },
             clients,
             onOpenClientProfile,
+            onOpenCreateClientForSessionParty,
         }),
         Dashboard
   );
