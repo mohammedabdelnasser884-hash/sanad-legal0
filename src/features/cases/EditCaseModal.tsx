@@ -18,7 +18,7 @@ import type { ClientModalContext } from '../clients/hooks/useClientActions';
 interface EditCaseModalProps {
     caseData: MappedCase;
     onClose: () => void;
-    onSave: (form: CaseFormSubmitData) => void;
+    onSave: (form: CaseFormSubmitData) => void | boolean | Promise<void | boolean>;
     countryCourts?: string[];
     countryCaseTypes?: string[];
     // 🔒 FIX (تقرير الموثوقية — نتيجة 1): المودال ده ما كانش فيه أي حماية
@@ -335,7 +335,7 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
 
     // تحذير قبل الإغلاق لو فيه بيانات مكتوبة لسه ما اتحفظتش (الـbaseline
     // هنا هو بيانات القضية المحمّلة فعليًا، مش فورم فاضي)
-    const guardedClose = useUnsavedChangesGuard(draftData, { form, parties: partyFields.parties, legalTitles: partyFields.legalTitles }, onClose);
+    const { guardedClose, confirmModal } = useUnsavedChangesGuard(draftData, { form, parties: partyFields.parties, legalTitles: partyFields.legalTitles }, onClose);
 
     // ⚡ NEW (خطة تطوير أطراف الدعوى — مرحلة 4 خطوة 2، 23 يوليو 2026): نفس
     // فكرة linkClientToParty في NewCaseModal.tsx بالحرف — بس هنا لأي طرف
@@ -410,7 +410,9 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
     const inputCls = "w-full p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600 transition-colors";
     const inpStyle = {fontFamily:'Cairo,sans-serif'};
 
-    return React.createElement('div', {className: "bg-premium-card w-full max-w-lg rounded-t-3xl border-t border-white/10 p-6 pb-10 shadow-2xl slide-up max-h-[90vh] overflow-y-auto no-scrollbar"},
+    return React.createElement(React.Fragment, null,
+    confirmModal,
+    React.createElement('div', {className: "bg-premium-card w-full max-w-lg rounded-t-3xl border-t border-white/10 p-6 pb-10 shadow-2xl slide-up max-h-[90vh] overflow-y-auto no-scrollbar"},
         React.createElement('div', {className: "w-10 h-1 bg-white/20 rounded-full mx-auto mb-5"}),
         React.createElement('div', {className: "flex items-center justify-between mb-5"},
             React.createElement('h3', {className: "text-sm font-black text-white flex items-center gap-2"},
@@ -599,7 +601,7 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
             React.createElement('button', {
                 disabled: saving,
                 'data-testid': 'edit-case-save',
-                onClick: () => {
+                onClick: async () => {
                     if(saving) return;
                     if(!form.title.trim()){ toast('يرجى إدخال موضوع ومسمى الدعوى', true); return; }
                     // ⚡ CHANGED (مرحلة 5.1 — خطة تعدد الأطراف): فاليديشن
@@ -648,16 +650,17 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
                         // إضافة جديدة، وعشان يحدد أي صف اتشال فيحذفه.
                         existingPartyIds: existingPartyRows.map((r) => r.id),
                     };
-                    onSave(saveData);
-                    // 🆕 (خطة حفظ المسودات — 1 أغسطس 2026): نفس قرار NewCaseModal.tsx —
-                    // نمسح المسودة بمجرد إرسال طلب الحفظ (عدّى الفاليديشن)، مش بعد
-                    // تأكيد النجاح من الأب.
-                    draft.clearDraft();
+                    const result = await onSave(saveData);
+                    // 🔒 FIX (قرارات مفتوحة — خطة حفظ المسودات، 3 أغسطس 2026):
+                    // بننتظر نتيجة onSave (اللي بترجع من CaseDetailView.tsx →
+                    // handleUpdateCase) ونمسح المسودة بس لو نجح فعلاً
+                    // (result !== false)، مش بمجرد الضغط على الزرار زي الأول.
+                    if (result !== false) draft.clearDraft();
                 },
                 className: "w-full py-3.5 bg-gradient-to-tr from-premium-gold to-amber-200 text-premium-bg rounded-xl font-black text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform mt-2 disabled:opacity-60"
             }, React.createElement(I.Check), saving ? "⏳ جاري الحفظ..." : "حفظ التعديلات")
         )
-    );
+    ));
 }
 
 export default EditCaseModal;
