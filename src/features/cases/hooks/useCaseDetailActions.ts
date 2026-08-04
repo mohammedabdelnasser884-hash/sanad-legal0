@@ -186,9 +186,9 @@ export function useCaseDetailActions(
         ? (caseData.defendant_role ? {name: caseData.defendant, capacity: caseData.defendant_role} : splitParty(caseData.defendant))
         : null;
     const safePlaintiffName = escapeHtml(plaintiffParty?.name || '');
-    const safePlaintiffLabel = escapeHtml(plaintiffParty?.capacity || 'المدعي / الطاعن');
+    const safePlaintiffLabel = escapeHtml(plaintiffParty?.capacity || 'الصفة غير محددة');
     const safeDefendantName = escapeHtml(defendantParty?.name || '');
-    const safeDefendantLabel = escapeHtml(defendantParty?.capacity || 'المدعى عليه / المطعون ضده');
+    const safeDefendantLabel = escapeHtml(defendantParty?.capacity || 'الصفة غير محددة');
 
     // ⚡ NEW (خطة تعدد الأطراف، مرحلة 10 — 23 يوليو 2026): لو القضية عندها
     // صفوف case_parties (جاية بالفعل من fetchSessions فوق، مرحلة 8)، بنعرض
@@ -203,7 +203,7 @@ export function useCaseDetailActions(
         side: p.side,
         isClient: !!p.is_client,
         name: escapeHtml(p.name || ''),
-        capacity: escapeHtml(p.capacity || (p.side === 'plaintiff' ? 'المدعي / الطاعن' : 'المدعى عليه / المطعون ضده')),
+        capacity: escapeHtml(p.capacity || 'الصفة غير محددة'),
     }));
     const partyPlaintiffs = safeCaseParties.filter((p) => p.side === 'plaintiff');
     const partyDefendants = safeCaseParties.filter((p) => p.side === 'defendant');
