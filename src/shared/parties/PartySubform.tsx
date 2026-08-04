@@ -22,8 +22,7 @@ interface PartySubformProps {
     isOpen: boolean;
     side: PartySide;
     title: string; // "الطرف الأول" / "الطرف الثاني"
-    cardLabel: string; // "مدعي" / "مدعى عليه" (لعنوان كارت كل شخص)
-    addLabel: string; // "➕ إضافة مدعي آخر" / ...
+    addLabel: string; // نص زرار الإضافة العام
     controller: UsePartyFieldsReturn;
     testIdPrefix?: string;
     renderPartyExtra?: (party: PartyFieldValue) => React.ReactNode;
@@ -32,7 +31,7 @@ interface PartySubformProps {
 }
 
 export function PartySubform({
-    isOpen, side, title, cardLabel, addLabel, controller, testIdPrefix, renderPartyExtra, renderPartyReadOnly, onClose,
+    isOpen, side, title, addLabel, controller, testIdPrefix, renderPartyExtra, renderPartyReadOnly, onClose,
 }: PartySubformProps) {
     useNestedModalBackButton(isOpen, onClose);
 
@@ -49,15 +48,14 @@ export function PartySubform({
     const nameWarningFor = (partyId: string) =>
         validation.warnings.find((w) => w.partyId === partyId && w.field === 'name')?.message ?? null;
 
-    const sideMarker = side === 'plaintiff' ? '(المدعي)' : '(المدعى عليه)';
-    const legalTitleError = validation.errors.find((e) => e.field === 'legal_title' && e.message.includes(sideMarker))?.message ?? null;
+    const legalTitleError = validation.errors.find((e) => e.field === 'legal_title' && e.side === side)?.message ?? null;
 
     const cards = list.map((party, index) =>
         React.createElement(PartyFields, {
             key: party.id,
             party,
             index,
-            sideLabel: cardLabel,
+            side,
             canRemove: canRemove(party.id),
             onChange: (field: 'name' | 'capacity' | 'address' | 'national_id' | 'power_of_attorney', value: string) => updateParty(party.id, field, value),
             onRemove: () => removeParty(party.id),
