@@ -38,9 +38,16 @@ function makeMockDb() {
           rangeSpy(table, f, t);
           return Promise.resolve(get(`${table}:range:${f}`, EMPTY_LIST));
         }),
-        // fetchBackups: .select('*').order(...).limit(20)
+        // fetchBackups: .select('id,created_at,...').order(...).limit(20)
         order: vi.fn(() => ({
           limit: vi.fn(() => Promise.resolve(get(`${table}:select`, EMPTY_LIST))),
+        })),
+        // 🔒 FIX (تشخيص لوجز CI — 4 أغسطس 2026): جلب صف واحد كامل (بعمود data)
+        // لحظة الحاجة الفعلية — handleDownloadBackup/handleRestoreBackup.
+        // val (الـid) متجاهل عمدًا في المحاكاة — التستات الحالية كلها بتتعامل
+        // مع نسخة واحدة في كل مرة، فمفيش داعي لتمييز حقيقي بين الـids هنا.
+        eq: vi.fn((_col: string, _val: unknown) => ({
+          single: vi.fn(() => Promise.resolve(get(`${table}:select:single`, EMPTY_LIST))),
         })),
       };
     }),
@@ -140,8 +147,9 @@ describe('useAdminBackup', () => {
       })]);
       expect(toast).toHaveBeenCalledWith('✅ تم إنشاء النسخة الاحتياطية بنجاح');
       expect(logActivity).toHaveBeenCalledWith(expect.anything(), 'إنشاء نسخة احتياطية', expect.objectContaining({ userName: 'أحمد المدير' }));
-      // fetchBackups بينادى في الآخر → select('backups','*') لازم يتنادى تاني بعد النداء بتاع الحفظ
-      expect(mockDb.selectSpy).toHaveBeenCalledWith('backups', '*');
+      // fetchBackups بينادى في الآخر → select الأعمدة الخفيفة (من غير data)
+      // لازم يتنادى تاني بعد النداء بتاع الحفظ
+      expect(mockDb.selectSpy).toHaveBeenCalledWith('backups', 'id,created_at,created_by,created_by_name,tables_count,rows_count,size_kb');
       expect(result.current.creatingBackup).toBe(false);
       expect(result.current.backupProgress).toBe('');
     });
@@ -171,8 +179,8 @@ describe('useAdminBackup', () => {
 
       expect(toast).toHaveBeenCalledWith('❌ فشل حفظ النسخة الاحتياطية', true);
       expect(logActivity).not.toHaveBeenCalled();
-      // مفيش select('backups','*') بعد الـ insert الفاشل (fetchBackups ما اتناداش)
-      expect(mockDb.selectSpy).not.toHaveBeenCalledWith('backups', '*');
+      // مفيش select الأعمدة الخفيفة بعد الـ insert الفاشل (fetchBackups ما اتناداش)
+      expect(mockDb.selectSpy).not.toHaveBeenCalledWith('backups', 'id,created_at,created_by,created_by_name,tables_count,rows_count,size_kb');
       expect(result.current.creatingBackup).toBe(false);
       expect(result.current.backupProgress).toBe('');
     });
@@ -201,7 +209,7 @@ describe('useAdminBackup', () => {
       vi.restoreAllMocks();
     });
 
-    it('بينشئ blob من backup.data وينده تنزيل باسم فيه التاريخ، توست، logActivity بتاريخ منسّق', () => {
+    it('بيجيب data كاملة بصف واحد (id محدد) وينشئ blob منها، توست، logActivity بتاريخ منسّق', async () => {
       const clickSpy = vi.fn();
       // بنحاكي بس عنصر 'a' — أي تاج تاني (زي الـ 'div' اللي renderHook بيبنيه
       // كـ container) لازم يرجع عنصر DOM حقيقي، مش الـ fake object.
@@ -213,9 +221,13 @@ describe('useAdminBackup', () => {
         return realCreateElement(tag);
       });
 
-      const backup = { created_at: '2026-05-01T10:00:00Z', data: { tables: {} } } as unknown as BackupRow;
+      // 🔒 FIX (تشخيص لوجز CI — 4 أغسطس 2026): backup القادم من القايمة مالوش
+      // data خالص دلوقتي — بيتجاب لوحده بـ select('data,created_at').eq('id',...).single()
+      const listBackup = { id: 'b1', created_at: '2026-05-01T10:00:00Z' } as unknown as BackupRow;
+      mockDb.setResult('backups:select:single', { data: { data: { tables: {} }, created_at: '2026-05-01T10:00:00Z' }, error: null });
+
       const { result } = setup();
-      act(() => { result.current.handleDownloadBackup(backup); });
+      await act(async () => { await result.current.handleDownloadBackup(listBackup); });
 
       expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
       expect(clickSpy).toHaveBeenCalledTimes(1);
@@ -223,10 +235,21 @@ describe('useAdminBackup', () => {
       expect(toast).toHaveBeenCalledWith('📥 جاري التنزيل...');
       expect(logActivity).toHaveBeenCalledWith(expect.anything(), 'تنزيل نسخة احتياطية', expect.objectContaining({ entity_type: 'backup' }));
     });
+
+    it('فشل جلب الصف الكامل (error أو data فاضية) → توست فشل، من غير أي محاولة تنزيل', async () => {
+      mockDb.setResult('backups:select:single', { data: null, error: { message: 'not found' } });
+      const listBackup = { id: 'missing', created_at: '2026-05-01T10:00:00Z' } as unknown as BackupRow;
+      const { result } = setup();
+      await act(async () => { await result.current.handleDownloadBackup(listBackup); });
+
+      expect(toast).toHaveBeenCalledWith('❌ تعذر تنزيل النسخة الاحتياطية', true);
+      expect(URL.createObjectURL).not.toHaveBeenCalled();
+    });
   });
 
   describe('handleRestoreBackup', () => {
     const BACKUP: BackupRow = {
+      id: 'b1',
       created_at: '2026-05-01T10:00:00Z',
       data: { version: '1.1', created_at: '2026-05-01T10:00:00Z', tables: {
         clients: [{ id: 'c1' }],
@@ -239,6 +262,15 @@ describe('useAdminBackup', () => {
     function typeConfirm(result: ReturnType<typeof setup>['result']) {
       act(() => { result.current.setRestoreConfirmText('استعادة'); });
     }
+
+    // 🔒 FIX (تشخيص لوجز CI — 4 أغسطس 2026): handleRestoreBackup بقى بيجيب
+    // data كاملة بصف واحد (select('data').eq('id',...).single()) بدل ما
+    // ياخدها مباشرة من الـbackup الممرّر — كل التستات هنا بتفترض backup.data
+    // زي ما هو، فبنظبط نفس القيمة كـdefault لنتيجة الجلب ده قبل كل تست، وأي
+    // تست بيستخدم backup مختلف (زي bigBackup تحت) بيغيّره صراحةً.
+    beforeEach(() => {
+      mockDb.setResult('backups:select:single', { data: { data: BACKUP.data }, error: null });
+    });
 
     it('نص التأكيد غلط → توست تحذير فقط، من غير أي نداء لقاعدة البيانات', async () => {
       const { result } = setup();
@@ -258,6 +290,18 @@ describe('useAdminBackup', () => {
 
       expect(toast).toHaveBeenCalledWith('❌ تعذر تحديد المكتب الحالي — لا يمكن الاستعادة بأمان', true);
       expect(mockDb.from).not.toHaveBeenCalled();
+    });
+
+    it('فشل جلب data الكاملة للنسخة (error أو صف مفقود) → توست فشل، ومفيش أي حذف/إدراج', async () => {
+      mockDb.setResult('backups:select:single', { data: null, error: { message: 'not found' } });
+      const { result } = setup();
+      typeConfirm(result);
+      await act(async () => { await result.current.handleRestoreBackup(BACKUP); });
+
+      expect(toast).toHaveBeenCalledWith('❌ تعذر جلب بيانات النسخة الاحتياطية — لم يتم حذف أو تعديل أي شيء', true);
+      expect(mockDb.deleteSpy).not.toHaveBeenCalled();
+      expect(mockDb.insertSpy).not.toHaveBeenCalled();
+      expect(result.current.restoringBackup).toBe(false);
     });
 
     it('نجاح كامل → حذف كل جداول RESTORE_DELETE_ORDER بـ tenant_id بنفس الترتيب، إدراج الجداول اللي فيها صفوف بترتيب RESTORE_INSERT_ORDER، upsert لـ profiles/activity_log، توست نجاح كامل، ريلود بعد 1.5 ثانية', async () => {
@@ -304,6 +348,7 @@ describe('useAdminBackup', () => {
     it('جدول فيه أكتر من INSERT_CHUNK_SIZE (500) صف → بيتقسّم دفعتين', async () => {
       const bigRows = Array.from({ length: 600 }, (_, i) => ({ id: `c${i}` }));
       const bigBackup = { ...BACKUP, data: { ...BACKUP.data as object, tables: { clients: bigRows } } } as unknown as BackupRow;
+      mockDb.setResult('backups:select:single', { data: { data: bigBackup.data }, error: null });
       const { result } = setup();
       typeConfirm(result);
       await act(async () => { await result.current.handleRestoreBackup(bigBackup); });
