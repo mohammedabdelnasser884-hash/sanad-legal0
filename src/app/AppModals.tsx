@@ -82,10 +82,15 @@ interface AppModalsProps {
     clientSearch: string;
 
     // ── هاندلرز ──
-    handleSaveCase: (form: CaseFormSubmitData) => void | Promise<void>;
+    handleSaveCase: (form: CaseFormSubmitData) => void | boolean | Promise<void | boolean>;
     handleDeleteCase: (caseId: string) => void | Promise<void>;
     handleUpdateCase: (caseId: string, form: CaseFormSubmitData) => void | boolean | Promise<void | boolean>;
     handleLinkClient: (caseId: string, clientId: string) => void | Promise<void>;
+    // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، Phase 3 — 4 أغسطس 2026): مرآة
+    // لـ handleLinkClient فوق، بس بيربط طرف بعينه من case_parties (بدل
+    // القضية كلها) — شوف useCaseActions.ts (handleLinkClientForParty)
+    // وInfoSection.tsx.
+    handleLinkClientForParty: (caseId: string, partyId: string, clientId: string, isPrimaryParty: boolean, onAfterLink: () => void) => void | Promise<void>;
     // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 4): عكس handleLinkClient.
     handleUnlinkClient: (caseId: string) => void | Promise<void>;
     // ⚡ CHANGED (خطة توحيد إنشاء الموكل، Phase 1): بقت مجرد فتح لموديل
@@ -115,7 +120,7 @@ interface AppModalsProps {
     // لـ CaseDetailView — زرار "إنشاء موكل" لكل طرف عليه ⭐ ومش مربوط في
     // تفاصيل القضية (InfoSection.tsx)، مش بس وسط wizard الجلسة المستقلة.
     handleOpenCreateClientForCaseParty: OpenCreateClientForParty;
-    handleSaveClient: (form: ClientFormData, idFile: File | null, poaFile: File | null) => void | Promise<void>;
+    handleSaveClient: (form: ClientFormData, idFile: File | null, poaFile: File | null) => void | boolean | Promise<void | boolean>;
     handleDeleteClient: (clientId: string) => void | Promise<void>;
     handleUpdateClient: (clientId: string, form: ClientFormData, idFile?: File | null, poaFile?: File | null) => void | boolean | Promise<void | boolean>;
     handleSaveLawyer: (form: { email: string; password: string; full_name: string; role?: string }) => void | Promise<void>;
@@ -143,7 +148,7 @@ function AppModals({
     setCases, setCasesFilter, setCasesPage,
     fetchCases, fetchTodaySessions, fetchUpcomingSessions, fetchMissedSessions, onStandaloneSessionSaved,
     fetchClients, clientSearch,
-    handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleUnlinkClient, handleCreateAndLinkClient,
+    handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleLinkClientForParty, handleUnlinkClient, handleCreateAndLinkClient,
     handleOpenCreateClientForSession, handleOpenCreateClientForSessionCase,
     handleOpenCreateClientForSessionParty, handleOpenCreateClientForCaseParty,
     handleOpenCreateClientForSessionPartyOnly,
@@ -241,7 +246,7 @@ function AppModals({
                 setCases((prev) => prev.map((c) => c.id === selectedCase?.id ? { ...c, status: newStatus } : c));
                 setCasesFilter(newStatus); setCasesPage(0); fetchCases(0, newStatus);
             },
-            onDelete: handleDeleteCase, onEdit: handleUpdateCase, onLinkClient: handleLinkClient, onUnlinkClient: handleUnlinkClient, onCreateAndLinkClient: handleCreateAndLinkClient,
+            onDelete: handleDeleteCase, onEdit: handleUpdateCase, onLinkClient: handleLinkClient, onLinkClientForParty: handleLinkClientForParty, onUnlinkClient: handleUnlinkClient, onCreateAndLinkClient: handleCreateAndLinkClient,
             // ⚡ NEW (مرحلة 13.1): زرار "إنشاء موكل" لكل طرف عليه ⭐ في تفاصيل القضية.
             // 🔧 FIX (بناء فشل — عدم تطابق تواقيع): CaseDetailView بيستخدم
             // امضاء مبسّط (caseId, party, isPrimaryParty, onAfterLink) بينما
