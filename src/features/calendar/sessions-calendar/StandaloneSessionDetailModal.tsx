@@ -736,6 +736,7 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                     ),
                     selectedExistingClient && React.createElement('button', {
                         onClick: () => {
+                            console.error('[DEBUG link-existing-client-confirm onClick]', 'existingClientTargetPartyId=' + existingClientTargetPartyId, 'showMismatchConfirm=' + showMismatchConfirm, 'linkingExisting=' + linkingExisting);
                             // ⚡ CHANGED (Phase 3 — 4 أغسطس 2026): لو فيه طرف محدد
                             // (existingClientTargetPartyId) بنتخطى فحص التعارض تمامًا وننده
                             // confirmLinkToExistingClient على طول — نفس قرار InfoSection.tsx
