@@ -26,11 +26,17 @@ interface PartySideCardProps {
 // خرائط قصيرة لتحويل حقل الخطأ لعبارة مختصرة تظهر جوه الكارت نفسه، بدل
 // النص الكامل الطويل من casePartiesValidation.ts (اللي مكانه الطبيعي هو
 // رسالة toast لحظة الحفظ، مش مساحة الكارت المطوي الضيقة).
-function shortReason(message: string): string {
+// 🆕 (خطة "تبسيط عرض أطراف الدعوى" — 3 أغسطس 2026): بتاخد الآن كائن
+// الخطأ كامل (مش النص بس) وتتحقق من field==='legal_title' أولاً — لأن
+// نص رسالة المسمى القانوني بقى عامًا ومفيهوش كلمة "المسمى القانوني"
+// بالترتيب اللي كان يسمح بالفحص النصي القديم يلقطها بأمان قبل باقي القواعد.
+function shortReason(error: PartyValidationError): string {
+    if (error.field === 'legal_title') return 'المسمى القانوني ناقص';
+    const message = error.message;
     if (message.includes('مكرر')) return 'الرقم القومي مكرر';
     if (message.includes('الرقم القومي')) return 'الرقم القومي ناقص';
-    if (message.includes('المسمى القانوني')) return 'المسمى القانوني ناقص';
     if (message.includes('ثلاثي')) return 'الاسم لازم يكون ثلاثي';
+    if (message.includes('ثنائي')) return 'الاسم لازم يكون ثنائي على الأقل';
     if (message.includes('صفة')) return 'الصفة ناقصة';
     if (message.includes('الاسم')) return 'الاسم ناقص';
     if (message.includes('موكلنا')) return 'لازم تحدد موكل المكتب';
@@ -38,10 +44,9 @@ function shortReason(message: string): string {
 }
 
 export function PartySideCard({ side, title, list, errors, dimEmpty, onOpen }: PartySideCardProps) {
-    const sideMarker = side === 'plaintiff' ? '(المدعي)' : '(المدعى عليه)';
     const partyIds = new Set(list.map((p) => p.id));
     const sideError = errors.find(
-        (e) => partyIds.has(e.partyId) || (e.partyId === '' && e.field === 'legal_title' && e.message.includes(sideMarker))
+        (e) => partyIds.has(e.partyId) || (e.partyId === '' && e.field === 'legal_title' && e.side === side)
     );
 
     const isEmpty = list.length <= 1 && !list[0]?.name.trim();
@@ -58,7 +63,7 @@ export function PartySideCard({ side, title, list, errors, dimEmpty, onOpen }: P
         if (othersCount > 0) bodyText += ` +${othersCount} ${othersCount === 1 ? 'آخر' : 'آخرين'}`;
     }
     if (sideError) {
-        bodyText = displayName ? `${displayName} — ${shortReason(sideError.message)}` : shortReason(sideError.message);
+        bodyText = displayName ? `${displayName} — ${shortReason(sideError)}` : shortReason(sideError);
     }
 
     const cardCls = sideError
