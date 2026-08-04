@@ -420,6 +420,7 @@ export interface Database {
           secretary_hall: string | null
           secretary_name: string | null
           secretary_mobile: string | null
+          session_group_id: string | null
         }
         Insert: {
           id?: string
@@ -453,6 +454,7 @@ export interface Database {
           secretary_hall?: string | null
           secretary_name?: string | null
           secretary_mobile?: string | null
+          session_group_id?: string | null
         }
         Update: {
           id?: string
@@ -486,6 +488,7 @@ export interface Database {
           secretary_hall?: string | null
           secretary_name?: string | null
           secretary_mobile?: string | null
+          session_group_id?: string | null
         }
         // ⚠️ FIX (14 يوليو 2026): كانت فاضية، وده كان بيمنع supabase-js من
         // استنتاج نوع الـ embed `cases(...)` جوه .select() (بيرجع
