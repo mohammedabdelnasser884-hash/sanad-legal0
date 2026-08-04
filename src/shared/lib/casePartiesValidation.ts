@@ -30,7 +30,7 @@
 // ══════════════════════════════════════════════════════════════
 
 import { validateFullNameParts } from './clientValidation';
-import type { PartyFieldValue } from '../parties/partyTypes';
+import type { PartyFieldValue, PartySide } from '../parties/partyTypes';
 
 const NATIONAL_ID_LEN = 14;
 
@@ -41,6 +41,12 @@ export interface PartyValidationError {
     partyId: string;
     field: 'name' | 'capacity' | 'national_id' | 'legal_title';
     message: string;
+    // 🆕 (خطة "تبسيط عرض أطراف الدعوى" — 3 أغسطس 2026): أي الطرف (أول/
+    // ثاني) خطأ "legal_title" العام (partyId==='') بيخصه — بدل ما مكوّنات
+    // العرض تدوّر جوه نص message نفسه (اللي بقى عام ومفيهوش "(المدعي)"/
+    // "(المدعى عليه)" تاني). فاضي (undefined) للأخطاء المرتبطة بطرف بعينه
+    // (partyId موجود بالفعل بيحدد صاحب الخطأ).
+    side?: PartySide;
 }
 
 // 🆕 نفس شكل PartyValidationError بالظبط — بس للتنبيهات غير المانعة
@@ -71,11 +77,6 @@ export interface PartyLegalTitles {
     plaintiff: string;
     defendant: string;
 }
-
-const SIDE_LABEL_AR: Record<'plaintiff' | 'defendant', string> = {
-    plaintiff: 'الطرف الأول (المدعي)',
-    defendant: 'الطرف الثاني (المدعى عليه)',
-};
 
 /**
  * يتحقق من array الأطراف بالكامل (مدعين + مدعى عليهم مع بعض) قبل الحفظ.
@@ -179,7 +180,8 @@ export function validateParties(
             errors.push({
                 partyId: '',
                 field: 'legal_title',
-                message: `⚠️ ${SIDE_LABEL_AR[side]} فيه أكثر من شخص — لازم تكتب "المسمى القانوني" الجامع لهذا الطرف`,
+                side,
+                message: '⚠️ يُكتب فقط في حالة كون أي من الطرفين الأول أو الثاني أكثر من شخص (مثل الورثة أو الشركاء أو متهمين أو مدعيين)',
             });
         }
     });
