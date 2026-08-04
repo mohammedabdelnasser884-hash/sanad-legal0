@@ -46,11 +46,11 @@ function buildCaseContextText(c: MappedCase, client: MappedClient | null, counts
   const plaintiffParties = caseParties.filter((p) => p.side === 'plaintiff');
   const defendantParties = caseParties.filter((p) => p.side === 'defendant');
   const plaintiffLine = plaintiffParties.length >= 2
-    ? `المدعي/الطاعن (${plaintiffParties.length} أشخاص):\n${buildFullPartiesText(plaintiffParties)}`
-    : `المدعي/الطاعن: ${c.plaintiff_legal_title || c.plaintiff || '—'}${c.plaintiff_role ? ' (' + c.plaintiff_role + ')' : ''}`;
+    ? `الطرف الأول (${plaintiffParties.length} أشخاص):\n${buildFullPartiesText(plaintiffParties)}`
+    : `الطرف الأول: ${c.plaintiff_legal_title || c.plaintiff || '—'}${c.plaintiff_role ? ' (' + c.plaintiff_role + ')' : ''}`;
   const defendantLine = defendantParties.length >= 2
-    ? `المدعى عليه (${defendantParties.length} أشخاص):\n${buildFullPartiesText(defendantParties)}`
-    : `المدعى عليه: ${c.defendant_legal_title || c.defendant || '—'}${c.defendant_role ? ' (' + c.defendant_role + ')' : ''}`;
+    ? `الطرف الثاني (${defendantParties.length} أشخاص):\n${buildFullPartiesText(defendantParties)}`
+    : `الطرف الثاني: ${c.defendant_legal_title || c.defendant || '—'}${c.defendant_role ? ' (' + c.defendant_role + ')' : ''}`;
   const lines = [
     `عنوان القضية: ${c.title || '—'}`,
     `رقم القيد: ${c.number || '—'} / ${c.year || '—'}`,
