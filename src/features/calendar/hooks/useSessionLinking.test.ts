@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, act } from '@testing-library/react';
+import { renderHook, act, waitFor } from '@testing-library/react';
 
 // ══════════════════════════════════════════════════════════════════
 // 🆕 (المرحلة 2 — خطة توسيع الأوفلاين) أول ملف تست لـ useSessionLinking.ts
@@ -60,7 +60,14 @@ function makeDbWriteMock() {
 let dbWrite = makeDbWriteMock();
 
 // mock بسيط لـ db (باراميتر مُحقَن) — بيغطي بس البحث عن موكل مطابق (read-only)
-function makeMockDb(clientsSelectResult: { data?: unknown; error?: unknown } = { data: [], error: null }) {
+// 🆕 (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): باراميتر تالت اختياري
+// partiesData — بيتحكم في نتيجة fetchSessionClientParties (case_parties)
+// عشان نقدر نغطي idlePartyList بأكتر من طرف. افتراضيًا [] زي ما كان
+// (فولباك مسار الاسم الواحد القديم يفضل شغال في التستات اللي مش بتحدده).
+function makeMockDb(
+  clientsSelectResult: { data?: unknown; error?: unknown } = { data: [], error: null },
+  partiesData: unknown[] = [],
+) {
   const ilikeSpy = vi.fn();
   return {
     from: vi.fn((table: string) => {
@@ -98,7 +105,7 @@ function makeMockDb(clientsSelectResult: { data?: unknown; error?: unknown } = {
         const chain = {
           eq: vi.fn(() => ({
             eq: vi.fn(() => ({
-              order: vi.fn(() => Promise.resolve({ data: [], error: null })),
+              order: vi.fn(() => Promise.resolve({ data: partiesData, error: null })),
             })),
             then: (resolve: (v: { data: unknown; error: unknown }) => void, reject?: (e: unknown) => void) =>
               Promise.resolve({ data: [], error: null }).then(resolve, reject),
@@ -562,6 +569,228 @@ describe('useSessionLinking', () => {
       await act(async () => { await result.current.handleAddClientOnly(); });
 
       expect(dbWrite.callsFor('INSERT:clients')).toHaveLength(0);
+    });
+  });
+
+  // 🆕 (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): idlePartyList
+  // بيتملى من case_parties (fetchSessionClientParties) بمجرد ما الهوك
+  // يشتغل، ومفلتر أي طرف اتربط بالفعل (client_id). handleAddClientOnlyForParty
+  // بتنده onOpenCreateClientForSessionParty بدل أي INSERT مباشر — التستات
+  // دي بتغطي بالظبط السيناريوهات التلاتة المذكورة في تقرير "المتبقي" (Phase 5):
+  // فولباك الطرف الواحد، زرار مستقل لكل طرف بتعدد أطراف، وفلترة الأطراف
+  // المربوطة بالفعل عند إعادة فتح الموديل.
+  describe('idlePartyList / handleAddClientOnlyForParty', () => {
+    it('جلسة قديمة من غير case_parties (فولباك) → idlePartyList فاضية', async () => {
+      const mockDb = makeMockDb({ data: [], error: null }, []);
+      const { result } = renderHook(() => useSessionLinking(makeSession(), mockDb, vi.fn()));
+
+      await waitFor(() => { expect(result.current.idlePartyList).toEqual([]); });
+    });
+
+    it('جلسة بأكتر من طرف is_client=true → idlePartyList بيتملى بكل الأطراف مرتّبة بـ sort_order', async () => {
+      const parties = [
+        { id: 'party-1', side: 'plaintiff', name: 'أحمد محمد', national_id: '111', power_of_attorney: null, address: null, sort_order: 0, client_id: null },
+        { id: 'party-2', side: 'defendant', name: 'شركة النور', national_id: null, power_of_attorney: null, address: null, sort_order: 1, client_id: null },
+      ];
+      const mockDb = makeMockDb({ data: [], error: null }, parties);
+      const { result } = renderHook(() => useSessionLinking(makeSession(), mockDb, vi.fn()));
+
+      await waitFor(() => { expect(result.current.idlePartyList).toHaveLength(2); });
+      expect(result.current.idlePartyList.map((p) => p.id)).toEqual(['party-1', 'party-2']);
+    });
+
+    it('🆕 طرف اتربط بموكل بالفعل (client_id مش فاضي) → بيتستبعد من idlePartyList (إعادة فتح الموديل)', async () => {
+      const parties = [
+        { id: 'party-1', side: 'plaintiff', name: 'أحمد محمد', national_id: '111', power_of_attorney: null, address: null, sort_order: 0, client_id: 'client-already-linked' },
+        { id: 'party-2', side: 'defendant', name: 'شركة النور', national_id: null, power_of_attorney: null, address: null, sort_order: 1, client_id: null },
+      ];
+      const mockDb = makeMockDb({ data: [], error: null }, parties);
+      const { result } = renderHook(() => useSessionLinking(makeSession(), mockDb, vi.fn()));
+
+      await waitFor(() => { expect(result.current.idlePartyList).toHaveLength(1); });
+      expect(result.current.idlePartyList[0].id).toBe('party-2');
+    });
+
+    it('handleAddClientOnlyForParty على الطرف الأول → بينده onOpenCreateClientForSessionParty بـ isPrimaryParty=true وبيانات الطرف كاملة', async () => {
+      const parties = [
+        { id: 'party-1', side: 'plaintiff', name: 'أحمد محمد', national_id: '111', power_of_attorney: 'توكيل 5', address: 'القاهرة', sort_order: 0, client_id: null },
+        { id: 'party-2', side: 'defendant', name: 'شركة النور', national_id: null, power_of_attorney: null, address: null, sort_order: 1, client_id: null },
+      ];
+      const mockDb = makeMockDb({ data: [], error: null }, parties);
+      const onOpenCreateClientForSessionParty = vi.fn();
+      const session = makeSession({ id: 'session-multi-1' });
+      const { result } = renderHook(() =>
+        useSessionLinking(session, mockDb, vi.fn(), undefined, undefined, onOpenCreateClientForSessionParty));
+
+      await waitFor(() => { expect(result.current.idlePartyList).toHaveLength(2); });
+      act(() => { result.current.handleAddClientOnlyForParty(result.current.idlePartyList[0]); });
+
+      expect(onOpenCreateClientForSessionParty).toHaveBeenCalledWith(
+        'party-1', 'session-multi-1', true, 'أحمد محمد', '111', 'توكيل 5', 'القاهرة', expect.any(Function),
+      );
+    });
+
+    it('handleAddClientOnlyForParty على طرف تاني (مش أول واحد) → isPrimaryParty=false', async () => {
+      const parties = [
+        { id: 'party-1', side: 'plaintiff', name: 'أحمد محمد', national_id: null, power_of_attorney: null, address: null, sort_order: 0, client_id: null },
+        { id: 'party-2', side: 'defendant', name: 'شركة النور', national_id: null, power_of_attorney: null, address: null, sort_order: 1, client_id: null },
+      ];
+      const mockDb = makeMockDb({ data: [], error: null }, parties);
+      const onOpenCreateClientForSessionParty = vi.fn();
+      const { result } = renderHook(() =>
+        useSessionLinking(makeSession(), mockDb, vi.fn(), undefined, undefined, onOpenCreateClientForSessionParty));
+
+      await waitFor(() => { expect(result.current.idlePartyList).toHaveLength(2); });
+      act(() => { result.current.handleAddClientOnlyForParty(result.current.idlePartyList[1]); });
+
+      expect(onOpenCreateClientForSessionParty).toHaveBeenCalledWith(
+        'party-2', expect.any(String), false, 'شركة النور', null, null, null, expect.any(Function),
+      );
+    });
+
+    it('🆕 بعد نجاح الربط (onAfterLink بتتنادى) → الطرف ده بس بيتضاف لـ linkedIdlePartyIds ويختفي زراره، والباقيين فاضلين', async () => {
+      const parties = [
+        { id: 'party-1', side: 'plaintiff', name: 'أحمد محمد', national_id: null, power_of_attorney: null, address: null, sort_order: 0, client_id: null },
+        { id: 'party-2', side: 'defendant', name: 'شركة النور', national_id: null, power_of_attorney: null, address: null, sort_order: 1, client_id: null },
+      ];
+      const mockDb = makeMockDb({ data: [], error: null }, parties);
+      let capturedOnAfterLink: (() => void) | undefined;
+      const onOpenCreateClientForSessionParty = vi.fn((...args: unknown[]) => {
+        capturedOnAfterLink = args[7] as () => void;
+      });
+      const { result } = renderHook(() =>
+        useSessionLinking(makeSession(), mockDb, vi.fn(), undefined, undefined, onOpenCreateClientForSessionParty));
+
+      await waitFor(() => { expect(result.current.idlePartyList).toHaveLength(2); });
+      act(() => { result.current.handleAddClientOnlyForParty(result.current.idlePartyList[0]); });
+      act(() => { capturedOnAfterLink?.(); });
+
+      expect(result.current.linkedIdlePartyIds.has('party-1')).toBe(true);
+      expect(result.current.linkedIdlePartyIds.has('party-2')).toBe(false);
+    });
+
+    it('مفيش onOpenCreateClientForSessionParty متوصّلة (undefined) → مفيش استثناء (الواجهة هي اللي بتفولباك)', async () => {
+      const parties = [
+        { id: 'party-1', side: 'plaintiff', name: 'أحمد محمد', national_id: null, power_of_attorney: null, address: null, sort_order: 0, client_id: null },
+      ];
+      const mockDb = makeMockDb({ data: [], error: null }, parties);
+      const { result } = renderHook(() => useSessionLinking(makeSession(), mockDb, vi.fn()));
+
+      await waitFor(() => { expect(result.current.idlePartyList).toHaveLength(1); });
+
+      expect(() => {
+        act(() => { result.current.handleAddClientOnlyForParty(result.current.idlePartyList[0]); });
+      }).not.toThrow();
+    });
+  });
+
+  // 🆕 (Phase 3 — خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026):
+  // startExistingClientSearch/cancelExistingClientSearch + الفرع الجديد في
+  // confirmLinkToExistingClient (existingClientTargetPartyId). مرآة تست
+  // لسيناريوهات جانب القضية (InfoSection.tsx) بس هنا عبر case_parties.id/
+  // case_sessions.client_id (linkClientToSessionParty) بدل case_parties
+  // فقط (linkClientToParty).
+  describe('startExistingClientSearch / cancelExistingClientSearch / confirmLinkToExistingClient (طرف بعينه)', () => {
+    const parties = [
+      { id: 'party-1', side: 'plaintiff', name: 'أحمد محمد', national_id: '111', power_of_attorney: null, address: null, sort_order: 0, client_id: null },
+      { id: 'party-2', side: 'defendant', name: 'شركة النور', national_id: null, power_of_attorney: null, address: null, sort_order: 1, client_id: null },
+    ];
+
+    it('startExistingClientSearch(party) → existingClientTargetPartyId = id الطرف، clientStep = searching، وحالة البحث القديمة بتتصفّر', async () => {
+      const mockDb = makeMockDb({ data: [], error: null }, parties);
+      const { result } = renderHook(() => useSessionLinking(makeSession(), mockDb, vi.fn()));
+      await waitFor(() => { expect(result.current.idlePartyList).toHaveLength(2); });
+
+      act(() => { result.current.startExistingClientSearch(result.current.idlePartyList[1]); });
+
+      expect(result.current.existingClientTargetPartyId).toBe('party-2');
+      expect(result.current.clientStep).toBe('searching');
+      expect(result.current.clientSearch).toBe('');
+      expect(result.current.searchResults).toEqual([]);
+      expect(result.current.selectedExistingClient).toBeNull();
+    });
+
+    it('startExistingClientSearch(null) → existingClientTargetPartyId = null (المسار القديم، الجلسة كلها)', async () => {
+      const mockDb = makeMockDb({ data: [], error: null }, parties);
+      const { result } = renderHook(() => useSessionLinking(makeSession(), mockDb, vi.fn()));
+      await waitFor(() => { expect(result.current.idlePartyList).toHaveLength(2); });
+
+      act(() => { result.current.startExistingClientSearch(null); });
+
+      expect(result.current.existingClientTargetPartyId).toBeNull();
+      expect(result.current.clientStep).toBe('searching');
+    });
+
+    it('cancelExistingClientSearch → رجوع لـ idle وتصفير existingClientTargetPartyId وحالة البحث', async () => {
+      const mockDb = makeMockDb({ data: [], error: null }, parties);
+      const { result } = renderHook(() => useSessionLinking(makeSession(), mockDb, vi.fn()));
+      await waitFor(() => { expect(result.current.idlePartyList).toHaveLength(2); });
+
+      act(() => { result.current.startExistingClientSearch(result.current.idlePartyList[0]); });
+      expect(result.current.clientStep).toBe('searching');
+
+      act(() => { result.current.cancelExistingClientSearch(); });
+
+      expect(result.current.clientStep).toBe('idle');
+      expect(result.current.existingClientTargetPartyId).toBeNull();
+      expect(result.current.clientSearch).toBe('');
+      expect(result.current.searchResults).toEqual([]);
+      expect(result.current.selectedExistingClient).toBeNull();
+    });
+
+    it('confirmLinkToExistingClient مع existingClientTargetPartyId (طرف تاني، مش أساسي) → UPDATE:case_parties بس، مفيش UPDATE:case_sessions، الطرف بيتضاف لـ linkedIdlePartyIds', async () => {
+      const mockDb = makeMockDb({ data: [], error: null }, parties);
+      const { result } = renderHook(() => useSessionLinking(makeSession({ id: 'session-x' }), mockDb, vi.fn()));
+      await waitFor(() => { expect(result.current.idlePartyList).toHaveLength(2); });
+
+      act(() => { result.current.startExistingClientSearch(result.current.idlePartyList[1]); });
+      act(() => { result.current.setSelectedExistingClient({ id: 'client-9', full_name: 'محمود علي', client_name: null, national_id: null, cr_number: null }); });
+
+      await act(async () => { await result.current.confirmLinkToExistingClient(); });
+
+      expect(dbWrite.callsFor('UPDATE:case_parties')[0]).toEqual(expect.objectContaining({
+        id: 'party-2', data: { client_id: 'client-9' },
+      }));
+      expect(dbWrite.callsFor('UPDATE:case_sessions')).toHaveLength(0);
+      expect(result.current.linkedIdlePartyIds.has('party-2')).toBe(true);
+      // ⚡ الفرع الجديد بيرجع لـ idle (زرار مستقل تاني) بدل 'done' (زي مسار
+      // الجلسة كلها القديم) — نفس فلسفة handleAddClientOnlyForParty.
+      expect(result.current.clientStep).toBe('idle');
+      expect(result.current.existingClientTargetPartyId).toBeNull();
+    });
+
+    it('confirmLinkToExistingClient مع existingClientTargetPartyId = أول طرف (أساسي) → UPDATE:case_parties وUPDATE:case_sessions.client_id مع بعض', async () => {
+      const mockDb = makeMockDb({ data: [], error: null }, parties);
+      const { result } = renderHook(() => useSessionLinking(makeSession({ id: 'session-y' }), mockDb, vi.fn()));
+      await waitFor(() => { expect(result.current.idlePartyList).toHaveLength(2); });
+
+      act(() => { result.current.startExistingClientSearch(result.current.idlePartyList[0]); });
+      act(() => { result.current.setSelectedExistingClient({ id: 'client-1', full_name: 'أحمد محمد', client_name: null, national_id: null, cr_number: null }); });
+
+      await act(async () => { await result.current.confirmLinkToExistingClient(); });
+
+      expect(dbWrite.callsFor('UPDATE:case_parties')[0]).toEqual(expect.objectContaining({
+        id: 'party-1', data: { client_id: 'client-1' },
+      }));
+      expect(dbWrite.callsFor('UPDATE:case_sessions')[0]).toEqual(expect.objectContaining({
+        id: 'session-y', data: { client_id: 'client-1' },
+      }));
+    });
+
+    it('confirmLinkToExistingClient من غير existingClientTargetPartyId (المسار القديم) → UPDATE:case_sessions بالحقول الحرة التلاتة زي ما كان بالظبط، ومفيش UPDATE:case_parties', async () => {
+      const mockDb = makeMockDb({ data: [], error: null }, []);
+      const session = makeSession({ id: 'session-legacy', plaintiff: 'اسم قديم' });
+      const { result } = renderHook(() => useSessionLinking(session, mockDb, vi.fn()));
+
+      act(() => { result.current.setSelectedExistingClient({ id: 'client-legacy', full_name: 'موكل قديم', client_name: null, national_id: '999', cr_number: '5' }); });
+      await act(async () => { await result.current.confirmLinkToExistingClient(); });
+
+      expect(dbWrite.callsFor('UPDATE:case_parties')).toHaveLength(0);
+      expect(dbWrite.callsFor('UPDATE:case_sessions')[0]).toEqual(expect.objectContaining({
+        id: 'session-legacy',
+        data: { client_id: 'client-legacy', plaintiff: 'موكل قديم', plaintiff_national_id: '999', plaintiff_power_of_attorney: '5' },
+      }));
+      expect(result.current.clientStep).toBe('done');
     });
   });
 });
