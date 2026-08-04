@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { toast } from '../../../shared/lib/notifications';
 import { validateFullNameParts, checkClientDuplicate } from '../../../shared/lib/clientValidation';
 import { showErrorToast } from '../../../shared/lib/errorReporting';
@@ -10,9 +10,15 @@ import type { Database } from '../../../database.types';
 import type { CaseSessionRow, ClientRow } from '../../../types';
 import {
   makeOfflineTempId, isOfflineTempId, withFkOfflineSentinel, withCaseSelfOfflineSentinel, findMatchingClientByName, buildCaseInsertData,
-  movePartiesFromSessionToCase, fetchSessionClientParties, matchClientsForParties, linkClientToParty,
+  movePartiesFromSessionToCase, fetchSessionClientParties, matchClientsForParties, linkClientToParty, linkClientToSessionParty,
 } from './caseSessionLinkingShared';
 import type { SessionClientParty, PartyClientMatch } from './caseSessionLinkingShared';
+// ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): نفس نوع الكول-باك
+// المستخدم في useClientLinking.ts (idlePartyList/handleAddClientOnlyForParty)
+// — بنعيد استخدامه هنا بدل ما نكرره، عشان "🔗 ربط" (جلسة محفوظة بالفعل)
+// يشتغل بنفس منطق "خطوة idle فور الحفظ" بالظبط بدل منطقه القديم المنفصل
+// (INSERT مباشر بحقلين + طرف واحد بس).
+import type { OpenCreateClientForSessionParty } from './useClientLinking';
 
 // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 6): أضيف cr_number (رقم
 // التوكيل) — لازم لكشف التعارض قبل الربط في confirmLinkToExistingClient.
@@ -40,6 +46,15 @@ export function useSessionLinking(
   // نسخة الجلسة اللي ممكن تكون قديمة لو الموكل تعدّل بعد آخر مرة الجلسة
   // اتفتحت (نفس فيكس SessionUpdateModal.tsx).
   linkedClient?: ClientRow | null,
+  // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): كول-باك بيفتح
+  // NewClientModal الموحّد لطرف بعينه من idlePartyList تحت (خطوة idle، قبل
+  // حتى ما يدوس "إنشاء ملف قضية") — بيوصل من App.tsx
+  // (handleOpenCreateClientForSessionPartyOnly)، نفس الدالة المستخدمة في
+  // NewStandaloneSessionModal.tsx بالحرف. لو مش متوصّلة (undefined)،
+  // handleAddClientOnlyForParty تحت بترجع من غير ما تعمل حاجة — الواجهة
+  // (LinkSessionModal) بتفولباك تلقائيًا لزرار handleAddClientOnly القديم
+  // في الحالة دي لأن idlePartyList برضه مش هتتملى غير لو فيه أطراف فعليًا.
+  onOpenCreateClientForSessionParty?: OpenCreateClientForSessionParty,
 ) {
   const [linkingCase, setLinkingCase] = useState(false);
   const [linkingClient, setLinkingClient] = useState(false);
@@ -68,6 +83,36 @@ export function useSessionLinking(
   const [partyList, setPartyList] = useState<SessionClientParty[]>([]);
   const [partyMatches, setPartyMatches] = useState<PartyClientMatch[]>([]);
   const [partyIndex, setPartyIndex] = useState(0);
+
+  // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): مرآة لـ
+  // idlePartyList/linkedIdlePartyIds في useClientLinking.ts (مرحلة 13 جزء
+  // 2) — هنا بس الفرق إن session.id حقيقي دايمًا (الجلسة already محفوظة)،
+  // فمفيش داعي ننتظر أي شرط زي savedFormData.sessionId هناك؛ الجلب بيحصل
+  // بمجرد ما الهوك يشتغل. partyList/partyMatches فوق (اللي بتتملى جوه
+  // handleLinkCase بعد إنشاء القضية) فضلوا زي ما هما بالظبط — دول
+  // مختلفين تمامًا (خاصين بويزارد "بعد إنشاء القضية"، مش خطوة idle).
+  const [idlePartyList, setIdlePartyList] = useState<SessionClientParty[]>([]);
+  const [linkedIdlePartyIds, setLinkedIdlePartyIds] = useState<Set<string>>(new Set());
+
+  // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، Phase 3 — 4 أغسطس 2026): null =
+  // المسار القديم ("ربط بموكل موجود" للجلسة كلها، فولباك الجلسات القديمة
+  // بلا case_parties) — قيمة = id طرف بعينه من idlePartyList يبقى
+  // البحث/الربط الجاي (searchExistingClients/confirmLinkToExistingClient)
+  // مخصص له بس عبر linkClientToSessionParty، بنفس فلسفة handleAddClientOnlyForParty.
+  const [existingClientTargetPartyId, setExistingClientTargetPartyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIdlePartyList([]);
+    setLinkedIdlePartyIds(new Set());
+    fetchSessionClientParties(db, session.id).then((parties) => {
+      // ⚡ فلترة الأطراف اللي اتربطت بالفعل (client_id مش فاضي) — عكس
+      // useClientLinking.ts، الجلسة هنا already محفوظة فممكن يكون فيها
+      // أطراف اتربطت من قبل (عبر إعادة فتح موديل "🔗 ربط" أكتر من مرة).
+      if (!cancelled) setIdlePartyList(parties.filter((p) => !p.client_id));
+    });
+    return () => { cancelled = true; };
+  }, [db, session.id]);
 
   /** بتتنقل للطرف الجاي في partyList (أو 'done' لو ده آخر واحد) — وبتحدّث
    * foundClient/foundClientMatchType/clientStep بناءً على مطابقة الطرف الجاي
@@ -574,6 +619,33 @@ export function useSessionLinking(
     if (!selectedExistingClient) return;
     setLinkingExisting(true);
     try {
+      // ⚡ NEW (Phase 3 — 4 أغسطس 2026): existingClientTargetPartyId متحدد
+      // (من startExistingClientSearch) وموجود فعلاً في idlePartyList → الربط
+      // بيبقى للطرف ده بس (case_parties.client_id + case_sessions.client_id
+      // لو ده الطرف الأساسي فقط) عبر linkClientToSessionParty — بدل تحديث
+      // الجلسة كلها زي موكل واحد. مفيش فحص تعارض هنا عمدًا (case_parties
+      // بيحتفظ ببياناته الخاصة لكل طرف على حدة، الواجهة هي اللي بتتخطى
+      // خطوة فحص التعارض في المسار ده). target=null (المسار القديم) فاضل
+      // زي ما هو بالظبط تحته — صفر تغيير سلوك.
+      const targetParty = existingClientTargetPartyId
+        ? idlePartyList.find((p) => p.id === existingClientTargetPartyId)
+        : undefined;
+      if (targetParty) {
+        const isPrimary = idlePartyList[0]?.id === targetParty.id;
+        const result = await linkClientToSessionParty(targetParty.id, selectedExistingClient.id, isPrimary, session.id);
+        if (!result.ok) {
+          showErrorToast('session_client_link', new Error('link party to existing client failed'), `تعذّر ربط "${targetParty.name}" بالموكل. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.`, 'ربط طرف بموكل');
+          return;
+        }
+        toast(`✅ تم ربط "${targetParty.name}" بـ"${selectedExistingClient.client_name || selectedExistingClient.full_name || '—'}"`);
+        setLinkedIdlePartyIds((prev) => new Set(prev).add(targetParty.id));
+        setExistingClientTargetPartyId(null);
+        setClientSearch(''); setSearchResults([]); setSelectedExistingClient(null);
+        onClientAdded?.();
+        setClientStep('idle');
+        return;
+      }
+      // ── مسار قديم (الجلسة كلها) — زي ما هو بالظبط ──
       // ⚡ FIX (مرحلة 0 — توسيع الأوفلاين): تحويل من db.from() المباشر لـ
       // __dbWrite. عملية UPDATE مستقلة بمعرّفين حقيقيين بالفعل (session.id
       // جلسة موجودة فعلاً، selectedExistingClient.id موكل موجود فعلاً) —
@@ -624,6 +696,46 @@ export function useSessionLinking(
     goToNextPartyOrDone(partyIndex, partyList, partyMatches);
   };
 
+  // ⚡ NEW (Phase 3 — 4 أغسطس 2026): بتفتح خطوة "searching" مخصصة لطرف
+  // بعينه من idlePartyList (party=null → المسار القديم، الجلسة كلها —
+  // نفس زرار "ربط بموكل موجود بالفعل" القديم بالظبط). بتصفّر حالة البحث
+  // القديمة (لو فاضلة من مرة سابقة) قبل ما تفتح، نفس نمط pickExisting في
+  // InfoSection.tsx.
+  const startExistingClientSearch = (party: SessionClientParty | null) => {
+    setExistingClientTargetPartyId(party ? party.id : null);
+    setClientSearch('');
+    setSearchResults([]);
+    setSelectedExistingClient(null);
+    setClientStep('searching');
+  };
+
+  // ⚡ NEW (Phase 3 — 4 أغسطس 2026): عكس startExistingClientSearch — رجوع
+  // لخطوة idle وتصفير كل حالة البحث/الاختيار، نفس زرار "رجوع" القديم بس
+  // بيصفّر existingClientTargetPartyId كمان عشان ميفضلش عالق لطرف سابق.
+  const cancelExistingClientSearch = () => {
+    setExistingClientTargetPartyId(null);
+    setClientSearch('');
+    setSearchResults([]);
+    setSelectedExistingClient(null);
+    setClientStep('idle');
+  };
+
+  // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): نفس فكرة
+  // handleAddClientOnlyForParty في useClientLinking.ts بالحرف — بتتنادى
+  // لكل زرار مستقل على حدة (مش wizard) من idlePartyList. الطرف "الأساسي"
+  // بتحدد بمقارنة id الطرف بأول عنصر في idlePartyList (نفس التعريف
+  // المستخدم في كل مكان تاني في المشروع). onAfterLink بتضيف الطرف لـ
+  // linkedIdlePartyIds عشان زراره يختفي فورًا من غير ما نستنى إعادة فتح
+  // الموديل.
+  const handleAddClientOnlyForParty = (party: SessionClientParty) => {
+    const isPrimary = idlePartyList[0]?.id === party.id;
+    onOpenCreateClientForSessionParty?.(
+      party.id, session.id, isPrimary,
+      party.name, party.national_id, party.power_of_attorney, party.address,
+      () => setLinkedIdlePartyIds((prev) => new Set(prev).add(party.id)),
+    );
+  };
+
   return {
     linkingCase, linkingClient, linkingToCase, linkingExisting,
     createdCaseId, clientStep, setClientStep, foundClient, foundClientMatchType,
@@ -631,6 +743,17 @@ export function useSessionLinking(
     // ⚡ NEW (7.2 جزء 2): partyList/partyIndex لعرض "طرف X من Y" وتحديد
     // الطرف الحالي في الواجهة، وhandleSkipParty لتخطي الطرف ده بس.
     partyList, partyIndex, handleSkipParty,
+    // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): idlePartyList/
+    // linkedIdlePartyIds لعرض زرار مستقل لكل طرف في خطوة "idle" (قبل
+    // إنشاء القضية)، وhandleAddClientOnlyForParty لفتح NewClientModal
+    // الموحّد لطرف بعينه بدل INSERT مباشر.
+    idlePartyList, linkedIdlePartyIds, handleAddClientOnlyForParty,
+    // ⚡ NEW (Phase 3 — 4 أغسطس 2026): existingClientTargetPartyId (null =
+    // مسار الجلسة كلها القديم) + startExistingClientSearch/
+    // cancelExistingClientSearch لفتح/إغلاق خطوة "searching" مخصصة لطرف
+    // بعينه — الواجهة (StandaloneSessionDetailModal.tsx) هي اللي بتستخدمهم
+    // بدل setClientStep('searching') / setClientStep('idle') المباشرين.
+    existingClientTargetPartyId, startExistingClientSearch, cancelExistingClientSearch,
     handleLinkCase, handleLinkExistingClient, handleAddAndLinkClient, handleAddClientOnly,
     searchExistingClients, confirmLinkToExistingClient,
   };
