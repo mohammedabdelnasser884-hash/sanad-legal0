@@ -84,8 +84,8 @@ vi.mock('../../../../shared/lib/dataAccess', () => ({ logActivity: (...a: unknow
 
 const PROFILE = { id: 'admin-1', full_name: 'أحمد المدير', tenant_id: 'tenant-1' } as unknown as ProfileRow;
 
-// الجداول العشرة الأساسية (بعد إضافة case_parties في مرحلة 12) + profiles
-// اللي بيتصدّروا في كل نسخة احتياطية
+// الجداول العشرة الأساسية (بما فيها case_parties من مرحلة 12 من خطة تعدد
+// الأطراف) + profiles اللي بيتصدّروا في كل نسخة احتياطية
 // (نفس ترتيب BACKUP_TABLES في الكود + 'profiles' المُضافة بعد الحلقة)
 const ALL_BACKUP_TABLES = ['clients','cases','case_sessions','case_parties','case_fees','fee_payments','case_documents','reminders','client_portal_pins','activity_log','profiles'];
 const RESTORE_DELETE_ORDER = ['case_parties','fee_payments','case_fees','case_documents','case_sessions','reminders','client_portal_pins','cases','clients'];
@@ -120,7 +120,7 @@ describe('useAdminBackup', () => {
   });
 
   describe('handleCreateBackup', () => {
-    it('نجاح كامل → بيصدّر كل الجداول العشرة (التسعة + profiles)، client_portal_pins بأعمدة محدودة والباقي بـ "*"، ثم يحفظ الباك أب ويعمل fetchBackups', async () => {
+    it('نجاح كامل → بيصدّر كل الجداول الإحدى عشر (العشرة + profiles)، client_portal_pins بأعمدة محدودة والباقي بـ "*"، ثم يحفظ الباك أب ويعمل fetchBackups', async () => {
       const { result } = setup();
       await act(async () => { await result.current.handleCreateBackup(); });
 
