@@ -570,7 +570,7 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
         // linkedIdlePartyIds لعرض زرار مستقل لكل طرف في خطوة "idle"،
         // وhandleAddClientOnlyForParty لفتح NewClientModal الموحّد لطرف
         // بعينه بدل INSERT مباشر.
-        idlePartyList, linkedIdlePartyIds, handleAddClientOnlyForParty,
+        idlePartyList, linkedIdlePartyIds, handleAddClientOnlyForParty, idlePartyListLoaded,
         // ⚡ NEW (Phase 3 — 4 أغسطس 2026): existingClientTargetPartyId (null =
         // مسار الجلسة كلها القديم) + startExistingClientSearch/
         // cancelExistingClientSearch لفتح/إغلاق خطوة "searching" مخصصة لطرف
@@ -618,13 +618,23 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                             React.createElement('span', null, '⚖️'),
                             React.createElement('span', null, linkingCase ? '⏳ جاري الإنشاء...' : 'إنشاء ملف قضية من هذه البيانات')
                         ),
+                        // 🔒 FIX (تحليل لوجز CI — 4 أغسطس 2026): idlePartyList بيتجاب
+                        // async، وقبل ما يخلص كانت [] بتتفسّر غلط كـ"جلسة قديمة من غير
+                        // أطراف" فتظهر الأزرار legacy (startExistingClientSearch(null))
+                        // بدل زرار الطرف الفعلي — existingClientTargetPartyId كان بيفضل
+                        // عالق على null حتى بعد ما الأطراف توصل. دلوقتي بنستنى
+                        // idlePartyListLoaded قبل ما نعرض أي زرار من الاتنين دول.
+                        ...(!hasClient && !idlePartyListLoaded ? [React.createElement('p', {
+                            key: 'link-session-loading',
+                            className: 'text-[10px] text-slate-500 text-center py-2'
+                        }, '⏳ جاري تحميل بيانات الجلسة...')] : []),
                         // ⚡ CHANGED (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): زرار
                         // مستقل لكل طرف is_client=true في idlePartyList (بدل زرار واحد
                         // مبني على session.plaintiff بس، بينشئ أول طرف ويتجاهل الباقيين) —
                         // نفس نمط "postSave" في NewStandaloneSessionModal.tsx بالحرف. جلسة
                         // قديمة/بلا case_parties (idlePartyList فاضية) → فولباك كامل
                         // للزرار الواحد القديم، صفر تغيير سلوك.
-                        ...(!hasClient ? (idlePartyList.length === 0
+                        ...(!hasClient && idlePartyListLoaded ? (idlePartyList.length === 0
                             ? [hasPlaintiff && React.createElement('button', {
                                 key: 'link-session-add-client-only-legacy',
                                 onClick: handleAddClientOnly,
@@ -657,7 +667,7 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                         // startExistingClientSearch(party). جلسة قديمة/بلا case_parties
                         // (idlePartyList فاضية) → فولباك كامل للزرار الواحد القديم
                         // (startExistingClientSearch(null) = المسار القديم)، صفر تغيير سلوك.
-                        ...(!hasClient ? (idlePartyList.length === 0
+                        ...(!hasClient && idlePartyListLoaded ? (idlePartyList.length === 0
                             ? [React.createElement('button', {
                                 key: 'link-session-search-existing-legacy',
                                 onClick: () => startExistingClientSearch(null),
@@ -736,7 +746,6 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                     ),
                     selectedExistingClient && React.createElement('button', {
                         onClick: () => {
-                            console.error('[DEBUG link-existing-client-confirm onClick]', 'existingClientTargetPartyId=' + existingClientTargetPartyId, 'showMismatchConfirm=' + showMismatchConfirm, 'linkingExisting=' + linkingExisting);
                             // ⚡ CHANGED (Phase 3 — 4 أغسطس 2026): لو فيه طرف محدد
                             // (existingClientTargetPartyId) بنتخطى فحص التعارض تمامًا وننده
                             // confirmLinkToExistingClient على طول — نفس قرار InfoSection.tsx
