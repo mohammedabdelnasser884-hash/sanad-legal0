@@ -33,6 +33,19 @@ export function isOfflineTempId(id: string): boolean {
   return id.startsWith('tmp-');
 }
 
+/** معرّف دائم (مش مؤقت) لتجميع سلسلة جلسات الجلسة المستقلة الواحدة عبر
+ * عمود session_group_id — أول مرة الجلسة "تتحدّث" (SessionUpdateModal)
+ * بيتولّد هنا ويتخزن على الجلسة القديمة والجديدة معًا، وبعد كده بينتقل
+ * كما هو لكل جلسة تالية في نفس السلسلة. بيستخدم crypto.randomUUID لو
+ * متاحة (كل المتصفحات الحديثة)، مع fallback بسيط زي makeOfflineTempId
+ * فوق لو مش متاحة لأي سبب. */
+export function makeSessionGroupId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `sg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 /** لو caseId لسه تمبيد (القضية نفسها اتقيدت أوفلاين ولسه ما اتزامنتش)،
  * بيضيف sentinel الحل الذاتي (_offlineSelfTempId + _offlineSelfFallbackName)
  * عشان دورة المزامنة تقدر تحل الـ id الحقيقي قبل تنفيذ الـ UPDATE ده —
@@ -340,6 +353,14 @@ export interface SessionClientParty {
   power_of_attorney: string | null;
   address: string | null;
   sort_order: number;
+  // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): مضاف اختياري
+  // — الاستهلاك القديم (movePartiesFromSessionToCase/matchClientsForParties
+  // جوه handleLinkCase) بيتجاهله زي ما هو، صفر تغيير سلوك هناك. مستخدم
+  // بس في useSessionLinking.ts (idlePartyList) عشان يفلتر الأطراف اللي
+  // اتربطت بالفعل قبل ما موديل "🔗 ربط" يتفتح تاني (خلاف
+  // useClientLinking.ts اللي بيضمن إن كل الأطراف الراجعة مش مربوطة لأن
+  // الجلسة هناك لسه جديدة تمامًا).
+  client_id?: string | null;
 }
 
 /**
@@ -357,7 +378,7 @@ export async function fetchSessionClientParties(
   // ⚠️ case_parties بقت مضافة في database.types.ts (خطة تعدد الأطراف،
   // مرحلة 1) — مفيش داعي لكاست 'as cases' تاني هنا.
   const { data, error } = await db.from('case_parties')
-    .select('id,side,name,national_id,power_of_attorney,address,sort_order')
+    .select('id,side,name,national_id,power_of_attorney,address,sort_order,client_id')
     .eq('session_id', sessionId)
     .eq('is_client', true)
     .order('sort_order', { ascending: true });
