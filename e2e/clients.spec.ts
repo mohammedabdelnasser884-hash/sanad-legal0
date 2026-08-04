@@ -85,6 +85,11 @@ test.describe('الموكلين — تعديل', () => {
     const updatedName = originalName + ' - معدّل';
     await page.getByTestId('edit-client-name').fill(updatedName);
     await page.getByTestId('save-client-edit-button').click();
+    // ⚡ NEW (تنبيه أثر التعديل): بعد الفاليديشن، المودال بيعرض تنبيه
+    // "التعديل ده هيتطبق في كل مكان..." ولازم تأكيد صريح قبل الحفظ الفعلي
+    // (راجع EditClientModal.tsx — showImpactWarning). كان الاختبار القديم
+    // بيفترض إن ضغطة save-client-edit-button بتحفظ على طول.
+    await page.getByTestId('edit-client-impact-confirm').click();
 
     await expectToast(page, '✅ تم تحديث بيانات الموكل');
     // المودالين (تعديل + تفاصيل) اتقفلوا بعد نجاح التعديل
@@ -106,9 +111,15 @@ test.describe('الموكلين — تعديل', () => {
 
     await page.getByTestId('edit-client-national-id').fill(nationalIdA);
     await page.getByTestId('save-client-edit-button').click();
+    // ⚡ NEW: فحص تكرار الرقم القومي بيحصل فعليًا جوه onSave، اللي بينفّذ
+    // بس بعد تأكيد تنبيه الأثر (نفس ملحوظة تست "تعديل موكل موجود بنجاح").
+    await page.getByTestId('edit-client-impact-confirm').click();
 
     await expectToast(page, '⚠️ الرقم القومي موجود بالفعل لموكل مسجل من قبل');
-    // مودال التعديل لسه مفتوح (مفيش حفظ حصل)
+    // مودال التعديل لسه مفتوح (مفيش حفظ حصل) — بيرجع لشاشة تنبيه الأثر
+    // نفسها (onSave رجع false)، فبنرجع لفورم التعديل بزرار "تراجع" ونتأكد
+    // إن زرار الحفظ ظاهر تاني.
+    await page.getByTestId('edit-client-impact-cancel').click();
     await expect(page.getByTestId('save-client-edit-button')).toBeVisible();
   });
 
@@ -123,8 +134,14 @@ test.describe('الموكلين — تعديل', () => {
     await page.getByTestId('client-edit-trigger').click();
 
     await page.getByTestId('edit-client-name').fill(name + ' - معدّل مرتين');
+    await page.getByTestId('save-client-edit-button').click();
+    // ⚡ NEW: الحفظ الفعلي (onSave) بيتنفذ من زرار التأكيد في شاشة تنبيه
+    // الأثر، مش من save-client-edit-button نفسه (اللي بقى بس بيفتح شاشة
+    // التنبيه). فالدبل-كليك الحقيقي اللي محتاج حماية دلوقتي هو على
+    // edit-client-impact-confirm.
+    await page.getByTestId('edit-client-impact-warning').waitFor({ state: 'visible', timeout: 5_000 });
     await page.evaluate(() => {
-      const btn = document.querySelector('[data-testid="save-client-edit-button"]') as HTMLButtonElement | null;
+      const btn = document.querySelector('[data-testid="edit-client-impact-confirm"]') as HTMLButtonElement | null;
       btn?.click();
       btn?.click();
     });
