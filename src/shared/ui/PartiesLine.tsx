@@ -16,9 +16,16 @@ export function PartiesLine({ plaintiff, defendant, plaintiffLegalTitle, defenda
     const displayPlaintiff = plaintiffLegalTitle || plaintiff;
     const displayDefendant = defendantLegalTitle || defendant;
     if (displayPlaintiff && displayDefendant) {
+        // 🔒 FIX (3 أغسطس 2026): كان التباعد حوالين "ضد" بـ CSS margin بس
+        // (mx-1.5) — بصريًا بيبعّد الكلام على الشاشة، بس مفيش مسافة حقيقية
+        // في النص نفسه. أي select/copy للسطر ده كان بيجيب النص خام بدون
+        // مسافات فيلتصق الكل في بعضه ("محمدضدأحمد"). دلوقتي فيه مسافة نصية
+        // حقيقية (' ') قبل وبعد span الـ"ضد" بالإضافة للمارجن البصري.
         return React.createElement('p', { className: `truncate leading-tight ${className}` },
             React.createElement('span', null, displayPlaintiff),
-            React.createElement('span', { className: 'mx-1.5 font-black', style: { color: '#a78bfa' } }, 'ضد'),
+            ' ',
+            React.createElement('span', { className: 'font-black', style: { color: '#a78bfa' } }, 'ضد'),
+            ' ',
             React.createElement('span', null, displayDefendant)
         );
     }
