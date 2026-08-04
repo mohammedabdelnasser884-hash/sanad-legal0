@@ -9,6 +9,10 @@ import { Sel } from '@/shared/ui/Sel';
 import SessionUpdateModal from './SessionUpdateModal';
 import DeleteConfirmModal from '@/shared/modals/DeleteConfirmModal';
 import { useSessionLinking } from '../hooks/useSessionLinking';
+// ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): نوع الكول-باك
+// بتاع فتح NewClientModal الموحّد لطرف بعينه — نفس النوع المستخدم في
+// NewStandaloneSessionModal.tsx.
+import type { OpenCreateClientForSessionParty } from '../hooks/useClientLinking';
 // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 6): كشف التعارض بين البيانات
 // الحرة في الجلسة وملف الموكل المختار وقت الربط اليدوي اللاحق.
 import { findClientDataMismatches, type FieldMismatch } from '../hooks/caseSessionLinkingShared';
@@ -25,6 +29,10 @@ import { validateParties } from '@/shared/lib/casePartiesValidation';
 import { useFormDraft } from '@/shared/hooks/useFormDraft';
 import { useUnsavedChangesGuard } from '@/shared/hooks/useUnsavedChangesGuard';
 import type { PartyFieldValue, PartySide } from '@/shared/parties/partyTypes';
+// ⚡ NEW (طلب "عرض تعدد الأطراف في مودال عرض الجلسة المستقلة" — 3 أغسطس
+// 2026): نفس دالة الملخص المستخدمة في InfoSection.tsx (تفاصيل القضية) —
+// "الاسم الأول + آخرين" بدل عرض شخص واحد بس بصفته "الموكل"/"الخصم" ثابتة.
+import { summarizePartySide, type PartyPersonLike } from '@/shared/parties/partyDisplay';
 import type { CaseSessionRow, ClientRow } from '../../../types';
 import type { MappedCase } from '../../../hooks/useAppData';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -292,7 +300,7 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
 
     // تحذير قبل الإغلاق لو فيه بيانات مكتوبة لسه ما اتحفظتش (الـbaseline
     // هنا هو بيانات الجلسة المحمّلة فعليًا، مش فورم فاضي)
-    const guardedClose = useUnsavedChangesGuard(draftData, { form, parties: partyFields.parties, legalTitles: partyFields.legalTitles }, onClose);
+    const { guardedClose, confirmModal } = useUnsavedChangesGuard(draftData, { form, parties: partyFields.parties, legalTitles: partyFields.legalTitles }, onClose);
 
     // ⚡ NEW (مرحلة 6.4): مزامنة الحفظ الفعلي في case_parties — نفس فلسفة
     // syncCaseParties في useCaseActions.ts (مرحلة 5.2) بالحرف، بس بـ
@@ -428,8 +436,8 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
             onClick: (e: React.MouseEvent<HTMLDivElement>) => { if (e.target === e.currentTarget) guardedClose(); }
         },
             React.createElement('div', {
-                className: 'w-full max-w-lg rounded-t-3xl overflow-hidden',
-                style: { background: '#0f1623', border: '1px solid rgba(255,255,255,0.08)', maxHeight: '92vh' },
+                className: 'w-full max-w-lg rounded-t-3xl overflow-hidden bg-premium-card border border-white/8',
+                style: { maxHeight: '92vh' },
                 'data-testid': 'edit-standalone-session-modal'
             },
                 React.createElement('div', { className: 'flex items-center justify-between px-5 pt-5 pb-3 border-b border-white/5' },
@@ -502,7 +510,7 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
         document.body
     );
 
-    return modalTree;
+    return React.createElement(React.Fragment, null, modalTree, confirmModal);
 }
 
 // ══════════════════════════════════════════
@@ -540,20 +548,37 @@ interface LinkSessionModalProps {
     // لنسخة الجلسة تلقائيًا). دلوقتي بيتوصل من الأب زي EditStandaloneModal
     // وSessionUpdateModal بالظبط.
     linkedClient?: ClientRow | null;
+    // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): مرّرة من
+    // StandaloneSessionDetailModal — شوف تعليق البروب المقابلة هناك.
+    onOpenCreateClientForSessionParty?: OpenCreateClientForSessionParty;
 }
 
-function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientAdded, hasClient, linkedClient }: LinkSessionModalProps) {
+function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientAdded, hasClient, linkedClient, onOpenCreateClientForSessionParty }: LinkSessionModalProps) {
     const {
         linkingCase, linkingClient, linkingToCase, linkingExisting,
-        clientStep, setClientStep, foundClient, foundClientMatchType,
+        // ⚡ CHANGED (Phase 3 — 4 أغسطس 2026): setClientStep المباشر بقى مش
+        // مستخدم هنا خالص — startExistingClientSearch/cancelExistingClientSearch
+        // بيتولوا الانتقال idle↔searching بدل ما نناديه إحنا مباشرة (باقي
+        // الخطوات found/notfound/done لسه بتستخدمه جوه الهوك نفسه، مش هنا).
+        clientStep, foundClient, foundClientMatchType,
         clientSearch, searchResults, searching, selectedExistingClient, setSelectedExistingClient,
         // ⚡ NEW (7.2 جزء 2 — بند 2.4): partyList/partyIndex لعرض "طرف X من Y"،
         // وhandleSkipParty لتخطي الطرف الحالي بس وقت الـ wizard (بدل onFullClose
         // اللي بيقفل الموديل كله — مسار الجلسات القديمة قبل مرحلة 6).
         partyList, partyIndex, handleSkipParty,
+        // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): idlePartyList/
+        // linkedIdlePartyIds لعرض زرار مستقل لكل طرف في خطوة "idle"،
+        // وhandleAddClientOnlyForParty لفتح NewClientModal الموحّد لطرف
+        // بعينه بدل INSERT مباشر.
+        idlePartyList, linkedIdlePartyIds, handleAddClientOnlyForParty,
+        // ⚡ NEW (Phase 3 — 4 أغسطس 2026): existingClientTargetPartyId (null =
+        // مسار الجلسة كلها القديم) + startExistingClientSearch/
+        // cancelExistingClientSearch لفتح/إغلاق خطوة "searching" مخصصة لطرف
+        // بعينه — بدل setClientStep('searching')/('idle') المباشرين.
+        existingClientTargetPartyId, startExistingClientSearch, cancelExistingClientSearch,
         handleLinkCase, handleLinkExistingClient, handleAddAndLinkClient, handleAddClientOnly,
         searchExistingClients, confirmLinkToExistingClient,
-    } = useSessionLinking(session, db, onDone, onClientAdded, linkedClient);
+    } = useSessionLinking(session, db, onDone, onClientAdded, linkedClient, onOpenCreateClientForSessionParty);
 
     const hasPlaintiff = !!session.plaintiff?.trim();
     // ⚡ NEW (7.2 جزء 2 — بند 2.4): في وضع الـ wizard (partyList فيها أطراف)،
@@ -572,8 +597,7 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
             style: { background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)' }
         },
             React.createElement('div', {
-                className: 'w-full max-w-sm rounded-3xl p-6 space-y-4',
-                style: { background: '#0f1623', border: '1px solid rgba(255,255,255,0.08)' },
+                className: 'w-full max-w-sm rounded-3xl p-6 space-y-4 bg-premium-card border border-white/8',
                 'data-testid': 'link-session-modal'
             },
 
@@ -594,23 +618,67 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                             React.createElement('span', null, '⚖️'),
                             React.createElement('span', null, linkingCase ? '⏳ جاري الإنشاء...' : 'إنشاء ملف قضية من هذه البيانات')
                         ),
-                        hasPlaintiff && !hasClient && React.createElement('button', {
-                            onClick: handleAddClientOnly,
-                            disabled: linkingClient,
-                            className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2',
-                            'data-testid': 'link-session-add-client-only'
-                        },
-                            React.createElement('span', null, '👤'),
-                            React.createElement('span', null, linkingClient ? '⏳ جاري الإضافة...' : 'إضافة الموكل لقائمة الموكلين فقط')
-                        ),
-                        !hasClient && React.createElement('button', {
-                            onClick: () => setClientStep('searching'),
-                            className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2',
-                            'data-testid': 'link-session-search-existing'
-                        },
-                            React.createElement('span', null, '🔗'),
-                            React.createElement('span', null, 'ربط بموكل موجود بالفعل')
-                        )
+                        // ⚡ CHANGED (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): زرار
+                        // مستقل لكل طرف is_client=true في idlePartyList (بدل زرار واحد
+                        // مبني على session.plaintiff بس، بينشئ أول طرف ويتجاهل الباقيين) —
+                        // نفس نمط "postSave" في NewStandaloneSessionModal.tsx بالحرف. جلسة
+                        // قديمة/بلا case_parties (idlePartyList فاضية) → فولباك كامل
+                        // للزرار الواحد القديم، صفر تغيير سلوك.
+                        ...(!hasClient ? (idlePartyList.length === 0
+                            ? [hasPlaintiff && React.createElement('button', {
+                                key: 'link-session-add-client-only-legacy',
+                                onClick: handleAddClientOnly,
+                                disabled: linkingClient,
+                                className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2',
+                                'data-testid': 'link-session-add-client-only'
+                            },
+                                React.createElement('span', null, '👤'),
+                                React.createElement('span', null, linkingClient ? '⏳ جاري الإضافة...' : 'إضافة الموكل لقائمة الموكلين فقط')
+                            )]
+                            : idlePartyList.filter((p) => !linkedIdlePartyIds.has(p.id)).map((p) => {
+                                const single = idlePartyList.length === 1;
+                                return React.createElement('button', {
+                                    key: `link-session-add-client-only-${p.id}`,
+                                    onClick: () => handleAddClientOnlyForParty(p),
+                                    disabled: linkingClient,
+                                    className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2',
+                                    'data-testid': 'link-session-add-client-only-' + p.id
+                                },
+                                    React.createElement('span', null, '👤'),
+                                    React.createElement('span', null, linkingClient
+                                        ? '⏳ جاري الإضافة...'
+                                        : (single ? `إضافة ${p.name} لقائمة الموكلين` : `إضافة "${p.name}" لقائمة الموكلين`))
+                                );
+                            })) : []),
+                        // ⚡ CHANGED (Phase 3 — 4 أغسطس 2026): "ربط بموكل موجود بالفعل" كان
+                        // زرار واحد بيفتح خطوة searching للجلسة كلها. بقى زرار مستقل لكل
+                        // طرف is_client=true غير مربوط في idlePartyList (نفس نمط زرار
+                        // "إضافة موكل" المجاور بالظبط) — بيفتح searching مخصص للطرف ده عبر
+                        // startExistingClientSearch(party). جلسة قديمة/بلا case_parties
+                        // (idlePartyList فاضية) → فولباك كامل للزرار الواحد القديم
+                        // (startExistingClientSearch(null) = المسار القديم)، صفر تغيير سلوك.
+                        ...(!hasClient ? (idlePartyList.length === 0
+                            ? [React.createElement('button', {
+                                key: 'link-session-search-existing-legacy',
+                                onClick: () => startExistingClientSearch(null),
+                                className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2',
+                                'data-testid': 'link-session-search-existing'
+                            },
+                                React.createElement('span', null, '🔗'),
+                                React.createElement('span', null, 'ربط بموكل موجود بالفعل')
+                            )]
+                            : idlePartyList.filter((p) => !linkedIdlePartyIds.has(p.id)).map((p) => {
+                                const single = idlePartyList.length === 1;
+                                return React.createElement('button', {
+                                    key: `link-session-search-existing-${p.id}`,
+                                    onClick: () => startExistingClientSearch(p),
+                                    className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2',
+                                    'data-testid': 'link-session-search-existing-' + p.id
+                                },
+                                    React.createElement('span', null, '🔗'),
+                                    React.createElement('span', null, single ? 'ربط بموكل موجود بالفعل' : `ربط "${p.name}" بموكل موجود`)
+                                );
+                            })) : [])
                     ),
                     React.createElement('button', {
                         onClick: onClose,
@@ -623,7 +691,14 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                 clientStep === 'searching' && React.createElement(React.Fragment, null,
                     React.createElement('div', { className: 'text-center space-y-1' },
                         React.createElement('div', { className: 'text-2xl' }, '🔍'),
-                        React.createElement('h3', { className: 'text-sm font-black text-white' }, 'ابحث عن موكل موجود'),
+                        // ⚡ CHANGED (Phase 3 — 4 أغسطس 2026): العنوان بيعرض اسم الطرف
+                        // المستهدف (existingClientTargetPartyId) لو محدد — نفس نمط
+                        // "— اختر موكلاً لـ ... —" في InfoSection.tsx. target=null (المسار
+                        // القديم) → نفس العنوان القديم بالظبط.
+                        React.createElement('h3', { className: 'text-sm font-black text-white' },
+                            existingClientTargetPartyId
+                                ? `ابحث عن موكل لـ "${idlePartyList.find((p) => p.id === existingClientTargetPartyId)?.name || ''}"`
+                                : 'ابحث عن موكل موجود'),
                         React.createElement('p', { className: 'text-[11px] text-slate-400' }, 'بالاسم أو الرقم القومي أو الهاتف')
                     ),
                     React.createElement('input', {
@@ -661,7 +736,13 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                     ),
                     selectedExistingClient && React.createElement('button', {
                         onClick: () => {
-                            if (!showMismatchConfirm) {
+                            // ⚡ CHANGED (Phase 3 — 4 أغسطس 2026): لو فيه طرف محدد
+                            // (existingClientTargetPartyId) بنتخطى فحص التعارض تمامًا وننده
+                            // confirmLinkToExistingClient على طول — نفس قرار InfoSection.tsx
+                            // (case_parties بيحتفظ ببياناته لكل طرف على حدة، مفيش "بيانات حرة
+                            // واحدة" تتعارض معاها). target=null (المسار القديم) → فحص
+                            // التعارض زي ما هو بالظبط.
+                            if (!existingClientTargetPartyId && !showMismatchConfirm) {
                                 const mismatches = findClientDataMismatches(
                                     {
                                         plaintiff: session.plaintiff,
@@ -682,7 +763,13 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                         style: { background: linkingExisting ? '#888' : 'linear-gradient(135deg,#d4af37,#f0c040)' }
                     }, linkingExisting ? '⏳ جاري الربط...' : (showMismatchConfirm ? '✅ نعم، استخدم بيانات الموكل' : '🔗 تأكيد الربط')),
                     React.createElement('button', {
-                        onClick: () => { if (showMismatchConfirm) { setShowMismatchConfirm(false); setPendingMismatches([]); } else setClientStep('idle'); },
+                        // ⚡ CHANGED (Phase 3 — 4 أغسطس 2026): رجوع بيستخدم
+                        // cancelExistingClientSearch (بدل setClientStep('idle') المباشر)
+                        // عشان يصفّر existingClientTargetPartyId كمان — غير كده لو المستخدم
+                        // فتح searching تاني لطرف مختلف هيلاقي حالة البحث/الطرف القديم
+                        // عالقة. showMismatchConfirm فاضل زي ما هو (إلغاء بس بيرجع لخطوة
+                        // البحث نفسها، مش idle).
+                        onClick: () => { if (showMismatchConfirm) { setShowMismatchConfirm(false); setPendingMismatches([]); } else cancelExistingClientSearch(); },
                         className: 'w-full py-2.5 rounded-2xl text-xs font-bold text-slate-500 hover:text-slate-300 transition-all',
                         'data-testid': 'link-session-searching-back'
                     }, showMismatchConfirm ? 'إلغاء' : 'رجوع')
@@ -800,9 +887,15 @@ interface StandaloneSessionDetailModalProps {
     // EditStandaloneModal، ونفتح تفاصيل الموكل من زرار "✏️ عدّل من ملف الموكل".
     clients?: ClientRow[];
     onOpenClientProfile?: (client: ClientRow) => void;
+    // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): بتتوصّل لحد
+    // LinkSessionModal تحت — نفس handleOpenCreateClientForSessionPartyOnly
+    // في App.tsx المستخدمة أصلاً في NewStandaloneSessionModal.tsx. اختيارية
+    // عشان أي استدعاء قديم للموديل ده من غيرها ميتكسرش (فولباك تلقائي
+    // لزرار "إضافة الموكل لقائمة الموكلين فقط" القديم).
+    onOpenCreateClientForSessionParty?: OpenCreateClientForSessionParty;
 }
 
-function StandaloneSessionDetailModal({ session: partialSession, db, onClose, onDone, onNotify, onClientAdded, clients = [], onOpenClientProfile }: StandaloneSessionDetailModalProps) {
+function StandaloneSessionDetailModal({ session: partialSession, db, onClose, onDone, onNotify, onClientAdded, clients = [], onOpenClientProfile, onOpenCreateClientForSessionParty }: StandaloneSessionDetailModalProps) {
     const [showUpdate, setShowUpdate] = useState(false);
     const [showEdit, setShowEdit] = useState(false);
     const [showLink, setShowLink] = useState(false);
@@ -839,6 +932,40 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
         return () => { cancelled = true; };
     }, [partialSession.id, db]);
 
+    // ⚡ NEW (طلب "عرض تعدد الأطراف في مودال عرض الجلسة المستقلة" — 3
+    // أغسطس 2026): نفس استعلام EditStandaloneModal بالحرف (case_parties
+    // بـ session_id) — بس هنا للعرض القرائي فقط. جلسة قديمة/بلا صفوف
+    // ترجع array فاضية، وبنعمل fallback لعمودي plaintiff/defendant
+    // القدامى تحت زي ما كان يحصل بالظبط قبل التعديل ده.
+    const [sessionParties, setSessionParties] = useState<{ side: PartySide; name: string; capacity: string }[]>([]);
+    useEffect(() => {
+        let cancelled = false;
+        db.from('case_parties').select('side,name,capacity').eq('session_id', partialSession.id).order('sort_order', { ascending: true })
+            .then(({ data, error }) => {
+                if (cancelled) return;
+                setSessionParties(error ? [] : ((data as unknown as { side: PartySide; name: string; capacity: string }[]) || []));
+            });
+        return () => { cancelled = true; };
+    }, [partialSession.id, db]);
+
+    // 🆕 (خطة تسلسل الجلسة المستقلة، 3 أغسطس 2026): كل الجلسات اللي شاركت
+    // نفس session_group_id — يعني نتجت كلها عن نفس الجلسة المستقلة
+    // الأصلية عبر ضغطات "⚡ تحديث الجلسة" المتتالية. لو fullSession
+    // مالهاش session_group_id (لسه ما "اتحدّثت" ولا مرة، أو جلسة قديمة
+    // قبل الفيكس ده)، القائمة تفضل فاضية والسكشن مش بيظهر خالص.
+    const [chainSessions, setChainSessions] = useState<CaseSessionRow[]>([]);
+    useEffect(() => {
+        let cancelled = false;
+        const groupId = fullSession.session_group_id;
+        if (!groupId) { setChainSessions([]); return; }
+        db.from('case_sessions').select('*').eq('session_group_id', groupId).order('session_date', { ascending: true })
+            .then(({ data, error }) => {
+                if (cancelled) return;
+                setChainSessions(error ? [] : ((data as CaseSessionRow[]) || []));
+            });
+        return () => { cancelled = true; };
+    }, [fullSession.session_group_id, db]);
+
     const session = fullSession;
     // زرار "🔗 ربط" بيتاح طول ما لسه مفيش قضية اتعملت من الجلسة دي —
     // مش شرطه إن الموكل يكون لسه مش مربوط. ربط/إضافة الموكل حاجة مستقلة
@@ -870,17 +997,37 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
         case_type: session.case_type || null,
     } as unknown as MappedCase;
 
-    const rows: { label: string; value: string | null }[] = [
+    // ⚡ NEW: لو فيه صفوف case_parties لهذه الجلسة بنستخدمها، وإلا
+    // fallback لعمودي plaintiff/defendant المفردين (جلسة قديمة). الاسم
+    // المعروض = اسم أول طرف مسمّى + "وآخرين" لو الجهة فيها أكتر من شخص،
+    // والصفة بتتاخد من حقل capacity المسجل فعليًا لأول شخص — مش كلمة
+    // "موكل"/"خصم" ثابتة زي ما كان قبل كده.
+    const plaintiffPersons: PartyPersonLike[] = (() => {
+        const rows = sessionParties.filter((p) => p.side === 'plaintiff' && p.name?.trim());
+        if (rows.length > 0) return rows;
+        return session.plaintiff ? [{ name: session.plaintiff, capacity: session.plaintiff_role || '' }] : [];
+    })();
+    const defendantPersons: PartyPersonLike[] = (() => {
+        const rows = sessionParties.filter((p) => p.side === 'defendant' && p.name?.trim());
+        if (rows.length > 0) return rows;
+        return session.defendant ? [{ name: session.defendant, capacity: session.defendant_role || '' }] : [];
+    })();
+    const plaintiffSummary = summarizePartySide(plaintiffPersons);
+    const defendantSummary = summarizePartySide(defendantPersons);
+    const partyLine = (s: ReturnType<typeof summarizePartySide>) =>
+        s ? (s.othersCount > 0 ? `${s.primaryName} وآخرين` : s.primaryName) : null;
+
+    const rows: { label: string; value: string | null; key?: string }[] = [
         { label: '📅 التاريخ', value: session.session_date || null },
         { label: '🕐 التوقيت', value: session.session_time || null },
         { label: '🏛 المحكمة', value: session.court || null },
         { label: '📋 رقم القضية', value: session.case_number || null },
         { label: '📂 نوع القضية', value: session.case_type || null },
         { label: '⚖️ الدائرة', value: session.circuit_number || null },
-        { label: '👤 الموكل', value: session.plaintiff || null },
-        { label: '🏷 صفة الموكل', value: session.plaintiff_role || null },
-        { label: '👤 الخصم', value: session.defendant || null },
-        { label: '🏷 صفة الخصم', value: session.defendant_role || null },
+        { label: '👤 الطرف الأول', value: partyLine(plaintiffSummary), key: 'primaryParty' },
+        { label: '🏷 صفة الطرف الأول', value: plaintiffSummary?.primaryCapacity || null },
+        { label: '👤 الطرف الثاني', value: partyLine(defendantSummary) },
+        { label: '🏷 صفة الطرف الثاني', value: defendantSummary?.primaryCapacity || null },
         { label: '⚡ الإجراء القادم', value: session.next_action || null },
         { label: '📝 ما تم', value: session.result || null },
     ].filter((r) => r.value);
@@ -925,8 +1072,8 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
         onClick: (e: React.MouseEvent<HTMLDivElement>) => { if (e.target === e.currentTarget) onClose(); }
     },
         React.createElement('div', {
-            className: 'w-full max-w-lg rounded-t-3xl overflow-hidden',
-            style: { background: '#0f1623', border: '1px solid rgba(255,255,255,0.08)', maxHeight: '90vh' },
+            className: 'w-full max-w-lg rounded-t-3xl overflow-hidden bg-premium-card border border-white/8',
+            style: { maxHeight: '90vh' },
             'data-testid': 'standalone-session-detail-modal'
         },
             // ── هيدر ──
@@ -950,18 +1097,19 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
                 className: 'overflow-y-auto px-5 py-4 space-y-2',
                 style: { maxHeight: 'calc(90vh - 160px)' }
             },
-                ...rows.map(({ label, value }) => {
+                ...rows.map(({ label, value, key }) => {
                     // ⚡ NEW: سطر "👤 الموكل" بس — لو الجلسة مربوطة بموكل حي
                     // (hasClient)، بيظهر تحته زرار "🔓 فك الربط" (منفصل تمامًا
                     // عن زرار "🔗 ربط" في الفوتر، اللي وظيفته تحويل الجلسة
                     // لقضية مش ربط الموكل).
-                    if (label === '👤 الموكل' && hasClient) {
+                    if (key === 'primaryParty' && hasClient) {
                         return React.createElement('div', {
                             key: label,
                             className: 'py-2 border-b border-white/5'
                         },
                             React.createElement('div', { className: 'flex items-start justify-between gap-3' },
                                 React.createElement('span', { className: 'text-[10px] font-bold text-slate-500 shrink-0' }, label),
+                                ' ',
                                 React.createElement('span', { className: 'text-[11px] font-semibold text-white text-left' }, value)
                             ),
                             // ⚡ NEW (مرحلة 7 — fallback الموكل المحذوف): الموكل
@@ -1004,9 +1152,35 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
                         className: 'flex items-start justify-between gap-3 py-2 border-b border-white/5'
                     },
                         React.createElement('span', { className: 'text-[10px] font-bold text-slate-500 shrink-0' }, label),
+                        ' ',
                         React.createElement('span', { className: 'text-[11px] font-semibold text-white text-left' }, value)
                     );
-                })
+                }),
+
+                // ── 🕓 سجل هذه الجلسة (خطة تسلسل الجلسة المستقلة، 3 أغسطس 2026) ──
+                // بيظهر بس لو فيه أكتر من جلسة واحدة في نفس السلسلة (مفيش
+                // فايدة تعرض سجل من عنصر واحد). قرائي بالكامل — قصده يورّي
+                // "الجلسات القديمة لسه موجودة" مش تعديلها من هنا.
+                chainSessions.length > 1 && React.createElement('div', {
+                    className: 'pt-3 mt-1',
+                    'data-testid': 'standalone-session-chain-history'
+                },
+                    React.createElement('h4', { className: 'text-[10px] font-black text-slate-400 mb-2' }, '🕓 سجل هذه الجلسة'),
+                    ...chainSessions.map((s) => {
+                        const isCurrent = s.id === session.id;
+                        return React.createElement('div', {
+                            key: s.id,
+                            className: `py-1.5 border-b border-white/5 ${isCurrent ? '' : 'opacity-70'}`
+                        },
+                            React.createElement('div', { className: 'flex items-center justify-between gap-3' },
+                                React.createElement('span', { className: 'text-[10px] font-bold text-slate-300' },
+                                    `📅 ${s.session_date || '—'}${isCurrent ? ' (الحالية)' : ''}`
+                                )
+                            ),
+                            s.result && React.createElement('p', { className: 'text-[10px] text-slate-500 mt-0.5' }, `📝 ${s.result}`)
+                        );
+                    })
+                )
             ),
 
             // ── Footer ──
@@ -1086,6 +1260,7 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
             onFullClose: () => { setShowLink(false); onDone(); onClose(); },
             onClientAdded,
             linkedClient,
+            onOpenCreateClientForSessionParty,
         })
     );
 }
