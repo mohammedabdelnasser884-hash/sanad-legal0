@@ -34,7 +34,7 @@ interface EditClientForm {
 interface EditClientModalProps {
     client: ClientRow;
     onClose: () => void;
-    onSave: (form: EditClientForm, idFile?: File | null, poaFile?: File | null) => void;
+    onSave: (form: EditClientForm, idFile?: File | null, poaFile?: File | null) => void | boolean | Promise<void | boolean>;
     // 🔒 FIX (تقرير الموثوقية — نتيجة 1): المودال ده ما كانش فيه أي حماية
     // دبل كليك خالص (بعكس NewClientModal). بنستقبل نفس savingClient state
     // من App.tsx عشان نقفل الزرار أثناء الحفظ.
@@ -93,12 +93,14 @@ function EditClientModal({client: c, onClose, onSave, saving = false}: EditClien
     }, [draft.restoredDraft]);
 
     // تحذير قبل الإغلاق — الـbaseline هنا بيانات الموكل المحمّلة فعليًا
-    const guardedClose = useUnsavedChangesGuard(form, form, onClose);
+    const { guardedClose, confirmModal } = useUnsavedChangesGuard(form, form, onClose);
 
     const pickId  = (file: File | null | undefined) => { if(!file) return; setIdFile(file);  setIdPreview(URL.createObjectURL(file)); };
     const pickPoa = (file: File | null | undefined) => { if(!file) return; setPoaFile(file); setPoaPreview(URL.createObjectURL(file)); };
 
     return createPortal(
+        React.createElement(React.Fragment, null,
+        confirmModal,
         React.createElement('div', {
             className:"fixed inset-0 z-[70] flex items-end justify-center bg-black/80 backdrop-blur-sm",
             onClick: (e: React.MouseEvent<HTMLDivElement>) => { if(e.target===e.currentTarget) guardedClose(); }
@@ -183,7 +185,13 @@ function EditClientModal({client: c, onClose, onSave, saving = false}: EditClien
                             React.createElement('button', {
                                 'data-testid': 'edit-client-impact-confirm',
                                 disabled: saving,
-                                onClick: () => { onSave(form, idFile, poaFile); draft.clearDraft(); },
+                                onClick: async () => {
+                                    const result = await onSave(form, idFile, poaFile);
+                                    // 🔒 FIX (قرارات مفتوحة — خطة حفظ المسودات، 3 أغسطس 2026):
+                                    // بننتظر نتيجة onSave ونمسح المسودة بس لو نجح
+                                    // الحفظ فعلاً (result !== false)، مش فورًا زي الأول.
+                                    if (result !== false) draft.clearDraft();
+                                },
                                 className:"flex-1 py-3 bg-gradient-to-tr from-emerald-500 to-emerald-400 text-white rounded-xl font-black text-xs disabled:opacity-60"
                             }, saving ? "⏳ جاري الحفظ..." : "نعم، احفظ في كل مكان"),
                             React.createElement('button', {
@@ -211,7 +219,7 @@ function EditClientModal({client: c, onClose, onSave, saving = false}: EditClien
                         className:"w-full py-3.5 bg-gradient-to-tr from-emerald-500 to-emerald-400 text-white rounded-xl font-black text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform mt-2 disabled:opacity-60"
                       }, React.createElement(I.Check), "حفظ التعديلات")
             )
-        )),
+        ))),
         document.body
     );
 }
