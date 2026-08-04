@@ -103,7 +103,13 @@ function CalendarTab({ cases, clients, onOpenCase, onOpenStandalone, refreshKey 
         if (!sessionsMap[key]) sessionsMap[key] = [];
         sessionsMap[key].push(s);
     });
-    const conflictDays = new Set(Object.keys(sessionsMap).filter((d: string) => sessionsMap[d].length > 1));
+    // ⚡ CHANGED (ملاحظة شكلية — 4 أغسطس 2026): شلنا مفهوم "⚠️ تعارض" (يوم فيه
+    // أكتر من جلسة) بالكامل من الواجهة — كان بيتحول لحدّ أحمر حول اليوم +
+    // نقطة حمراء + badge تحذيري، وده كان بيدّي إحساس إن في مشكلة حقيقية
+    // بالرغم من إن أكتر من جلسة في نفس اليوم أمر طبيعي تمامًا وملوش أي دلالة
+    // سلبية. عدد الجلسات (badge العادي جنب اسم اليوم، والنقط الذهبية تحت
+    // الرقم في الشبكة) لسه ظاهر عادي زي أي يوم تاني — بس من غير أي تلوين
+    // تحذيري.
 
     const selectedDateStr = selectedDay
         ? `${viewYear}-${String(viewMonth+1).padStart(2,'0')}-${String(selectedDay).padStart(2,'0')}`
@@ -176,19 +182,17 @@ function CalendarTab({ cases, clients, onOpenCase, onOpenStandalone, refreshKey 
                 Array.from({ length: daysInMon }, (_: unknown,i: number) => i+1).map((d: number) => {
                     const dStr = `${viewYear}-${String(viewMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
                     const hasSess    = sessionsMap[dStr]?.length > 0;
-                    const isConflict = conflictDays.has(dStr);
                     const isToday    = dStr === todayStr;
                     const isSel      = selectedDay === d;
                     return React.createElement('button', {
                         key: d, onClick: () => setSelectedDay(isSel ? null : d),
                         'data-testid': 'calendar-day',
-                        className: `relative aspect-square flex flex-col items-center justify-center gap-0.5 transition-all active:scale-90 ${isSel?'bg-premium-gold/15':'hover:bg-white/5'} ${isConflict?'ring-1 ring-inset ring-red-500/50':''}`
+                        className: `relative aspect-square flex flex-col items-center justify-center gap-0.5 transition-all active:scale-90 ${isSel?'bg-premium-gold/15':'hover:bg-white/5'}`
                     },
-                        isConflict && React.createElement('div', { className: "absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-red-500" }),
-                        React.createElement('span', { className: `text-[11px] font-black ${isConflict?'text-red-400':isToday?'text-premium-gold':isSel?'text-premium-gold':'text-slate-300'}` }, d),
+                        React.createElement('span', { className: `text-[11px] font-black ${isToday?'text-premium-gold':isSel?'text-premium-gold':'text-slate-300'}` }, d),
                         hasSess && React.createElement('div', { className: "flex gap-0.5 justify-center" },
                             sessionsMap[dStr].slice(0,3).map((_: CalendarSessionRow,i: number) =>
-                                React.createElement('div', { key:i, className:`w-1 h-1 rounded-full ${isConflict?'bg-red-400':'bg-premium-gold'}` })
+                                React.createElement('div', { key:i, className:"w-1 h-1 rounded-full bg-premium-gold" })
                             )
                         ),
                         isToday && !hasSess && React.createElement('div', { className: "w-1 h-1 rounded-full bg-premium-gold/50" })
@@ -202,11 +206,7 @@ function CalendarTab({ cases, clients, onOpenCase, onOpenStandalone, refreshKey 
             React.createElement('div', { className: "flex items-center gap-2 px-1" },
                 React.createElement('span', { className: "w-1 h-3 bg-premium-gold rounded-full" }),
                 React.createElement('p', { className: "text-xs font-black text-white" }, `جلسات ${selectedDay} ${MONTHS_AR2[viewMonth]} ${viewYear}`),
-                React.createElement('span', { className: "text-[9px] text-slate-500" }, `${daysSessions.length} جلسة`),
-                daysSessions.length > 1 && React.createElement('span', {
-                    className: "text-[8px] px-1.5 py-0.5 rounded-full font-black",
-                    style: { background: 'rgba(239,68,68,0.15)', color: '#f87171' }
-                }, "⚠️ تعارض")
+                React.createElement('span', { className: "text-[9px] text-slate-500" }, `${daysSessions.length} جلسة`)
             ),
             daysSessions.length === 0
                 ? React.createElement('div', { className: "bg-premium-card border border-white/5 rounded-xl p-4 text-center text-slate-500 text-xs" }, "لا توجد جلسات في هذا اليوم")
