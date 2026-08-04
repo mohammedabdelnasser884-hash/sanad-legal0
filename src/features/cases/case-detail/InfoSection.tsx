@@ -26,6 +26,11 @@ interface InfoSectionProps {
   clients?: MappedClient[];
   linkingClient?: boolean;
   onLinkClient?: (clientId: string) => void | Promise<void>;
+  // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، Phase 3 — 4 أغسطس 2026): مرآة
+  // لـ onLinkClient فوق، بس بيربط طرف بعينه من caseParties (case_parties.client_id
+  // + cases.client_id لو الطرف أساسي) بدل ما يربط القضية كلها — شوف
+  // useCaseActions.ts (handleLinkClientForParty).
+  onLinkClientForParty?: (partyId: string, clientId: string, isPrimaryParty: boolean) => void | Promise<void>;
   // ⚡ CHANGED (خطة توحيد إنشاء الموكل، Phase 1): بقت مجرد فتح لـ
   // NewClientModal الكامل (مليان ببيانات المدعي) — مش عملية حفظ. الحفظ
   // والربط وفحص التكرار كلهم بقوا مسؤولية useClientActions.handleSaveClient.
@@ -48,7 +53,7 @@ interface InfoRow {
   value: string | null;
 }
 
-function InfoSection({ caseData, client, sessions, notes, docs, caseParties = [], clients = [], linkingClient = false, onLinkClient, onCreateAndLinkClient, unlinkingClient = false, onUnlinkClient, onCreateAndLinkClientForParty }: InfoSectionProps) {
+function InfoSection({ caseData, client, sessions, notes, docs, caseParties = [], clients = [], linkingClient = false, onLinkClient, onLinkClientForParty, onCreateAndLinkClient, unlinkingClient = false, onUnlinkClient, onCreateAndLinkClientForParty }: InfoSectionProps) {
   // ⚡ NEW (مرحلة 13.1 — قسم 9 في الخطة): كل الأطراف عليهم ⭐ (is_client)،
   // والأطراف منهم اللي لسه مش مربوطة بموكل (client_id فاضي) — دي اللي
   // محتاجة زرار "إنشاء موكل". الطرف الأول (بترتيب sort_order، نفس ترتيب
@@ -66,6 +71,11 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
   const isOrphaned = !!caseData.client_id && !client;
   const [linkStep, setLinkStep] = useState<'closed' | 'choice' | 'pickExisting' | 'confirmMismatch'>('closed');
   const [pickedClientId, setPickedClientId] = useState('');
+  // ⚡ NEW (Phase 3 — 4 أغسطس 2026): null = المسار القديم ("ربط بموكل
+  // موجود" للقضية كلها، فولباك القضايا القديمة بلا caseParties) — قيمة =
+  // طرف بعينه من unlinkedStarredParties يبقى الاختيار/الربط الجاي مخصص
+  // له بس عبر onLinkClientForParty، بنفس فلسفة onCreateAndLinkClientForParty.
+  const [existingClientTargetParty, setExistingClientTargetParty] = useState<CasePartyRow | null>(null);
   // ⚡ NEW (مرحلة 6): الحقول المتعارضة بين بيانات القضية الحرة وملف الموكل
   // المختار — بتتحسب لما يدوس "ربط"، وبتتعرض كتنبيه تأكيد بدل استبدال صامت.
   const [pendingMismatches, setPendingMismatches] = useState<FieldMismatch[]>([]);
@@ -91,6 +101,7 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                             className: `flex items-start justify-between gap-4 py-3 ${i < arr.length - 1 ? 'border-b border-white/5' : ''}`
                         },
                             React.createElement('span', {className: "text-[10px] text-slate-400 font-bold shrink-0"}, row.label),
+                            ' ',
                             React.createElement('span', {className: "text-xs text-white font-black text-left max-w-[60%] text-right"}, row.value)
                         )
                     )
@@ -114,6 +125,7 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                             className: `flex items-start justify-between gap-4 py-3 ${i < arr.length - 1 ? 'border-b border-white/5' : ''}`
                         },
                             React.createElement('span', {className: "text-[10px] text-slate-400 font-bold shrink-0"}, row.label),
+                            ' ',
                             row.label === 'موبايل سكرتير الجلسة'
                                 ? React.createElement('a', {href: `tel:${row.value}`, className: "text-xs text-premium-gold font-black text-left max-w-[60%] text-right"}, '📞 ' + row.value)
                                 : React.createElement('span', {className: "text-xs text-white font-black text-left max-w-[60%] text-right"}, row.value)
@@ -138,7 +150,8 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                             key: p.id,
                             className: "flex items-center justify-between gap-3"
                         },
-                            React.createElement('span', {className: "text-[10px] text-slate-400 font-bold"}, p.capacity || (p.side === 'plaintiff' ? 'المدعي / الطاعن' : 'المدعى عليه / المطعون ضده')),
+                            React.createElement('span', {className: "text-[10px] text-slate-400 font-bold"}, p.capacity || 'الصفة غير محددة'),
+                            ' ',
                             React.createElement('span', {className: "flex items-center gap-1.5"},
                                 p.is_client && React.createElement('span', {
                                     className: "text-[8px] font-black text-premium-gold bg-premium-gold/10 rounded-full px-1.5 py-0.5"
@@ -190,12 +203,14 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                             : null;
                         return React.createElement('div', {className: "space-y-3"},
                             p && React.createElement('div', {className: "flex items-center justify-between"},
-                                React.createElement('span', {className: "text-[10px] text-slate-400 font-bold"}, p.capacity || "المدعي / الطاعن"),
+                                React.createElement('span', {className: "text-[10px] text-slate-400 font-bold"}, p.capacity || "الصفة غير محددة"),
+                                ' ',
                                 React.createElement('span', {className: "text-[11px] font-black text-emerald-400"}, p.name)
                             ),
                             p && d && React.createElement('div', {className: "border-t border-white/5"}),
                             d && React.createElement('div', {className: "flex items-center justify-between"},
-                                React.createElement('span', {className: "text-[10px] text-slate-400 font-bold"}, d.capacity || "المدعى عليه / المطعون ضده"),
+                                React.createElement('span', {className: "text-[10px] text-slate-400 font-bold"}, d.capacity || "الصفة غير محددة"),
+                                ' ',
                                 React.createElement('span', {className: "text-[11px] font-black text-rose-400"}, d.name)
                             )
                         );
@@ -273,7 +288,7 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                 // فيه أطراف عليهم ⭐ لسه مش مربوطة بموكل حتى لو client موجود
                 // (طرف تاني غير الأساسي) — عشان زرار "إنشاء موكل" يفضل متاح
                 // لكل طرف محتاجه، مش بس وقت أول ربط للقضية.
-                (((!client) && (onLinkClient || onCreateAndLinkClient)) || (unlinkedStarredParties.length > 0 && onCreateAndLinkClientForParty))
+                (((!client) && (onLinkClient || onCreateAndLinkClient)) || (unlinkedStarredParties.length > 0 && (onCreateAndLinkClientForParty || onLinkClientForParty)))
                   && React.createElement('div', {className: "bg-premium-card border border-dashed border-premium-gold/30 rounded-2xl p-4"},
                     linkStep === 'closed'
                         ? React.createElement('button', {
@@ -283,14 +298,26 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                     : linkStep === 'choice'
                         ? React.createElement('div', {className: "space-y-2"},
                             React.createElement('p', {className: "text-[9px] font-black text-slate-500 tracking-widest mb-1"}, "— اختر طريقة الربط —"),
-                            // ⚡ "ربط بموكل موجود" لسه بيربط cases.client_id مباشرة
-                            // (مسار قديم، برّه نطاق مرحلة 13) — فمفيش داعي منطقي يظهر
-                            // لو القضية أصلاً مربوطة (client موجود)، حتى لو فيه أطراف
-                            // تانية محتاجة موكل.
-                            !client && onLinkClient && React.createElement('button', {
-                                onClick: () => setLinkStep('pickExisting'),
-                                className: "w-full flex items-center justify-center gap-2 text-[11px] font-black text-white bg-white/5 border border-white/10 rounded-xl py-2.5"
-                            }, '🔗 ربط بموكل موجود'),
+                            // ⚡ CHANGED (Phase 3 — 4 أغسطس 2026): "ربط بموكل موجود" كان
+                            // بيربط cases.client_id مباشرة دايمًا، وبيظهر بس لو !client
+                            // (القضية أصلاً مش مربوطة). دلوقتي بيتفرّع زي زرار "إنشاء
+                            // موكل" فوق بالظبط: لو caseParties فيها بيانات (hasPartyData)،
+                            // زرار منفصل لكل طرف عليه ⭐ ومش مربوط — بيفتح pickExisting
+                            // مخصص للطرف ده (existingClientTargetParty)، حتى لو client
+                            // موجود بالفعل (طرف تاني محتاج موكل). لو caseParties فاضية
+                            // (قضية قديمة قبل مرحلة 4)، فولباك كامل للزرار الواحد القديم
+                            // (existingClientTargetParty=null) — صفر تغيير سلوك.
+                            (hasPartyData && onLinkClientForParty
+                                ? unlinkedStarredParties.map((party: CasePartyRow) => React.createElement('button', {
+                                    key: `link-existing-${party.id}`,
+                                    onClick: () => { setExistingClientTargetParty(party); setLinkStep('pickExisting'); },
+                                    className: "w-full flex items-center justify-center gap-2 text-[11px] font-black text-white bg-white/5 border border-white/10 rounded-xl py-2.5"
+                                  }, `🔗 ربط (${party.name}) بموكل موجود`))
+                                : (!hasPartyData && !client && onLinkClient && React.createElement('button', {
+                                    onClick: () => { setExistingClientTargetParty(null); setLinkStep('pickExisting'); },
+                                    className: "w-full flex items-center justify-center gap-2 text-[11px] font-black text-white bg-white/5 border border-white/10 rounded-xl py-2.5"
+                                  }, '🔗 ربط بموكل موجود'))
+                            ),
                             // ⚡ CHANGED (خطة توحيد إنشاء الموكل، Phase 1): مبقاش فيه خطوة تأكيد
                             // منفصلة هنا — الزرار بيفتح NewClientModal الكامل على طول (مليان
                             // ببيانات المدعي)، وهو نفسه بيتولى فحص التكرار وإظهار خيار الربط لو
@@ -312,13 +339,14 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                                   }, `➕ إنشاء موكل جديد${caseData.plaintiff ? ' — ' + caseData.plaintiff : ''}`))
                             ),
                             React.createElement('button', {
-                                onClick: () => setLinkStep('closed'),
+                                onClick: () => { setLinkStep('closed'); setExistingClientTargetParty(null); },
                                 className: "w-full py-2 text-[11px] font-bold text-slate-500"
                             }, 'إلغاء')
                           )
                     : linkStep === 'pickExisting'
                         ? React.createElement('div', {className: "space-y-3"},
-                            React.createElement('p', {className: "text-[9px] font-black text-slate-500 tracking-widest"}, "— اختر موكلاً —"),
+                            React.createElement('p', {className: "text-[9px] font-black text-slate-500 tracking-widest"},
+                                existingClientTargetParty ? `— اختر موكلاً لـ "${existingClientTargetParty.name}" —` : "— اختر موكلاً —"),
                             React.createElement('select', {
                                 value: pickedClientId,
                                 onChange: (e: React.ChangeEvent<HTMLSelectElement>) => setPickedClientId(e.target.value),
@@ -332,6 +360,17 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                                 React.createElement('button', {
                                     disabled: !pickedClientId || linkingClient,
                                     onClick: async () => {
+                                        // ⚡ NEW (Phase 3 — 4 أغسطس 2026): existingClientTargetParty
+                                        // متحدد → ربط الطرف ده بس عبر onLinkClientForParty (case_parties.client_id
+                                        // + cases.client_id لو الطرف أساسي)، من غير فحص تعارض — case_parties
+                                        // بيحتفظ ببياناته الخاصة (اسم/رقم قومي/توكيل) لكل طرف على حدة، مفيش
+                                        // "بيانات قضية حرة" واحدة تتعارض معاها زي المسار القديم تحت.
+                                        if (existingClientTargetParty) {
+                                            await onLinkClientForParty!(existingClientTargetParty.id, pickedClientId, existingClientTargetParty.id === primaryPartyId);
+                                            setLinkStep('closed'); setPickedClientId(''); setExistingClientTargetParty(null);
+                                            return;
+                                        }
+                                        // ── مسار قديم (القضية كلها) — زي ما هو بالظبط ──
                                         // ⚡ NEW (مرحلة 6): قبل الربط، نقارن بيانات القضية الحرة (لو موجودة)
                                         // بملف الموكل المختار. لو فيه تعارض حقيقي، بنوقف ونعرض تأكيد
                                         // بدل ما نستبدل صامت (onLinkClient بقى بيزامن الحقول دي فعليًا).
@@ -356,7 +395,7 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                                 }, linkingClient ? '... جارٍ الربط' : 'ربط'),
                                 React.createElement('button', {
                                     disabled: linkingClient,
-                                    onClick: () => { setLinkStep('choice'); setPickedClientId(''); },
+                                    onClick: () => { setLinkStep('choice'); setPickedClientId(''); setExistingClientTargetParty(null); },
                                     className: "flex-1 bg-white/5 border border-white/10 text-slate-300 rounded-xl py-2.5 text-[11px] font-black"
                                 }, 'رجوع')
                             )
