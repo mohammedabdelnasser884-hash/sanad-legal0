@@ -199,7 +199,7 @@ export async function createClient(
 export async function expectToast(page: Page, text: string, timeout = 5_000): Promise<void> {
   const toastEl = page.locator('#toast');
   await expect(toastEl).toHaveClass(/show/, { timeout });
-  await expect(toastEl).toHaveText(text);
+  await expect(toastEl).toHaveText(text, { timeout });
 }
 
 // المرحلة 3 (خطة تنفيذ اختبارات E2E المقسمة) — هيلبر إضافة جلسة لقضية
