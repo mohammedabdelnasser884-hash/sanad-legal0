@@ -15,7 +15,7 @@ import type { ClientModalContext } from '../clients/hooks/useClientActions';
 
 interface NewCaseModalProps {
     onClose: () => void;
-    onSave: (form: CaseFormSubmitData) => void;
+    onSave: (form: CaseFormSubmitData) => void | boolean | Promise<void | boolean>;
     loading?: boolean;
     lawyers: ProfileRow[];
     isAdmin: boolean;
@@ -85,7 +85,7 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
     }, [draft.restoredDraft]);
 
     // تحذير قبل الإغلاق لو فيه بيانات مكتوبة لسه ما اتحفظتش
-    const guardedClose = useUnsavedChangesGuard(draftData, { form, parties: partyFields.parties, legalTitles: partyFields.legalTitles }, onClose);
+    const { guardedClose, confirmModal } = useUnsavedChangesGuard(draftData, { form, parties: partyFields.parties, legalTitles: partyFields.legalTitles }, onClose);
 
     // ربط طرف بعينه بموكل موجود من النظام — بيملى الاسم/الرقم القومي/
     // التوكيل/العنوان دفعة واحدة من بيانات الموكل الحقيقية (نفس سلوك
@@ -146,7 +146,9 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
     const inputCls = "w-full p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600 transition-colors";
     const inpStyle = {fontFamily:'Cairo,sans-serif'};
 
-    return React.createElement('div',{className:"fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm",onClick:(e: React.MouseEvent<HTMLDivElement>) =>{if(e.target===e.currentTarget)guardedClose();}},
+    return React.createElement(React.Fragment, null,
+    confirmModal,
+    React.createElement('div',{className:"fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm",onClick:(e: React.MouseEvent<HTMLDivElement>) =>{if(e.target===e.currentTarget)guardedClose();}},
         React.createElement('div',{className:"bg-premium-card w-full max-w-lg rounded-t-3xl border-t border-white/10 p-6 pb-10 shadow-2xl slide-up max-h-[90vh] overflow-y-auto no-scrollbar"},
             React.createElement('div',{className:"w-10 h-1 bg-white/20 rounded-full mx-auto mb-5"}),
             React.createElement('div',{className:"flex items-center justify-between mb-5"},
@@ -289,7 +291,7 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
                 React.createElement('button',{
                     disabled:loading,
                     'data-testid':'new-case-save',
-                    onClick:()=>{
+                    onClick:async ()=>{
                         if(!form.title.trim()){toast('يرجى إدخال موضوع ومسمى الدعوى',true);return;}
                         // ⚡ CHANGED (مرحلة 4 — خطة تعدد الأطراف): فاليديشن أطراف
                         // الدعوى كلها بقت من casePartiesValidation.ts (اسم/صفة كل
@@ -308,7 +310,7 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
                         // useCaseActions.ts بالجدول الجديد — مش جزء من الخطوة دي).
                         const primaryPlaintiff = partyFields.plaintiffs.find((p) =>p.is_client) || partyFields.plaintiffs[0];
                         const primaryDefendant = partyFields.defendants.find((p) =>p.is_client) || partyFields.defendants[0];
-                        onSave({
+                        const result = await onSave({
                             ...form,
                             number,
                             court: finalCourt,
@@ -333,19 +335,21 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
                             // الأعمدة القديمة فوق من الطرف الأساسي بس).
                             parties: partyFields.parties,
                         });
-                        // 🆕 (خطة حفظ المسودات — 1 أغسطس 2026): وصلنا هنا يعني عدّى
-                        // فاليديشن العميل وبدأ فعليًا محاولة الحفظ — نمسح المسودة.
-                        // لو الحفظ فشل سيرفريًا بعد كده (رقم مكرر/شبكة)، المودال
-                        // بيفضل مفتوح وبيانات الفورم في الذاكرة زي ما هي (مفيش فقدان
-                        // فعلي)، بس مش هترجع تتسترجع تلقائيًا لو قفل التطبيق فجأة قبل
-                        // إعادة المحاولة — قرار مقصود لتبسيط الخطوة الأولى.
-                        draft.clearDraft();
+                        // 🔒 FIX (قرارات مفتوحة — خطة حفظ المسودات، 3 أغسطس 2026):
+                        // بننتظر نتيجة onSave فعليًا دلوقتي ونمسح المسودة بس لو
+                        // نجح الحفظ (result !== false) — بدل ما نمسحها فورًا بمجرد
+                        // الضغط على الزرار زي ما كان قبل كده. لو الحفظ فشل (رقم
+                        // مكرر/شبكة/انقطاع)، المسودة بتفضل موجودة وقابلة للاسترجاع
+                        // حتى لو المستخدم قفل التطبيق فجأة قبل إعادة المحاولة —
+                        // نفس فلسفة StandaloneSessionDetailModal.tsx بالظبط.
+                        if (result !== false) draft.clearDraft();
                     },
                     className:"w-full py-3.5 bg-gradient-to-tr from-premium-gold to-amber-200 text-premium-bg rounded-xl font-black text-sm shadow-md flex items-center justify-center gap-2 disabled:opacity-60 active:scale-95 transition-transform mt-2"
                 },loading?React.createElement(I.Spin):React.createElement(I.Plus),loading?'جاري الحفظ...':'حفظ وتقييد الدعوى')
             )
         )
-    );
+    ));
 }
 
 export default NewCaseModal;
+
