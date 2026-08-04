@@ -90,6 +90,10 @@ function ClientDetailModal({client:c, cases, onClose, onDelete, onEdit, onOpenCa
                 onSave: async (form: ClientFormData, idFile?: File | null, poaFile?: File | null) => {
                     const result = await onEdit?.(c.id, form, idFile, poaFile);
                     if (result !== false) setShowEditClient(false);
+                    // 🔒 FIX (قرارات مفتوحة — خطة حفظ المسودات، 3 أغسطس 2026):
+                    // بنرجّع النتيجة لـ EditClientModal.tsx عشان يمسح المسودة
+                    // بس لو نجح الحفظ فعلاً.
+                    return result;
                 }
             }),
 
@@ -100,6 +104,7 @@ function ClientDetailModal({client:c, cases, onClose, onDelete, onEdit, onOpenCa
                     React.createElement('p',{className:"text-[10px] font-black text-slate-500"},"— بيانات التواصل —"),
                     c.phone&&React.createElement('div',{className:"flex items-center justify-between"},
                         React.createElement('span',{className:"text-[10px] text-slate-400"},"الهاتف"),
+                        ' ',
                         React.createElement('div',{className:"flex items-center gap-2"},
                             React.createElement('a',{
                                 href:`tel:${c.phone}`,
@@ -123,6 +128,7 @@ function ClientDetailModal({client:c, cases, onClose, onDelete, onEdit, onOpenCa
                     ),
                     c.email&&React.createElement('div',{className:"flex items-center justify-between"},
                         React.createElement('span',{className:"text-[10px] text-slate-400"},"البريد"),
+                        ' ',
                         React.createElement('a',{
                             href:`mailto:${c.email}`,
                             onClick:(e: React.MouseEvent) =>e.stopPropagation(),
@@ -137,10 +143,12 @@ function ClientDetailModal({client:c, cases, onClose, onDelete, onEdit, onOpenCa
                     React.createElement('p',{className:"text-[10px] font-black text-slate-500"},"— المستندات الرسمية —"),
                     c.national_id&&React.createElement('div',{className:"flex items-center justify-between"},
                         React.createElement('span',{className:"text-[10px] text-slate-400"},"الرقم القومي"),
+                        ' ',
                         React.createElement('span',{className:"text-xs font-bold text-white font-mono"},c.national_id)
                     ),
                     c.cr_number&&React.createElement('div',{className:"flex items-center justify-between"},
                         React.createElement('span',{className:"text-[10px] text-slate-400"},"رقم التوكيل"),
+                        ' ',
                         React.createElement('span',{className:"text-xs font-bold text-white"},c.cr_number)
                     )
                 ),
