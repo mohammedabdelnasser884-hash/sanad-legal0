@@ -617,4 +617,78 @@ describe('useCaseActions', () => {
       expect(toast).toHaveBeenCalledWith('❌ خطأ في الاتصال، تحقق من الإنترنت وأعد المحاولة', true);
     });
   });
+
+  // 🆕 (Phase 4 — خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): كانت
+  // ناقصة تمامًا من قبل. handleLinkClientForParty بتستخدم linkClientToParty
+  // (caseSessionLinkingShared.ts، مش موك — بتعدي فعليًا عن طريق
+  // window.__dbWrite) بدل تحديث cases.client_id مباشرة، فبنتحقق من شكل
+  // نداءات __dbWrite الفعلية بدل استدعاء دالة موك.
+  describe('handleLinkClientForParty', () => {
+    it('طرف أساسي (isPrimaryParty=true) → UPDATE:case_parties و UPDATE:cases (client_id) مع بعض، توست نجاح، fetchCases، logActivity، onAfterLink', async () => {
+      dbWriteMock().mockResolvedValue({ error: null, offline: false, queued: false });
+      const targetCase = makeCase({ id: 'case-link-1', title: 'قضية للربط' });
+      const params = makeParams({ cases: [targetCase] });
+      const { handleLinkClientForParty } = useCaseActions(params);
+      const onAfterLink = vi.fn();
+
+      await handleLinkClientForParty('case-link-1', 'party-1', 'client-1', true, onAfterLink);
+
+      const calls = dbWriteMock().mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>);
+      expect(calls).toContainEqual(expect.objectContaining({
+        type: 'UPDATE', table: 'case_parties', id: 'party-1', data: { client_id: 'client-1' },
+      }));
+      expect(calls).toContainEqual(expect.objectContaining({
+        type: 'UPDATE', table: 'cases', id: 'case-link-1', data: expect.objectContaining({ client_id: 'client-1' }),
+      }));
+      expect(toast).toHaveBeenCalledWith('✅ تم ربط الطرف بالموكل "أحمد محمد"');
+      expect(logActivity).toHaveBeenCalledWith(expect.anything(), 'ربط طرف بموكل', expect.objectContaining({
+        entity_type: 'case', entity_id: 'case-link-1', case_name: 'قضية للربط', client_name: 'أحمد محمد',
+      }));
+      expect(params.fetchCases).toHaveBeenCalledWith(0, 'all');
+      expect(onAfterLink).toHaveBeenCalled();
+    });
+
+    it('طرف غير أساسي (isPrimaryParty=false) → UPDATE:case_parties بس، مفيش UPDATE:cases ولا fetchCases، لكن onAfterLink بتتنادى برضه', async () => {
+      dbWriteMock().mockResolvedValue({ error: null, offline: false, queued: false });
+      const targetCase = makeCase({ id: 'case-link-2', title: 'قضية أطراف متعددة' });
+      const params = makeParams({ cases: [targetCase] });
+      const { handleLinkClientForParty } = useCaseActions(params);
+      const onAfterLink = vi.fn();
+
+      await handleLinkClientForParty('case-link-2', 'party-2', 'client-1', false, onAfterLink);
+
+      const calls = dbWriteMock().mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>);
+      expect(calls).toEqual([expect.objectContaining({
+        type: 'UPDATE', table: 'case_parties', id: 'party-2', data: { client_id: 'client-1' },
+      })]);
+      expect(params.fetchCases).not.toHaveBeenCalled();
+      expect(onAfterLink).toHaveBeenCalled();
+    });
+
+    it('فشل تحديث case_parties (error) → توست فشل، مفيش logActivity ولا fetchCases ولا onAfterLink', async () => {
+      dbWriteMock().mockResolvedValue({ error: { message: 'update failed' }, offline: false, queued: false });
+      const targetCase = makeCase({ id: 'case-link-3' });
+      const params = makeParams({ cases: [targetCase] });
+      const { handleLinkClientForParty } = useCaseActions(params);
+      const onAfterLink = vi.fn();
+
+      await handleLinkClientForParty('case-link-3', 'party-1', 'client-1', true, onAfterLink);
+
+      expect(toast).toHaveBeenCalledWith('❌ تعذّر ربط الموكل بهذا الطرف. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', true);
+      expect(logActivity).not.toHaveBeenCalled();
+      expect(params.fetchCases).not.toHaveBeenCalled();
+      expect(onAfterLink).not.toHaveBeenCalled();
+    });
+
+    it('الموكل مش موجود في clients[] (id غريب) → توست نجاح من غير اسم الموكل في الرسالة', async () => {
+      dbWriteMock().mockResolvedValue({ error: null, offline: false, queued: false });
+      const targetCase = makeCase({ id: 'case-link-4' });
+      const params = makeParams({ cases: [targetCase] });
+      const { handleLinkClientForParty } = useCaseActions(params);
+
+      await handleLinkClientForParty('case-link-4', 'party-1', 'client-unknown', false, vi.fn());
+
+      expect(toast).toHaveBeenCalledWith('✅ تم ربط الطرف بالموكل');
+    });
+  });
 });
