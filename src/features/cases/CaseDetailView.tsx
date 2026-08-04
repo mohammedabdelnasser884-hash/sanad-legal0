@@ -59,6 +59,10 @@ interface CaseDetailViewProps {
     onDelete?: (caseId: string) => void | Promise<void>;
     onEdit?: (caseId: string, form: CaseFormSubmitData) => void | boolean | Promise<void | boolean>;
     onLinkClient?: (caseId: string, clientId: string) => void | Promise<void>;
+    // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، Phase 3 — 4 أغسطس 2026): مرآة
+    // لـ onLinkClient فوق، بس بيربط طرف بعينه من case_parties (بدل القضية
+    // كلها) — شوف useCaseActions.ts (handleLinkClientForParty) وInfoSection.tsx.
+    onLinkClientForParty?: (caseId: string, partyId: string, clientId: string, isPrimaryParty: boolean, onAfterLink: () => void) => void | Promise<void>;
     // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 4): زرار "فك الربط" جوه
     // EditCaseModal — بيصفّر client_id بس (handleUnlinkClient في App.tsx).
     onUnlinkClient?: (caseId: string) => void | Promise<void>;
@@ -93,7 +97,7 @@ interface CaseDetailViewProps {
     openNewClientModal?: (ctx: ClientModalContext) => void;
 }
 
-function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDelete, onEdit, onLinkClient, onUnlinkClient, onCreateAndLinkClient, onCreateAndLinkClientForParty, onNotify, initialTab='timeline', profile=null, country=null, savingCase=false, onOpenClientProfile, openNewClientModal}: CaseDetailViewProps){
+function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDelete, onEdit, onLinkClient, onLinkClientForParty, onUnlinkClient, onCreateAndLinkClient, onCreateAndLinkClientForParty, onNotify, initialTab='timeline', profile=null, country=null, savingCase=false, onOpenClientProfile, openNewClientModal}: CaseDetailViewProps){
     const [activeSection, setActiveSection] = useState(initialTab);
     const [showEditCase, setShowEditCase] = useState(false);
     const [linkingClient, setLinkingClient] = useState(false);
@@ -219,6 +223,11 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
                 onSave: async (form: CaseFormSubmitData) => {
                     const result = await onEdit?.(caseData.id, form);
                     if (result !== false) setShowEditCase(false);
+                    // 🔒 FIX (قرارات مفتوحة — خطة حفظ المسودات، 3 أغسطس 2026):
+                    // بنرجّع النتيجة نفسها لـ EditCaseModal.tsx عشان يعرف يمسح
+                    // مسودة الفورم بس لو نجح الحفظ فعلاً (كانت بترجع undefined
+                    // دايمًا، فالمودال ماكانش عنده وسيلة يعرف بيها النتيجة).
+                    return result;
                 },
                 countryCourts: COUNTRY_CONFIGS[country as string]?.courts,
                 countryCaseTypes: COUNTRY_CONFIGS[country as string]?.caseTypes,
@@ -532,6 +541,17 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
                     try { await onLinkClient(caseData.id, clientId); }
                     finally { setLinkingClient(false); }
                 },
+                // ⚡ NEW (Phase 3 — 4 أغسطس 2026): مرآة لـ onLinkClient فوق بس
+                // لطرف بعينه — onAfterLink بتنادي fetchSessions() تاني عشان
+                // caseParties (والوسم/الزرار الخاص بالطرف ده) تتحدّث فورًا،
+                // بنفس نمط onCreateAndLinkClientForParty تحت بالظبط.
+                onLinkClientForParty: onLinkClientForParty
+                    ? async (partyId: string, clientId: string, isPrimaryParty: boolean) => {
+                        setLinkingClient(true);
+                        try { await onLinkClientForParty(caseData.id, partyId, clientId, isPrimaryParty, () => fetchSessions()); }
+                        finally { setLinkingClient(false); }
+                      }
+                    : undefined,
                 onCreateAndLinkClient: onCreateAndLinkClient
                     ? () => onCreateAndLinkClient(caseData.id, caseData.plaintiff || '', caseData.plaintiff_national_id, caseData.plaintiff_power_of_attorney, caseData.plaintiff_address)
                     : undefined,
