@@ -163,7 +163,7 @@ function App() {
         else   { _setDeleteConfirm(null); }
     }, [nav]);
 
-    const { handleLogout, handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleUnlinkClient } = useCaseActions({
+    const { handleLogout, handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleLinkClientForParty, handleUnlinkClient } = useCaseActions({
         sendTelegram, fetchCases, cases, lawyers, clients, selectedCase,
         setCases, setLawyers, setClients, setProfile, setAuthUser,
         setSelectedCase, setDeleteConfirm, setSavingCase, setShowCaseModal,
@@ -354,6 +354,10 @@ function App() {
         // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 3): زرار "عدّل من ملف
         // الموكل" جوه EditStandaloneModal — نفس آلية فتح تفاصيل الموكل.
         onOpenClientProfile: (c) => setSelectedClient(c as MappedClient, true),
+        // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): بتوصّل
+        // لـ StandaloneSessionDetailModal (زرار "🔗 ربط") عبر DashboardTab —
+        // نفس الدالة المستخدمة أصلاً في NewStandaloneSessionModal.tsx.
+        onOpenCreateClientForSessionParty: handleOpenCreateClientForSessionPartyOnly,
     });
     const CasesTabContent   = React.createElement(CasesTab, {
         cases, casesFilter, setCasesFilter, casesPage, setCasesPage,
@@ -406,6 +410,10 @@ function App() {
                     externalRefreshSignal: sessionsRefreshSignal,
                     nav,
                     onOpenClientProfile: (c) => setSelectedClient(c as MappedClient, true),
+                    // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): بتوصّل
+                    // لـ StandaloneSessionDetailModal (زرار "🔗 ربط") عبر تاب الجلسات —
+                    // نفس الدالة المستخدمة أصلاً في NewStandaloneSessionModal.tsx.
+                    onOpenCreateClientForSessionParty: handleOpenCreateClientForSessionPartyOnly,
                 })
             ),
             tab === 'fees' && React.createElement(FeesTab, { cases, clients, showSummaryModal: showFeesSummary, setShowSummaryModal: setShowFeesSummary, country, profile, nav }),
@@ -449,7 +457,7 @@ function App() {
             fetchCases, fetchTodaySessions, fetchUpcomingSessions, fetchMissedSessions,
             onStandaloneSessionSaved: bumpSessionsRefreshSignal,
             fetchClients, clientSearch,
-            handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleUnlinkClient, handleCreateAndLinkClient: handleOpenCreateClientForCase,
+            handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleLinkClientForParty, handleUnlinkClient, handleCreateAndLinkClient: handleOpenCreateClientForCase,
             handleOpenCreateClientForSession, handleOpenCreateClientForSessionCase: handleOpenCreateClientForCase,
             handleOpenCreateClientForSessionParty: handleOpenCreateClientForParty,
             handleOpenCreateClientForSessionPartyOnly,
