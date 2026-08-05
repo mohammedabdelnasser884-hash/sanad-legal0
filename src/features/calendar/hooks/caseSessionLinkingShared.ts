@@ -656,6 +656,37 @@ export async function linkClientToParty(
   return { ok: !partyResult.error && caseOk };
 }
 
+// ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة "إصلاح 5" — 5 أغسطس 2026):
+// عكس linkClientToParty فوق بالظبط — بتصفّر case_parties.client_id للطرف
+// ده بس، وcases.client_id كمان لو الطرف أساسي (isPrimaryParty)، من غير ما
+// تلمس أي حقل تاني (اسم/رقم قومي/توكيل/عنوان الطرف بتفضل زي ما هي —
+// بيانات حرة قابلة للتعديل بدل ما تتقرا من ملف الموكل، نفس فلسفة
+// handleUnlinkClient لمستوى القضية كلها). مفيش داعي لـclientOfflineInfo
+// هنا (فك ربط، مش إنشاء رابط جديد لموكل أوفلاين مؤقت).
+export async function unlinkClientFromParty(
+  partyId: string,
+  isPrimaryParty: boolean,
+  caseId: string,
+): Promise<{ ok: boolean }> {
+  const partyResult = await window.__dbWrite({
+    type: 'UPDATE',
+    table: 'case_parties',
+    id: partyId,
+    data: { client_id: null },
+  });
+  let caseOk = true;
+  if (isPrimaryParty) {
+    const caseResult = await window.__dbWrite({
+      type: 'UPDATE',
+      table: 'cases',
+      id: caseId,
+      data: { client_id: null },
+    });
+    caseOk = !caseResult.error;
+  }
+  return { ok: !partyResult.error && caseOk };
+}
+
 // ══════════════════════════════════════════════════════════════
 //  خطة تعدد الأطراف — مرحلة 13 جزء 2 (23 يوليو 2026): نسخة من
 //  linkClientToParty فوق، بس لطرف تابع لجلسة مستقلة *لسه ما اتحوّلتش
