@@ -167,13 +167,25 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
         legalTitles: { plaintiff: string; defendant: string };
     }
     const draftData: SessionDraftData = { form, linkMode, selectedCaseId, parties: partyFields.parties, legalTitles: partyFields.legalTitles };
+    // ⚡ FIX (بلاغ 5 أغسطس 2026 — مسودة "زيادة عن اللزوم"): كانت
+    // `d.linkMode === 'standalone'` شرط إلزامي هنا، يعني في وضع "existing"
+    // الفورم مكانش بيتحسب فاضي أبدًا حتى لو مفيش قضية متحددة ولا أي حاجة
+    // مكتوبة — بيتم تجاهل linkMode في فحص الفراغ؛ اختيار قضية (selectedCaseId)
+    // بيتفحص في الحالتين، وparties أصلاً بتفضل فاضية في وضع "existing" برضه.
     const isSessionDraftEmpty = (d: SessionDraftData) =>
         !d.form.title.trim() && !d.form.session_date.trim() && !d.form.case_number.trim() &&
-        d.linkMode === 'standalone' && !d.selectedCaseId &&
+        !d.selectedCaseId &&
         !d.parties.some((p) => p.name.trim() || p.national_id.trim() || p.address.trim() || p.power_of_attorney.trim() || p.capacity.trim());
-    const draft = useFormDraft<SessionDraftData>({ key: 'new-standalone-session', data: draftData, isEmpty: isSessionDraftEmpty });
     const [saving, setSaving] = useState(false);
+    // ⚡ FIX (بلاغ 5 أغسطس 2026 — مسودة "زيادة عن اللزوم"): postSaveModal
+    // لازم يتعرّف قبل استخدامه في useFormDraft تحت (enabled) — الفورم نفسه
+    // فاضل mounted وقت شاشة "بعد الحفظ" (تحويل لقضية/إضافة موكل)، فمن غير
+    // enabled=false هنا، أي re-render أثناء تفاعلك مع الشاشة دي (useClientLinking
+    // بتغيّر state زي linkingCase/linkingClient) بيولّد reference جديد لـ
+    // draftData، والـ hook (بعد ما ينتهي suppress الـ3 ثواني بتاعه) بيرجع
+    // يكتب نفس بيانات الجلسة اللي خلصت وحُفظت كمسودة جديدة من الأول.
     const [postSaveModal, setPostSaveModal] = useState(false);
+    const draft = useFormDraft<SessionDraftData>({ key: 'new-standalone-session', data: draftData, isEmpty: isSessionDraftEmpty, enabled: !postSaveModal });
     // 🆕 (خطة "المسمى القانوني" — بند مؤجل من التقرير): plaintiffLegalTitle/
     // defendantLegalTitle اتضافوا هنا (مطابقة لـ SavedFormData في
     // useClientLinking.ts) عشان يتنقلوا للقضية الجديدة وقت التحويل.
