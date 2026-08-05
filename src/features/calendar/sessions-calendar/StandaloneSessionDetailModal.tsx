@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from '../../../shared/lib/notifications';
-import { safeUpdate } from '../../../shared/lib/dataAccess';
 import { showErrorToast } from '../../../shared/lib/errorReporting';
 import { I } from '../../../constants';
 import { Inp } from '@/shared/ui/Inp';
@@ -15,7 +14,7 @@ import { useSessionLinking } from '../hooks/useSessionLinking';
 import type { OpenCreateClientForSessionParty } from '../hooks/useClientLinking';
 // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 6): كشف التعارض بين البيانات
 // الحرة في الجلسة وملف الموكل المختار وقت الربط اليدوي اللاحق.
-import { findClientDataMismatches, type FieldMismatch } from '../hooks/caseSessionLinkingShared';
+import { findClientDataMismatches, syncSessionIdentityToGroupSiblings, type FieldMismatch } from '../hooks/caseSessionLinkingShared';
 // ⚡ NEW (خطة تعدد الأطراف، مرحلة 6.4، 23 يوليو 2026): نفس Component/هوك
 // مشترك مرحلة 5.1 (EditCaseModal.tsx) و6.1 (NewStandaloneSessionModal.tsx)
 // بالحرف — بدل حقلي "الموكل"/"الخصم" المفردين هنا كمان. استيراد
@@ -377,14 +376,63 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
         // القديمة — نفس آلية 4.1/5.1/6.1 بالحرف.
         const primaryPlaintiff = partyFields.plaintiffs.find((p) => p.is_client) || partyFields.plaintiffs[0];
         const primaryDefendant = partyFields.defendants.find((p) => p.is_client) || partyFields.defendants[0];
-        const { success, conflict, error } = await safeUpdate(db, 'case_sessions', session.id, {
+        // 🆕 (توحيد الأوفلاين لشاشة الجلسة المستقلة — 5 أغسطس 2026): __dbWrite
+        // بدل safeUpdate — بيحافظ على نفس فحص التعارض (knownUpdatedAt) أونلاين،
+        // وكمان بيقيّد التعديل في طابور الأوفلاين لو النت مقطوع بدل ما يفشل
+        // بتوست خطأ عادي (نفس نمط handleUpdateSession في useCaseSessions.ts).
+        const { error, offline, queued, conflict } = await window.__dbWrite({
+            type: 'UPDATE', table: 'case_sessions', id: session.id,
+            data: {
+                court: form.court || null,
+                title: form.title || null,
+                case_number: fullCaseNumber || null,
+                case_type: finalCaseType || null,
+                circuit_number: form.circuit_number || null,
+                session_date: form.session_date,
+                session_time: form.session_time || null,
+                plaintiff: primaryPlaintiff?.name || null,
+                plaintiff_role: primaryPlaintiff?.capacity || null,
+                plaintiff_national_id: primaryPlaintiff?.national_id || null,
+                plaintiff_power_of_attorney: primaryPlaintiff?.power_of_attorney || null,
+                defendant: primaryDefendant?.name || null,
+                defendant_role: primaryDefendant?.capacity || null,
+                defendant_national_id: primaryDefendant?.national_id || null,
+                // 🆕 (خطة "المسمى القانوني" — مرحلة 3): نفس منطق EditCaseModal.tsx.
+                plaintiff_legal_title: partyFields.legalTitles.plaintiff || null,
+                defendant_legal_title: partyFields.legalTitles.defendant || null,
+                next_action: form.next_action || null,
+            },
+            knownUpdatedAt: session.updated_at || null,
+        });
+        // 🔒 FIX (تقرير الموثوقية — القسم 12، Concurrent Editing): توست بدل السكوت التام.
+        if (conflict) { setSaving(false); toast('⚠️ هذه الجلسة عدّلها شخص آخر بعد ما فتحتها — أعد المحاولة', true); return; }
+        // ⚠️ `error` هنا بيبقى null في حالة النجاح أونلاين *وكمان* في حالة
+        // التقييد الناجح في طابور الأوفلاين (offline && queued) — __dbWrite
+        // بيرجّع error حقيقي بس لو فشل الاتصال أونلاين، أو لو فشل الحفظ محليًا
+        // في IndexedDB نفسها وقت الأوفلاين. يعني الفحص ده وحده كافي للحالتين.
+        if (error) {
+            setSaving(false);
+            showErrorToast('session_save', error, 'تعذّر حفظ الجلسة. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'حفظ الجلسة');
+            return;
+        }
+        // 🆕 (خطة حفظ المسودات — 1 أغسطس 2026): نفس قرار NewStandaloneSessionModal.tsx
+        // — بيانات الجلسة اتحفظت فعليًا في الداتابيز (أو اتقيّدت في طابور
+        // الأوفلاين بأمان لو النت مقطوع) بحلول هنا (مش مجرد الضغط على "حفظ")،
+        // فالمسودة بتتمسح دلوقتي بالظبط في الحالتين.
+        draft.clearDraft();
+        // 🔒 FIX (تناسق "هوية" السلسلة — 5 أغسطس 2026): لو الجلسة دي عضو في
+        // سلسلة session_group_id، نفس حقول "هوية القضية" (محكمة/عنوان/رقم
+        // قضية/نوع/دائرة/بيانات المدعي والمدعى عليه) اللي اتصححت هنا لازم
+        // تتزامن مع باقي جلسات السلسلة التاريخية — عمدًا من غير
+        // session_date/session_time/next_action (دول خاصين بكل جلسة على
+        // حدة). syncSessionIdentityToGroupSiblings بترجع {siblingCount:0}
+        // لو مفيش session_group_id أصلاً (صفر تغيير سلوك للجلسة العادية).
+        const identitySyncResult = await syncSessionIdentityToGroupSiblings(db, session, {
             court: form.court || null,
             title: form.title || null,
             case_number: fullCaseNumber || null,
             case_type: finalCaseType || null,
             circuit_number: form.circuit_number || null,
-            session_date: form.session_date,
-            session_time: form.session_time || null,
             plaintiff: primaryPlaintiff?.name || null,
             plaintiff_role: primaryPlaintiff?.capacity || null,
             plaintiff_national_id: primaryPlaintiff?.national_id || null,
@@ -392,27 +440,17 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
             defendant: primaryDefendant?.name || null,
             defendant_role: primaryDefendant?.capacity || null,
             defendant_national_id: primaryDefendant?.national_id || null,
-            // 🆕 (خطة "المسمى القانوني" — مرحلة 3): نفس منطق EditCaseModal.tsx.
             plaintiff_legal_title: partyFields.legalTitles.plaintiff || null,
             defendant_legal_title: partyFields.legalTitles.defendant || null,
-            next_action: form.next_action || null,
-        }, session.updated_at || null);
-        // 🔒 FIX (تقرير الموثوقية — القسم 12، Concurrent Editing): توست بدل السكوت التام.
-        if (conflict) { setSaving(false); toast('⚠️ هذه الجلسة عدّلها شخص آخر بعد ما فتحتها — أعد المحاولة', true); return; }
-        if (!success) {
-            setSaving(false);
-            showErrorToast('session_save', error, 'تعذّر حفظ الجلسة. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'حفظ الجلسة');
-            return;
-        }
-        // 🆕 (خطة حفظ المسودات — 1 أغسطس 2026): نفس قرار NewStandaloneSessionModal.tsx
-        // — بيانات الجلسة اتحفظت فعليًا في الداتابيز بحلول هنا (مش مجرد الضغط
-        // على "حفظ")، فالمسودة بتتمسح دلوقتي بالظبط.
-        draft.clearDraft();
+        });
         // ⚡ NEW (مرحلة 6.4): مزامنة أطراف الدعوى الفعلية في case_parties —
         // بعد نجاح تحديث بيانات الجلسة نفسها، بالـ session_id الحقيقي
         // مباشرة (مفيش داعي لسنتينل، الجلسة أصلاً موجودة قبل التعديل).
         const partiesResult = await syncSessionParties(session.id);
         setSaving(false);
+        if (!identitySyncResult.ok) {
+            toast('⚠️ تم تعديل الجلسة، لكن حصل خطأ في مزامنة بيانات بعض جلسات السلسلة التاريخية — راجعها يدويًا', true);
+        }
         if (!partiesResult.ok) {
             // 🔒 نفس مبدأ 4.3/5.2: توست واحد بس، برسالة الفاليديشن المحددة
             // لو ده السبب، أو رسالة عامة لو فشل الكتابة — من غير ما يمنع
@@ -424,7 +462,10 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
                 true
             );
         }
-        toast('✅ تم تعديل الجلسة');
+        // 🆕 (توحيد الأوفلاين): توست مختلف لو التعديل الأساسي اتقيّد في
+        // الطابور بدل ما يوصل السيرفر فورًا — نفس صياغة handleUpdateSession
+        // في useCaseSessions.ts.
+        toast(offline && queued ? '📥 تعديل الجلسة محفوظ محلياً — سيُزامن عند عودة الإنترنت' : '✅ تم تعديل الجلسة');
         onSaved();
         onClose();
     };
@@ -578,6 +619,9 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
         existingClientTargetPartyId, startExistingClientSearch, cancelExistingClientSearch,
         handleLinkCase, handleLinkExistingClient, handleAddAndLinkClient, handleAddClientOnly,
         searchExistingClients, confirmLinkToExistingClient,
+        // 🆕 (زرار "أعد المحاولة" — 5 أغسطس 2026): لعرض تحذير + زرار في خطوة
+        // 'done' لو صف تاريخي في السلسلة فشل ربطه بالقضية.
+        groupLinkRetryContext, retryingGroupLink, handleRetryGroupLink,
     } = useSessionLinking(session, db, onDone, onClientAdded, linkedClient, onOpenCreateClientForSessionParty);
 
     const hasPlaintiff = !!session.plaintiff?.trim();
@@ -872,6 +916,24 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                         React.createElement('h3', { className: 'text-sm font-black text-white' }, 'تم بنجاح'),
                         React.createElement('p', { className: 'text-[11px] text-slate-400' }, 'تم تنفيذ الربط بنجاح')
                     ),
+                    // 🆕 (زرار "أعد المحاولة" — 5 أغسطس 2026): بيظهر بس لو فيه
+                    // جلسات تاريخية في نفس السلسلة فشل ربطها بالقضية رغم نجاح
+                    // الجلسة الأساسية — بدل ما المستخدم يعتمد على توست بيختفي
+                    // ويرجع لاحقًا يعمل قضية جديدة مكررة بالغلط.
+                    groupLinkRetryContext && React.createElement('div', {
+                        className: 'rounded-2xl p-3 space-y-2 border border-amber-500/30 bg-amber-500/10',
+                        'data-testid': 'group-link-retry-warning'
+                    },
+                        React.createElement('p', { className: 'text-[11px] text-amber-300 leading-relaxed' },
+                            `⚠️ فشل ربط ${groupLinkRetryContext.failedIds.length} من جلسات السلسلة التاريخية بالقضية — القضية اتعملت بالفعل، فمتضغطش "تحويل لقضية" من الجلسة دي تاني، استخدم الزرار ده بدل كده.`
+                        ),
+                        React.createElement('button', {
+                            onClick: handleRetryGroupLink,
+                            disabled: retryingGroupLink,
+                            className: 'w-full py-2.5 rounded-xl text-[11px] font-black text-amber-300 border border-amber-500/40 disabled:opacity-50',
+                            'data-testid': 'group-link-retry-button'
+                        }, retryingGroupLink ? 'جاري إعادة المحاولة...' : '🔄 أعد المحاولة')
+                    ),
                     React.createElement('button', {
                         onClick: onFullClose,
                         className: 'w-full py-3 rounded-2xl text-xs font-black text-premium-bg transition-all',
@@ -1042,35 +1104,49 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
         { label: '📝 ما تم', value: session.result || null },
     ].filter((r) => r.value);
 
+    // 🆕 (توحيد الأوفلاين لشاشة الجلسة المستقلة — 5 أغسطس 2026): __dbWrite
+    // بدل db.from(...).delete() المباشر — لو النت مقطوع، الحذف بيتقيّد في
+    // طابور الأوفلاين (window.__dbWrite) بدل ما يفشل بتوست خطأ عادي، ويتزامن
+    // فعليًا لما النت يرجع. مفيش داعي لسنتينل `_offlineSessionCaseId` هنا
+    // (زي useCaseSessions.ts) لأن دي أصلاً جلسة *مستقلة* — case_id بتاعها
+    // null دايمًا، فمفيش next_hearing لقضية نعيد حسابه بعد المزامنة.
     const handleDelete = async () => {
         setDeleting(true);
         try {
-            const { error } = await db.from('case_sessions').delete().eq('id', session.id);
+            const { error, offline, queued } = await window.__dbWrite({ type: 'DELETE', table: 'case_sessions', id: session.id });
             if (error) {
                 showErrorToast('session_delete', error, 'تعذّر حذف الجلسة. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'حذف الجلسة');
                 return;
             }
-            toast('✅ تم حذف الجلسة');
+            toast(offline && queued ? '📥 حذف الجلسة محفوظ محلياً — سيُزامن عند عودة الإنترنت' : '✅ تم حذف الجلسة');
             onDone();
             onClose();
         } catch { toast('❌ خطأ غير متوقع', true); }
         finally { setDeleting(false); setShowConfirmDelete(false); }
     };
 
-    // ⚡ NEW: نفس منطق handleUnlink اللي كان جوه EditStandaloneModal بالظبط
-    // (كتابة مباشرة على case_sessions.client_id عبر safeUpdate)، بس هنا
-    // بيحدّث fullSession محليًا كمان عشان زرار الربط/فك الربط يتحدّث فورًا
-    // من غير ما يقفل الشاشة (بعكس الحذف).
+    // ⚡ NEW: نفس منطق handleUnlink اللي كان جوه EditStandaloneModal بالظبط،
+    // بس هنا بيحدّث fullSession محليًا كمان عشان زرار الربط/فك الربط يتحدّث
+    // فورًا من غير ما يقفل الشاشة (بعكس الحذف).
+    // 🆕 (توحيد الأوفلاين — 5 أغسطس 2026): __dbWrite بدل safeUpdate — بيحافظ
+    // على نفس فحص التعارض (knownUpdatedAt) أونلاين، وبيقيّد في طابور
+    // الأوفلاين لو النت مقطوع بدل الفشل المباشر.
     const handleUnlinkClient = async () => {
         setUnlinkingClient(true);
-        const { success, conflict, error } = await safeUpdate(db, 'case_sessions', session.id, { client_id: null }, session.updated_at || null);
+        const { error, offline, queued, conflict } = await window.__dbWrite({
+            type: 'UPDATE', table: 'case_sessions', id: session.id,
+            data: { client_id: null },
+            knownUpdatedAt: session.updated_at || null,
+        });
         setUnlinkingClient(false);
         if (conflict) { toast('⚠️ هذه الجلسة عدّلها شخص آخر بعد ما فتحتها — أعد المحاولة', true); return; }
-        if (!success) {
+        if (error) {
             showErrorToast('session_unlink', error, 'تعذّر فك ربط الجلسة عن الموكل. حاول مرة أخرى.', 'فك ربط الجلسة');
             return;
         }
-        toast('✅ تم فك الربط — بيانات الموكل في الجلسة بقت قابلة للتعديل الحر');
+        toast(offline && queued
+            ? '📥 فك الربط محفوظ محلياً — سيُزامن عند عودة الإنترنت'
+            : '✅ تم فك الربط — بيانات الموكل في الجلسة بقت قابلة للتعديل الحر');
         setFullSession((prev) => ({ ...prev, client_id: null }));
         setShowUnlinkConfirm(false);
         onDone();
