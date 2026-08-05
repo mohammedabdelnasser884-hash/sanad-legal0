@@ -691,4 +691,66 @@ describe('useCaseActions', () => {
       expect(toast).toHaveBeenCalledWith('✅ تم ربط الطرف بالموكل');
     });
   });
+
+  // 🆕 ("إصلاح 5" — خطة توحيد مصدر بيانات الموكل، 5 أغسطس 2026): عكس
+  // describe('handleLinkClientForParty') فوق بالظبط — handleUnlinkClientForParty
+  // بتستخدم unlinkClientFromParty (caseSessionLinkingShared.ts، مش موك —
+  // بتعدي فعليًا عن طريق window.__dbWrite) بدل تصفير cases.client_id مباشرة.
+  describe('handleUnlinkClientForParty', () => {
+    it('طرف أساسي (isPrimaryParty=true) → UPDATE:case_parties و UPDATE:cases (client_id=null) مع بعض، توست نجاح، fetchCases، logActivity، onAfterLink', async () => {
+      dbWriteMock().mockResolvedValue({ error: null, offline: false, queued: false });
+      const targetCase = makeCase({ id: 'case-unlink-1', title: 'قضية لفك الربط' });
+      const params = makeParams({ cases: [targetCase] });
+      const { handleUnlinkClientForParty } = useCaseActions(params);
+      const onAfterLink = vi.fn();
+
+      await handleUnlinkClientForParty('case-unlink-1', 'party-1', true, onAfterLink);
+
+      const calls = dbWriteMock().mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>);
+      expect(calls).toContainEqual(expect.objectContaining({
+        type: 'UPDATE', table: 'case_parties', id: 'party-1', data: { client_id: null },
+      }));
+      expect(calls).toContainEqual(expect.objectContaining({
+        type: 'UPDATE', table: 'cases', id: 'case-unlink-1', data: { client_id: null },
+      }));
+      expect(toast).toHaveBeenCalledWith('✅ تم فك ربط الطرف عن الموكل — بياناته بقت قابلة للتعديل الحر');
+      expect(logActivity).toHaveBeenCalledWith(expect.anything(), 'فك ربط طرف عن موكل', expect.objectContaining({
+        entity_type: 'case', entity_id: 'case-unlink-1', case_name: 'قضية لفك الربط',
+      }));
+      expect(params.fetchCases).toHaveBeenCalledWith(0, 'all');
+      expect(onAfterLink).toHaveBeenCalled();
+    });
+
+    it('طرف غير أساسي (isPrimaryParty=false) → UPDATE:case_parties بس، مفيش UPDATE:cases ولا fetchCases، لكن onAfterLink بتتنادى برضه', async () => {
+      dbWriteMock().mockResolvedValue({ error: null, offline: false, queued: false });
+      const targetCase = makeCase({ id: 'case-unlink-2', title: 'قضية أطراف متعددة' });
+      const params = makeParams({ cases: [targetCase] });
+      const { handleUnlinkClientForParty } = useCaseActions(params);
+      const onAfterLink = vi.fn();
+
+      await handleUnlinkClientForParty('case-unlink-2', 'party-2', false, onAfterLink);
+
+      const calls = dbWriteMock().mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>);
+      expect(calls).toEqual([expect.objectContaining({
+        type: 'UPDATE', table: 'case_parties', id: 'party-2', data: { client_id: null },
+      })]);
+      expect(params.fetchCases).not.toHaveBeenCalled();
+      expect(onAfterLink).toHaveBeenCalled();
+    });
+
+    it('فشل تحديث case_parties (error) → توست فشل، مفيش logActivity ولا fetchCases ولا onAfterLink', async () => {
+      dbWriteMock().mockResolvedValue({ error: { message: 'update failed' }, offline: false, queued: false });
+      const targetCase = makeCase({ id: 'case-unlink-3' });
+      const params = makeParams({ cases: [targetCase] });
+      const { handleUnlinkClientForParty } = useCaseActions(params);
+      const onAfterLink = vi.fn();
+
+      await handleUnlinkClientForParty('case-unlink-3', 'party-1', true, onAfterLink);
+
+      expect(toast).toHaveBeenCalledWith('❌ تعذّر فك ربط الطرف عن الموكل. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', true);
+      expect(logActivity).not.toHaveBeenCalled();
+      expect(params.fetchCases).not.toHaveBeenCalled();
+      expect(onAfterLink).not.toHaveBeenCalled();
+    });
+  });
 });
