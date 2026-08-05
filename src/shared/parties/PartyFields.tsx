@@ -1,6 +1,7 @@
 import React from 'react';
 import { Inp } from '../ui/Inp';
 import { PoaInput } from '../ui/PoaInput';
+import { toast } from '../lib/notifications';
 import type { PartyFieldValue, PartySide } from './partyTypes';
 
 // نفس هيلبر "أرقام فقط بحد أقصى" المستخدم في NewCaseModal.tsx/
@@ -74,10 +75,17 @@ export function PartyFields({
             React.createElement('div', { className: 'flex items-center gap-2' },
                 React.createElement('button', {
                     type: 'button',
-                    onClick: onToggleIsClient,
+                    // ⚡ FIX (تقرير التحقّق — النقطة 6، الثغرة الأولى): لو الطرف
+                    // مربوط فعليًا بموكل حي (client_id != null)، منسمحش بتبديل
+                    // "موكلنا" مباشرة — ده كان بيخلق "primary" جديد بدون فك ربط
+                    // العميل الموجود أصلاً. لازم فك الربط أولًا (النقطة 5).
+                    onClick: party.client_id
+                        ? () => toast('⚠️ فك الربط أولًا قبل تغيير "موكلنا"', true)
+                        : onToggleIsClient,
+                    'aria-disabled': !!party.client_id,
                     'data-testid': tid('star'),
                     'aria-pressed': party.is_client,
-                    className: `text-[11px] font-bold px-2 py-1 rounded-lg transition-colors ${party.is_client ? 'text-amber-300' : 'text-slate-500'}`,
+                    className: `text-[11px] font-bold px-2 py-1 rounded-lg transition-colors ${party.is_client ? 'text-amber-300' : 'text-slate-500'} ${party.client_id ? 'cursor-not-allowed opacity-70' : ''}`,
                 }, party.is_client ? '⭐ موكلنا' : '☆ موكلنا؟'),
                 canRemove && React.createElement('button', {
                     type: 'button',
