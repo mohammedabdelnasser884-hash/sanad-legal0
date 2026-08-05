@@ -662,7 +662,7 @@ describe('useSessionLinking', () => {
         { data: [], error: null }, [],
         { data: [{ id: 'session-1' }, { id: 'session-old-9' }], error: null },
       );
-      const session = makeSession({ id: 'session-1', session_group_id: 'group-abc', plaintiff: 'موكل جديد' });
+      const session = makeSession({ id: 'session-1', session_group_id: 'group-abc', plaintiff: 'موكل جديد تماما' });
       const { result } = renderHook(() => useSessionLinking(session, mockDb, vi.fn()));
 
       await act(async () => { await result.current.handleAddClientOnly(); });
