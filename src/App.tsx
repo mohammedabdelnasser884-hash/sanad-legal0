@@ -163,7 +163,7 @@ function App() {
         else   { _setDeleteConfirm(null); }
     }, [nav]);
 
-    const { handleLogout, handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleLinkClientForParty, handleUnlinkClient } = useCaseActions({
+    const { handleLogout, handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleLinkClientForParty, handleUnlinkClient, handleUnlinkClientForParty } = useCaseActions({
         sendTelegram, fetchCases, cases, lawyers, clients, selectedCase,
         setCases, setLawyers, setClients, setProfile, setAuthUser,
         setSelectedCase, setDeleteConfirm, setSavingCase, setShowCaseModal,
@@ -457,7 +457,7 @@ function App() {
             fetchCases, fetchTodaySessions, fetchUpcomingSessions, fetchMissedSessions,
             onStandaloneSessionSaved: bumpSessionsRefreshSignal,
             fetchClients, clientSearch,
-            handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleLinkClientForParty, handleUnlinkClient, handleCreateAndLinkClient: handleOpenCreateClientForCase,
+            handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleLinkClientForParty, handleUnlinkClient, handleUnlinkClientForParty, handleCreateAndLinkClient: handleOpenCreateClientForCase,
             handleOpenCreateClientForSession, handleOpenCreateClientForSessionCase: handleOpenCreateClientForCase,
             handleOpenCreateClientForSessionParty: handleOpenCreateClientForParty,
             handleOpenCreateClientForSessionPartyOnly,
