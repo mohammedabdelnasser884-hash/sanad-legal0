@@ -5,8 +5,8 @@ import { showErrorToast } from '../../../shared/lib/errorReporting';
 import { recalcNextHearing } from '../../../shared/lib/dataAccess';
 import type { Form } from '../NewStandaloneSessionModal';
 import {
-  makeOfflineTempId, isOfflineTempId, withFkOfflineSentinel, withCaseSelfOfflineSentinel, findMatchingClientByName, buildCaseInsertData,
-  movePartiesFromSessionToCase, fetchSessionClientParties, matchClientsForParties, linkClientToParty,
+  makeOfflineTempId, isOfflineTempId, withCaseSelfOfflineSentinel, findMatchingClientByName, buildCaseInsertData,
+  fetchSessionClientParties, matchClientsForParties, linkClientToParty, linkSessionGroupToCase,
 } from './caseSessionLinkingShared';
 import type { SessionClientParty, PartyClientMatch } from './caseSessionLinkingShared';
 
@@ -235,28 +235,28 @@ export function useClientLinking(
         ? await fetchSessionClientParties(db, savedFormData.sessionId)
         : [];
       if (savedFormData.sessionId) {
-        const { error: sessionLinkErr } = await window.__dbWrite({
-          type: 'UPDATE',
-          table: 'case_sessions',
-          id: savedFormData.sessionId,
-          // 🆕 المرحلة 2: sentinel التمبيد العام بيتبعت بس لما القضية نفسها
-          // لسه تمبيد (أوفلاين) — لو نجحت أونلاين، case_id بالفعل id حقيقي
-          // ومحتاجش أي حل وقت المزامنة.
-          data: withFkOfflineSentinel(offline, queued, 'case_id', offlineTempId, 'cases', caseTitle, { case_id: realOrTempCaseId }),
-        });
-        if (sessionLinkErr) {
-          showErrorToast('session_case_link', sessionLinkErr, 'تم إنشاء القضية لكن تعذّر ربط الجلسة بها. حاول تحديث الصفحة.', 'ربط الجلسة بالقضية');
+        // ⚡ FIX (تقرير التحقّق — النقطة 2): كان الكود هنا بيعمل UPDATE على
+        // صف case_sessions ده بس + movePartiesFromSessionToCase لصف واحد،
+        // بعكس useSessionLinking.ts اللي بيستخدم linkSessionGroupToCase
+        // (group-aware) للمسار المكافئ (جلسة محفوظة بالفعل → قضية). الجلسة
+        // هنا لسه جديدة (اتحفظت للتوّ في نفس العملية دي)، فمفروض عمليًا معهاش
+        // session_group_id أصلاً (السلسلة بتتكوّن بس لاحقًا عن طريق "⚡ تحديث
+        // الجلسة" في SessionUpdateModal) — بس استخدام linkSessionGroupToCase
+        // هنا كمان (بدل نسخة يدوية منفصلة) بيوحّد المسارين على نفس الدالة
+        // المُختبَرة، ويحمي أي سيناريو مستقبلي يبقى فيه للجلسة الجديدة سلسلة
+        // بالفعل وقت التحويل.
+        const groupLinkResult = await linkSessionGroupToCase(
+          db, { id: savedFormData.sessionId, session_group_id: null }, realOrTempCaseId, offline, queued, offlineTempId, caseTitle,
+        );
+        if (!groupLinkResult.ok && groupLinkResult.failedIds.includes(savedFormData.sessionId)) {
+          // فشل ربط الجلسة الأساسية نفسها بالقضية (case_id) — نفس رسالة
+          // الخطأ القديمة بالظبط.
+          showErrorToast('session_case_link', null, 'تم إنشاء القضية لكن تعذّر ربط الجلسة بها. حاول تحديث الصفحة.', 'ربط الجلسة بالقضية');
         } else {
-          // ⚡ NEW (مرحلة 7.1 — خطة تعدد الأطراف، 23 يوليو 2026): نقل كل
-          // صفوف case_parties بتاعة الجلسة (مش بس الطرف الأساسي اللي
-          // buildCaseInsertData كتبه فوق للأعمدة القديمة) للقضية الجديدة.
-          // savedFormData.sessionId هنا حقيقي دايمًا جوه الشرط ده (الفرع ده
-          // بيتنفذ بس لو الجلسة اتحفظت أونلاين بنجاح — راجع تعليق الشرط
-          // فوق)، فمفيش داعي لأي تمبيد على جنب المصدر.
-          const moveResult = await movePartiesFromSessionToCase(
-            db, savedFormData.sessionId, realOrTempCaseId, offline, queued, offlineTempId, caseTitle,
-          );
-          if (!moveResult.ok) {
+          // الجلسة الأساسية اترتبطت بنجاح — أي فشل متبقي (failedIds من غير
+          // الجلسة الأساسية، أو فشل نقل بعض الأطراف) بيتعرض كتحذير غير مانع،
+          // نفس نمط رسالة "راجعها يدويًا" القديمة.
+          if (!groupLinkResult.ok) {
             toast('⚠️ تم إنشاء القضية وربط الجلسة، لكن حصل خطأ في نقل بعض أطراف الدعوى الإضافية — راجعها يدويًا', true);
           }
           if (!(offline && queued)) {
