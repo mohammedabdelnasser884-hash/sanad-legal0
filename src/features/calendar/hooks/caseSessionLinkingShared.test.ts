@@ -910,7 +910,7 @@ describe('syncSessionIdentityToGroupSiblings', () => {
 
   it('أخ فشل تحديثه → ok=false، failedIds فيه الأخ ده بس', async () => {
     const { db } = makeMockDb(
-      { data: [{ id: 'session-1' }, { id: 'session-old-9' }], error: null },
+      { data: [{ id: 'session-1' }, { id: 'session-old-9' }, { id: 'session-old-3' }], error: null },
       { 'session-old-9': new Error('fail') },
     );
     const result = await syncSessionIdentityToGroupSiblings(
