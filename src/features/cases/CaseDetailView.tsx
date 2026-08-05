@@ -66,6 +66,10 @@ interface CaseDetailViewProps {
     // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 4): زرار "فك الربط" جوه
     // EditCaseModal — بيصفّر client_id بس (handleUnlinkClient في App.tsx).
     onUnlinkClient?: (caseId: string) => void | Promise<void>;
+    // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، "إصلاح 5" — 5 أغسطس 2026): مرآة
+    // لـ onUnlinkClient فوق بس لطرف بعينه من case_parties (بدل القضية
+    // كلها) — شوف useCaseActions.ts (handleUnlinkClientForParty) وInfoSection.tsx.
+    onUnlinkClientForParty?: (caseId: string, partyId: string, isPrimaryParty: boolean, onAfterLink: () => void) => void | Promise<void>;
     // ⚡ CHANGED (خطة توحيد إنشاء الموكل، Phase 1): مبقتش بترجع نتيجة تكرار
     // ولا async — مجرد فتح لموديل "إنشاء موكل جديد" الموحّد (NewClientModal)
     // مليان ببيانات المدعي. شوف App.tsx (handleOpenCreateClientForCase).
@@ -97,7 +101,7 @@ interface CaseDetailViewProps {
     openNewClientModal?: (ctx: ClientModalContext) => void;
 }
 
-function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDelete, onEdit, onLinkClient, onLinkClientForParty, onUnlinkClient, onCreateAndLinkClient, onCreateAndLinkClientForParty, onNotify, initialTab='timeline', profile=null, country=null, savingCase=false, onOpenClientProfile, openNewClientModal}: CaseDetailViewProps){
+function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDelete, onEdit, onLinkClient, onLinkClientForParty, onUnlinkClient, onUnlinkClientForParty, onCreateAndLinkClient, onCreateAndLinkClientForParty, onNotify, initialTab='timeline', profile=null, country=null, savingCase=false, onOpenClientProfile, openNewClientModal}: CaseDetailViewProps){
     const [activeSection, setActiveSection] = useState(initialTab);
     const [showEditCase, setShowEditCase] = useState(false);
     const [linkingClient, setLinkingClient] = useState(false);
@@ -107,6 +111,10 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
     const [confirmDeleteCase, setConfirmDeleteCase] = useState(false);
     const [docSearch, setDocSearch] = useState('');
     const [viewingDoc, setViewingDoc] = useState<CaseDocWithUrl | null>(null);
+    // ⚡ FIX (تقرير التحقّق — النقطة 4 + الإصلاح 2): موكل مستهدف رسالة
+    // الواتساب — بيتحدد لما فيه أكتر من موكل مربوط بالقضية (شوف
+    // linkedClients + الـuseEffect تحت).
+    const [selectedWaClientId, setSelectedWaClientId] = useState<string | null>(null);
 
     // ✅ FIX: كان هنا كاست إجباري (as unknown as CaseRow) لأن توقيع
     // useCaseDetailActions كان بيطلب CaseRow خام، بينما caseData هنا فعليًا
@@ -140,6 +148,34 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
       handleExportPdf, handleAddSession, handleAddNote, handleDeleteNote,
       handleUpdateNote, handleDeleteSession, handleUpdateSession,
     } = actions;
+
+    // ⚡ FIX (تقرير التحقّق — النقطة 4 + الإصلاح 2): الهيدر السريع + مودال
+    // الواتساب كانوا بيعتمدوا على `client` (الموكل الأساسي القديم من
+    // cases.client_id) بس، حتى لو القضية فيها أكتر من موكل مربوط فعليًا عبر
+    // case_parties (خطة تعدد الأطراف — نفس الجذر المعماري رقم 2 في التقرير).
+    // linkedClients بتجمع كل الموكلين المرتبطين فعليًا: أي طرف عليه client_id
+    // (بحث عن كل واحد في `clients`)، + `client` نفسه لو مش موجود أصلاً في
+    // case_parties (قضايا قديمة لسه معتمدة على العمود القديم بس).
+    const linkedClients = React.useMemo(() => {
+        const byId = new Map<string, ClientRow>();
+        if (client) byId.set(client.id, client);
+        for (const party of caseParties) {
+            if (!party.client_id) continue;
+            const found = clients.find((c) => c.id === party.client_id);
+            if (found) byId.set(found.id, found);
+        }
+        return Array.from(byId.values());
+    }, [client, caseParties, clients]);
+
+    // لما مودال الواتساب يتفتح، بنختار افتراضيًا أول موكل عنده رقم فعلي
+    // (أو أول واحد في القايمة لو مفيش حد عنده رقم) — نفس السلوك القديم
+    // بالظبط لو فيه موكل واحد بس.
+    useEffect(() => {
+        if (showWhatsApp) {
+            setSelectedWaClientId((linkedClients.find((c) => c.phone) || linkedClients[0])?.id || null);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showWhatsApp]);
 
     const statuses: CaseStatusOption[] = [
         {key:'نشطة', color:'emerald', icon:'⚡'},
@@ -243,12 +279,16 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
         // ── مودال واتساب ──
         showWhatsApp && (()=>{
             const waNum = formatPhoneForWhatsApp(officeWA);
-            const clientPhone = formatPhoneForWhatsApp(client?.phone);
+            // ⚡ FIX (النقطة 4 + الإصلاح 2): بدل ما نعتمد على `client` (الأساسي
+            // القديم) بس، بنستهدف الموكل المختار حاليًا من linkedClients —
+            // نفس سلوك قديم بالظبط لو مفيش غير موكل واحد مرتبط.
+            const targetClient = linkedClients.find((c) => c.id === selectedWaClientId) || linkedClients[0] || client;
+            const clientPhone = formatPhoneForWhatsApp(targetClient?.phone);
             const officeName = officeWhatsAppName || 'مكتب المحاماة';
             const caseTitle = caseData.title || '—';
             const caseNum = caseData.number && caseData.number!=='—' ? (()=>{const p=(caseData.number||'').split('/');return p.length===2?p[0]+' لسنة '+p[1]:caseData.number;})() : '';
             const nextDate = caseData.date && caseData.date!=='—' ? caseData.date : '';
-            const clientName = client?.full_name || 'الموكل الكريم';
+            const clientName = targetClient?.full_name || 'الموكل الكريم';
             const sig = `\n\nمع التقدير،\n${officeName}`;
 
             const messages: WhatsAppMessageOption[] = [
@@ -313,10 +353,21 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
                                 React.createElement('div', {className: "w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/20 flex items-center justify-center text-lg"}, "💬"),
                                 React.createElement('div', null,
                                     React.createElement('p', {className: "text-sm font-black text-white"}, "مراسلة الموكل"),
-                                    React.createElement('p', {className: "text-[10px] text-slate-500"}, clientPhone ? `📱 ${client?.phone}` : "لا يوجد رقم واتساب مسجل للموكل")
+                                    React.createElement('p', {className: "text-[10px] text-slate-500"}, clientPhone ? `📱 ${targetClient?.phone}` : "لا يوجد رقم واتساب مسجل للموكل")
                                 )
                             ),
                             React.createElement('button', {onClick: ()=>setShowWhatsApp(false), className: "w-8 h-8 rounded-xl bg-white/5 flex items-center justify-center text-slate-400"}, "✕")
+                        ),
+                        // ⚡ NEW (الإصلاح 2): لو فيه أكتر من موكل مرتبط بالقضية، بنعرض
+                        // شرائط اختيار المستلم بدل ما نرسل بصمت للموكل الأساسي القديم
+                        // بس — القضية ممكن يكون فيها مدعي ومدعى عليه كلاهما موكلين مثلاً.
+                        linkedClients.length > 1 && React.createElement('div', {className: "flex flex-wrap gap-1.5 mt-3"},
+                            linkedClients.map((c: ClientRow) => React.createElement('button', {
+                                key: c.id,
+                                type: 'button',
+                                onClick: () => setSelectedWaClientId(c.id),
+                                className: `text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-colors ${c.id === selectedWaClientId ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300' : 'bg-white/5 border-white/10 text-slate-400'}`,
+                            }, c.full_name || 'بلا اسم'))
                         )
                     ),
                     // رسائل
@@ -489,10 +540,15 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
                         React.createElement('span', {className: "text-[9px] text-white/40 font-bold"}, "المحكمة"),
                         React.createElement('span', {className: "text-[10px] text-white/80 font-bold"}, caseData.court)
                     ),
-                    client && React.createElement('div', {className: "flex items-center gap-1.5"},
-                        React.createElement('span', {className: "text-[9px] text-white/40 font-bold"}, "الموكل"),
-                        React.createElement('span', {className: "text-[10px] text-emerald-400 font-black"}, client.full_name),
-                        client.phone && React.createElement('a',{href:`tel:${client.phone}`,className:"text-[9px] text-slate-500"},client.phone)
+                    // ⚡ FIX (تقرير التحقّق — النقطة 4 + الإصلاح 2): كان بيعرض
+                    // `client` (الأساسي القديم) بس — دلوقتي بيعرض كل الموكلين
+                    // المرتبطين فعليًا (linkedClients)، بعنوان "الموكل"/"الموكلون (N)".
+                    linkedClients.length > 0 && React.createElement('div', {className: "flex items-center gap-1.5 flex-wrap"},
+                        React.createElement('span', {className: "text-[9px] text-white/40 font-bold"}, linkedClients.length > 1 ? `الموكلون (${linkedClients.length})` : "الموكل"),
+                        ...linkedClients.map((c: ClientRow) => React.createElement('span', {key: c.id, className: "flex items-center gap-1"},
+                            React.createElement('span', {className: "text-[10px] text-emerald-400 font-black"}, c.full_name),
+                            c.phone && React.createElement('a',{href:`tel:${c.phone}`,className:"text-[9px] text-slate-500"},c.phone)
+                        ))
                     )
                 )
             ),
@@ -568,6 +624,17 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
                     try { await onUnlinkClient(caseData.id); }
                     finally { setUnlinkingClient(false); }
                 } : undefined,
+                // ⚡ NEW ("إصلاح 5" — 5 أغسطس 2026): مرآة لـ onUnlinkClient فوق
+                // بس لطرف بعينه — onAfterLink بتنادي fetchSessions() تاني عشان
+                // caseParties (والوسم/الزرار الخاص بالطرف ده) تتحدّث فورًا،
+                // بنفس نمط onLinkClientForParty فوق بالظبط.
+                onUnlinkClientForParty: onUnlinkClientForParty
+                    ? async (partyId: string, isPrimaryParty: boolean) => {
+                        setUnlinkingClient(true);
+                        try { await onUnlinkClientForParty(caseData.id, partyId, isPrimaryParty, () => fetchSessions()); }
+                        finally { setUnlinkingClient(false); }
+                      }
+                    : undefined,
             }),
 
             // ═══ المراجعة (نواقص الملف) — Rule-based بدون AI، المرحلة 1 من خطة المساعد الذكي ═══
