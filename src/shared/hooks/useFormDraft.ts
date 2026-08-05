@@ -83,6 +83,12 @@ export function useFormDraft<T>({ key, data, enabled = true, isEmpty }: UseFormD
     const [checked, setChecked] = useState(false);
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const userIdRef = useRef<string>('anon');
+    // ⚡ FIX (تقرير التحقّق — النقطة 7): بعد نجاح الحفظ الفعلي (clearDraft)،
+    // لازم نمنع أي جدولة save تلقائي جديدة لفترة قصيرة، وإلا لو الفورم
+    // فضل mounted وrender جديد بنى نسخة جديدة من `data` (reference جديد
+    // بنفس المحتوى)، الـeffect تحت هيجدول timer جديد ويرجّع نفس المسودة
+    // اللي اتمسحت لتوّها في localStorage.
+    const suppressUntilRef = useRef<number>(0);
 
     // فحص أوّلي: هل فيه مسودة محفوظة من قبل لنفس المفتاح؟
     useEffect(() => {
@@ -110,6 +116,9 @@ export function useFormDraft<T>({ key, data, enabled = true, isEmpty }: UseFormD
         if (!enabled || !checked) return undefined;
         if (timerRef.current) clearTimeout(timerRef.current);
         timerRef.current = setTimeout(() => {
+            // ⚡ لو لسه جوه نافذة الـsuppress بعد آخر clearDraft، متكتبش —
+            // ده اللي بيمنع رجوع المسودة بعد الحفظ الناجح.
+            if (Date.now() < suppressUntilRef.current) return;
             try {
                 if (isEmpty && isEmpty(data)) {
                     localStorage.removeItem(storageKey(key, userIdRef.current));
@@ -124,6 +133,10 @@ export function useFormDraft<T>({ key, data, enabled = true, isEmpty }: UseFormD
 
     const clearDraft = useCallback(() => {
         try { localStorage.removeItem(storageKey(key, userIdRef.current)); } catch { /* ignore */ }
+        // ألغِ أي timer مجدول حاليًا، وامنع أي جدولة جديدة لـ3 ثواني —
+        // كافية عشان أي re-render/setState بعد الحفظ مباشرة مايرجّعش المسودة.
+        if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+        suppressUntilRef.current = Date.now() + 3000;
     }, [key]);
 
     const dismissRestoredDraft = useCallback(() => setRestoredDraft(null), []);
