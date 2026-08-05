@@ -64,9 +64,17 @@ let dbWrite = makeDbWriteMock();
 // partiesData — بيتحكم في نتيجة fetchSessionClientParties (case_parties)
 // عشان نقدر نغطي idlePartyList بأكتر من طرف. افتراضيًا [] زي ما كان
 // (فولباك مسار الاسم الواحد القديم يفضل شغال في التستات اللي مش بتحدده).
+// 🆕 (باج "orphaned historical session" — 4 أغسطس 2026): باراميتر رابع
+// اختياري groupSessionsResult — بيتحكم في نتيجة fetchSessionGroupIds
+// (case_sessions.select('id').eq('session_group_id', ...)) جوه
+// linkSessionGroupToCase. افتراضيًا [] عشان الجلسات اللي مالهاش
+// session_group_id (أغلب التستات القديمة) أصلاً منعديش عليه — الكود
+// الحقيقي بيرجع [session.id] فورًا من غير ما يستدعي db.from('case_sessions')
+// خالص لو session_group_id فاضي، فالقيمة الافتراضية هنا مجرد fallback آمن.
 function makeMockDb(
   clientsSelectResult: { data?: unknown; error?: unknown } = { data: [], error: null },
   partiesData: unknown[] = [],
+  groupSessionsResult: { data?: unknown; error?: unknown } = { data: [], error: null },
 ) {
   const ilikeSpy = vi.fn();
   return {
@@ -112,6 +120,12 @@ function makeMockDb(
           })),
         };
         return { select: vi.fn(() => chain) };
+      }
+      // 🆕 (باج "orphaned historical session" — 4 أغسطس 2026): fetchSessionGroupIds
+      // (caseSessionLinkingShared.ts) بتستخدم .select('id').eq('session_group_id', ...)
+      // بس (awaited مباشرة، زي case_parties فوق) — مش بتستخدم .order() ولا .eq() تانية.
+      if (table === 'case_sessions') {
+        return { select: vi.fn(() => ({ eq: vi.fn(() => Promise.resolve(groupSessionsResult)) })) };
       }
       return {};
     }),
@@ -236,6 +250,75 @@ describe('useSessionLinking', () => {
       // 🔒 FIX (1 أغسطس 2026): onDone() اتأجّل لحد ما المستخدم يقفل المودال
       // فعليًا — نفس السبب في التست اللي فوق.
       expect(onDone).not.toHaveBeenCalled();
+    });
+
+    // 🆕 (باج "orphaned historical session" — 4 أغسطس 2026): جلسة عضو في
+    // سلسلة session_group_id لازم تحويلها لقضية يسحب معاه كل باقي أعضاء
+    // السلسلة (جلسات تاريخية)، مش الصف اللي اتدُس عليه بس.
+    describe('🔒 FIX: سلسلة session_group_id (جلسات تاريخية متسلسلة)', () => {
+      it('الجلسة عندها session_group_id وليها إخوات → UPDATE:case_sessions بيتبعت لكل صف في السلسلة (مش صف واحد بس)', async () => {
+        dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-real-1' } });
+        const mockDb = makeMockDb(
+          { data: [], error: null },
+          [],
+          { data: [{ id: 'session-1' }, { id: 'session-old-9' }], error: null },
+        );
+        const session = makeSession({ id: 'session-1', session_group_id: 'group-abc' });
+        const { result } = renderHook(() => useSessionLinking(session, mockDb, vi.fn()));
+
+        await act(async () => { await result.current.handleLinkCase(); });
+
+        const calls = dbWrite.callsFor('UPDATE:case_sessions');
+        const ids = calls.map((c) => c.id).sort();
+        expect(ids).toEqual(['session-1', 'session-old-9']);
+        expect(calls.every((c) => c.data?.case_id === 'case-real-1')).toBe(true);
+        expect(toast).toHaveBeenCalledWith('✅ تم إنشاء ملف القضية');
+      });
+
+      it('مفيش session_group_id (جلسة عادية/قديمة) → UPDATE:case_sessions لصف واحد بس، صفر تغيير سلوك', async () => {
+        dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-real-2' } });
+        const mockDb = makeMockDb();
+        const session = makeSession({ id: 'session-solo' });
+        const { result } = renderHook(() => useSessionLinking(session, mockDb, vi.fn()));
+
+        await act(async () => { await result.current.handleLinkCase(); });
+
+        expect(dbWrite.callsFor('UPDATE:case_sessions')).toHaveLength(1);
+        expect(dbWrite.callsFor('UPDATE:case_sessions')[0].id).toBe('session-solo');
+      });
+
+      it('صف تاريخي تاني في السلسلة (مش الجلسة اللي دُست عليها) فشل تحديثه → توست تحذير، بس الربط الأساسي بيكمل عادي (createdCaseId متحدد)', async () => {
+        dbWrite.setResult('INSERT:cases', { error: null, offline: false, data: { id: 'case-real-3' } });
+        dbWrite.setResult('UPDATE:case_sessions', { error: null, offline: false });
+        const mockDb = makeMockDb(
+          { data: [], error: null },
+          [],
+          { data: [{ id: 'session-1' }, { id: 'session-old-9' }], error: null },
+        );
+        const session = makeSession({ id: 'session-1', session_group_id: 'group-abc' });
+        // فشل الصف التاريخي بس (session-old-9)، الصف الأساسي (session-1) ينجح.
+        dbWrite.fn.mockImplementation(async (op: DbWriteOp) => {
+          dbWrite.calls.push(op);
+          if (op.type === 'UPDATE' && op.table === 'case_sessions' && op.id === 'session-old-9') {
+            return { error: { message: 'update failed' }, offline: false };
+          }
+          const key = `${op.type}:${op.table}`;
+          const defaults: Record<string, DbWriteResult> = {
+            'INSERT:cases': { error: null, offline: false, data: { id: 'case-real-3' } },
+            'UPDATE:case_sessions': { error: null, offline: false },
+          };
+          return defaults[key] ?? { error: null, offline: false };
+        });
+        const { result } = renderHook(() => useSessionLinking(session, mockDb, vi.fn()));
+
+        await act(async () => { await result.current.handleLinkCase(); });
+
+        expect(toast).toHaveBeenCalledWith(
+          '⚠️ تم ربط الجلسة، لكن حصل خطأ في تحديث بعض جلسات السلسلة التاريخية أو نقل أطرافها — راجعها يدويًا',
+          true,
+        );
+        expect(result.current.createdCaseId).toBe('case-real-3');
+      });
     });
   });
 
@@ -570,6 +653,26 @@ describe('useSessionLinking', () => {
 
       expect(dbWrite.callsFor('INSERT:clients')).toHaveLength(0);
     });
+
+    // 🆕 (باج "orphaned historical session" — 5 أغسطس 2026): نفس فيكس
+    // handleLinkCase بس لربط موكل مباشرة بجلسة مستقلة (من غير إنشاء قضية).
+    it('🔒 FIX: الجلسة عندها session_group_id وليها إخوات → UPDATE:case_sessions بيتبعت لكل صف في السلسلة بنفس client_id', async () => {
+      dbWrite.setResult('INSERT:clients', { error: null, offline: false, data: { id: 'new-client-group' } });
+      const mockDb = makeMockDb(
+        { data: [], error: null }, [],
+        { data: [{ id: 'session-1' }, { id: 'session-old-9' }], error: null },
+      );
+      const session = makeSession({ id: 'session-1', session_group_id: 'group-abc', plaintiff: 'موكل جديد' });
+      const { result } = renderHook(() => useSessionLinking(session, mockDb, vi.fn()));
+
+      await act(async () => { await result.current.handleAddClientOnly(); });
+
+      const calls = dbWrite.callsFor('UPDATE:case_sessions');
+      const ids = calls.map((c) => c.id).sort();
+      expect(ids).toEqual(['session-1', 'session-old-9']);
+      expect(calls.every((c) => c.data?.client_id === 'new-client-group')).toBe(true);
+      expect(toast).toHaveBeenCalledWith('✅ تمت إضافة الموكل وربطه بالجلسة');
+    });
   });
 
   // 🆕 (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): idlePartyList
@@ -791,6 +894,24 @@ describe('useSessionLinking', () => {
         data: { client_id: 'client-legacy', plaintiff: 'موكل قديم', plaintiff_national_id: '999', plaintiff_power_of_attorney: '5' },
       }));
       expect(result.current.clientStep).toBe('done');
+    });
+
+    it('🔒 FIX (باج "orphaned historical session" — 5 أغسطس 2026): المسار القديم + الجلسة عندها session_group_id → نفس بيانات المدعي بتتبعت لكل صفوف السلسلة', async () => {
+      const mockDb = makeMockDb(
+        { data: [], error: null }, [],
+        { data: [{ id: 'session-legacy' }, { id: 'session-legacy-old' }], error: null },
+      );
+      const session = makeSession({ id: 'session-legacy', session_group_id: 'group-xyz', plaintiff: 'اسم قديم' });
+      const { result } = renderHook(() => useSessionLinking(session, mockDb, vi.fn()));
+
+      act(() => { result.current.setSelectedExistingClient({ id: 'client-legacy', full_name: 'موكل قديم', client_name: null, national_id: '999', cr_number: '5' }); });
+      await act(async () => { await result.current.confirmLinkToExistingClient(); });
+
+      const calls = dbWrite.callsFor('UPDATE:case_sessions');
+      const ids = calls.map((c) => c.id).sort();
+      expect(ids).toEqual(['session-legacy', 'session-legacy-old']);
+      expect(calls.every((c) => c.data?.client_id === 'client-legacy')).toBe(true);
+      expect(toast).toHaveBeenCalledWith('✅ تم ربط الجلسة بالموكل');
     });
   });
 });
