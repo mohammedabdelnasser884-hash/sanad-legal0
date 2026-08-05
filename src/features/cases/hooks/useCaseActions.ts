@@ -4,7 +4,7 @@ import { logActivity } from '../../../shared/lib/dataAccess';
 import { checkCaseNumberDuplicate } from '../../../shared/lib/caseValidation';
 import { showErrorToast } from '../../../shared/lib/errorReporting';
 import { db } from '../../../supabaseClient';
-import { withFkOfflineSentinel, linkClientToParty } from '../../calendar/hooks/caseSessionLinkingShared';
+import { withFkOfflineSentinel, linkClientToParty, unlinkClientFromParty } from '../../calendar/hooks/caseSessionLinkingShared';
 import type { Dispatch, SetStateAction } from 'react';
 import type { ClientRow, ProfileRow } from '../../../types';
 import type { NavigationState } from '../../../useNavigation';
@@ -888,6 +888,36 @@ export function useCaseActions(params: {
         fetchCases(0, casesFilter);
     };
 
+    // ─ فك ربط طرف بعينه (case_parties) عن موكله ─ (خطة توحيد مصدر بيانات
+    // الموكل، "إصلاح 5" — 5 أغسطس 2026)
+    // ⚡ NEW: عكس handleLinkClientForParty فوق بالظبط — بتصفّر
+    // case_parties.client_id للطرف ده بس (+ cases.client_id لو الطرف
+    // أساسي) عبر unlinkClientFromParty المشتركة، من غير ما تلمس أي حقل
+    // تاني (اسم/رقم قومي/توكيل/عنوان الطرف بتفضل زي ما هي — بيانات حرة
+    // قابلة للتعديل، نفس فلسفة handleUnlinkClient لمستوى القضية كلها).
+    // caseId لازم يكون id حقيقي دايمًا (الزرار بيظهر بس جوه InfoSection.tsx
+    // لقضية محفوظة بالفعل). onAfterLink بتتنادى بعد نجاح فك الربط عشان
+    // caseParties تتحدّث فورًا (نفس نمط handleLinkClientForParty).
+    const handleUnlinkClientForParty = async (caseId: string, partyId: string, isPrimaryParty: boolean, onAfterLink: () => void) => {
+        const existingCase = cases.find((c) => c.id === caseId);
+        const result = await unlinkClientFromParty(partyId, isPrimaryParty, caseId);
+        if (!result.ok) {
+            showErrorToast('party_client_unlink', new Error('unlink party from client failed'), 'تعذّر فك ربط الطرف عن الموكل. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'فك ربط طرف عن موكل');
+            return;
+        }
+        toast('✅ تم فك ربط الطرف عن الموكل — بياناته بقت قابلة للتعديل الحر');
+        logActivity(db, 'فك ربط طرف عن موكل', {
+            userName: _userName,
+            entity_type: 'case', entity_id: caseId, details: existingCase?.title || null,
+            case_name: existingCase?.title || null,
+        });
+        // ⚡ لو الطرف أساسي، cases.client_id اتصفّر كمان جوه unlinkClientFromParty —
+        // بنعمل fetchCases عشان أي مكان تاني بيعرض القضية (زي الليستة) يتحدّث،
+        // بنفس فلسفة handleUnlinkClient فوق.
+        if (isPrimaryParty) fetchCases(0, casesFilter);
+        onAfterLink();
+    };
+
     // ─ إنشاء موكل جديد من بيانات القضية وربطه بها ─
 
     // ⚡ REMOVED (خطة توحيد إنشاء الموكل، Phase 1): كانت هنا نسخة كاملة من
@@ -898,5 +928,5 @@ export function useCaseActions(params: {
     // الزرار بتاعها في InfoSection.tsx بقى بيستدعي onCreateAndLinkClient
     // اللي هو دلوقتي مجرد فتح-موديل، مش عملية حفظ.
 
-    return { handleLogout, handleSaveCase, handleDeleteCase, handlePermanentDeleteCase, handleRestoreCase, handleUpdateCase, handleLinkClient, handleLinkClientForParty, handleUnlinkClient };
+    return { handleLogout, handleSaveCase, handleDeleteCase, handlePermanentDeleteCase, handleRestoreCase, handleUpdateCase, handleLinkClient, handleLinkClientForParty, handleUnlinkClient, handleUnlinkClientForParty };
 }
