@@ -10,7 +10,7 @@ import type { Database } from '../../../database.types';
 import type { CaseSessionRow, ClientRow } from '../../../types';
 import {
   makeOfflineTempId, isOfflineTempId, withFkOfflineSentinel, withCaseSelfOfflineSentinel, findMatchingClientByName, buildCaseInsertData,
-  movePartiesFromSessionToCase, fetchSessionClientParties, matchClientsForParties, linkClientToParty, linkClientToSessionParty,
+  linkSessionGroupToCase, retryFailedGroupSessionsLinkToCase, updateCaseSessionsForGroup, fetchSessionClientParties, matchClientsForParties, linkClientToParty, linkClientToSessionParty,
 } from './caseSessionLinkingShared';
 import type { SessionClientParty, PartyClientMatch } from './caseSessionLinkingShared';
 // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): نفس نوع الكول-باك
@@ -61,6 +61,20 @@ export function useSessionLinking(
   const [linkingToCase, setLinkingToCase] = useState(false);
   const [linkingExisting, setLinkingExisting] = useState(false);
   const [createdCaseId, setCreatedCaseId] = useState<string | null>(null);
+  // 🆕 (زرار "أعد المحاولة" — 5 أغسطس 2026): لو صف تاريخي في السلسلة فشل
+  // ربطه بالقضية رغم نجاح الجلسة الأساسية، بنخزن هنا كل السياق اللازم
+  // لإعادة المحاولة لاحقًا (نفس معاملات linkSessionGroupToCase) — الواجهة
+  // (خطوة 'done' في StandaloneSessionDetailModal.tsx) بتعرض زرار "أعد
+  // المحاولة" لو groupLinkRetryContext مش null.
+  const [groupLinkRetryContext, setGroupLinkRetryContext] = useState<{
+    failedIds: string[];
+    caseId: string;
+    caseOffline: boolean | undefined;
+    caseQueued: boolean | undefined;
+    caseTempId: string;
+    caseFallbackTitle: string | undefined;
+  } | null>(null);
+  const [retryingGroupLink, setRetryingGroupLink] = useState(false);
   const [clientStep, setClientStep] = useState<'idle' | 'found' | 'notfound' | 'searching' | 'done'>('idle');
   const [foundClient, setFoundClient] = useState<{ id: string; full_name: string | null } | null>(null);
   // ⚡ FIX: خطوة 'found' هنا كانت مبنية على تخمين بالاسم (ilike تقريبي) بس
@@ -219,29 +233,40 @@ export function useSessionLinking(
       // القضية الجديدة)، فلو استنينا وقريناها بعدين بـ session_id مش هنلاقي
       // حاجة. session.id حقيقي دايمًا هنا (نفس افتراض movePartiesFromSessionToCase).
       const clientPartiesBeforeMove = await fetchSessionClientParties(db, session.id);
+      // 🔒 FIX (باج "orphaned historical session" — 4 أغسطس 2026): كان هنا
+      // تحديث case_id لصف session.id بس عن طريق __dbWrite مباشرة — لو
+      // الجلسة دي عضو في سلسلة session_group_id (نتجت عن "⚡ تحديث الجلسة"
+      // قبل كده)، باقي أعضاء السلسلة (جلسات تاريخية) كانوا بيفضلوا
+      // case_id=NULL "يتيمين" رغم إن التقويم لسه شايفهم متسلسلين مع بعض.
+      // linkSessionGroupToCase (caseSessionLinkingShared.ts) بتجيب كل
+      // أعضاء السلسلة (بترجع [session.id] لوحدها لو مفيش session_group_id
+      // أصلاً — صفر تغيير سلوك للجلسات العادية) وتحدّث case_id لكل صف،
+      // وتنقل case_parties بتاعة كل صف منهم للقضية الجديدة كمان (بدل
+      // movePartiesFromSessionToCase لصف واحد بس زي قبل كده).
       // ⚠️ session.id هنا حقيقي دايمًا (الجلسة already موجودة فعليًا في
       // القاعدة، بعكس useClientLinking.ts اللي ممكن تكون لسه بيانات form) —
       // فمحتاجش أي تمبيد لـ id الجلسة نفسها، بس case_id ممكن يكون تمبيد.
-      const { error: sessionLinkErr } = await window.__dbWrite({
-        type: 'UPDATE',
-        table: 'case_sessions',
-        id: session.id,
-        data: withFkOfflineSentinel(offline, queued, 'case_id', offlineTempId, 'cases', caseTitle, { case_id: realOrTempCaseId }),
-      });
-      if (sessionLinkErr) {
-        showErrorToast('session_case_link', sessionLinkErr, 'تم إنشاء القضية لكن تعذّر ربط الجلسة بها. حاول تحديث الصفحة.', 'ربط الجلسة بالقضية');
+      const { ok: groupLinkOk, failedIds } = await linkSessionGroupToCase(
+        db, session, realOrTempCaseId, offline, queued, offlineTempId, caseTitle,
+      );
+      if (!groupLinkOk && failedIds.includes(session.id)) {
+        // الصف اللي دُست عليه بالذات فشل تحديثه — نفس شدة الخطأ الأصلي
+        // (كان بيوقف هنا قبل كده)، فبنعرض نفس رسالة الخطأ ومنكملش.
+        showErrorToast('session_case_link', new Error('group link failed for primary session'), 'تم إنشاء القضية لكن تعذّر ربط الجلسة بها. حاول تحديث الصفحة.', 'ربط الجلسة بالقضية');
       } else {
-        // ⚡ NEW (مرحلة 7.1 — خطة تعدد الأطراف، 23 يوليو 2026): نقل كل
-        // صفوف case_parties بتاعة الجلسة (مش بس الطرف الأساسي اللي
-        // buildCaseInsertData كتبه فوق للأعمدة القديمة) للقضية الجديدة.
-        // session.id هنا حقيقي دايمًا (الجلسة already موجودة)، فمفيش داعي
-        // لأي تمبيد على جنب المصدر — بس realOrTempCaseId (الوجهة) ممكن
-        // يكون لسه تمبيد لو أوفلاين.
-        const moveResult = await movePartiesFromSessionToCase(
-          db, session.id, realOrTempCaseId, offline, queued, offlineTempId, caseTitle,
-        );
-        if (!moveResult.ok) {
-          toast('⚠️ تم إنشاء القضية وربط الجلسة، لكن حصل خطأ في نقل بعض أطراف الدعوى الإضافية — راجعها يدويًا', true);
+        if (!groupLinkOk) {
+          // صف تاريخي تاني في نفس السلسلة (مش الجلسة اللي دُست عليها) فشل
+          // تحديثه أو نقل أطرافه — الجلسة الأساسية اتربطت صح، فبنكمل بس
+          // بتنبيه للمستخدم يراجع باقي السلسلة يدويًا.
+          toast('⚠️ تم ربط الجلسة، لكن حصل خطأ في تحديث بعض جلسات السلسلة التاريخية أو نقل أطرافها — راجعها يدويًا', true);
+          // 🆕 (زرار "أعد المحاولة"): بنخزن السياق كامل عشان handleRetryGroupLink
+          // تحت تقدر تعيد نفس المحاولة للصفوف الفاشلة بس، من غير ما تعيد
+          // إنشاء قضية جديدة تانية لو المستخدم رجع لنفس الجلسة اليتيمة تاني.
+          setGroupLinkRetryContext({
+            failedIds, caseId: realOrTempCaseId,
+            caseOffline: offline, caseQueued: queued,
+            caseTempId: offlineTempId, caseFallbackTitle: caseTitle,
+          });
         }
         if (!(offline && queued)) {
           // ⚡ FIX: نفس إصلاح useClientLinking.ts — next_hearing كان بيفضل فاضي.
@@ -304,6 +329,36 @@ export function useSessionLinking(
       toast('❌ خطأ غير متوقع', true);
     }
     finally { setLinkingCase(false); }
+  };
+
+  // 🆕 (زرار "أعد المحاولة" — 5 أغسطس 2026): بتاخد groupLinkRetryContext
+  // المخزّن فوق وتعيد محاولة ربط الصفوف الفاشلة بس بنفس القضية (بدل ما
+  // تعمل قضية جديدة تانية لو المستخدم رجع لنفس الجلسة اليتيمة). لو نجحت
+  // كل الصفوف، بتمسح السياق (الزرار يختفي) وتعيد حساب next_hearing لو
+  // أونلاين فعليًا (نفس منطق handleLinkCase). لو لسه فيه صفوف فاشلة،
+  // بتحدّث السياق بالقايمة الجديدة الأقصر عشان الزرار يفضل ظاهر للمحاولة
+  // التالية.
+  const handleRetryGroupLink = async () => {
+    if (!groupLinkRetryContext) return;
+    setRetryingGroupLink(true);
+    const { failedIds, caseId, caseOffline, caseQueued, caseTempId, caseFallbackTitle } = groupLinkRetryContext;
+    try {
+      const { ok, failedIds: stillFailed } = await retryFailedGroupSessionsLinkToCase(
+        db, failedIds, caseId, caseOffline, caseQueued, caseTempId, caseFallbackTitle,
+      );
+      if (ok) {
+        setGroupLinkRetryContext(null);
+        toast('✅ تمت مزامنة باقي جلسات السلسلة بنجاح');
+        if (!(caseOffline && caseQueued)) await recalcNextHearing(db, caseId);
+      } else {
+        setGroupLinkRetryContext({ ...groupLinkRetryContext, failedIds: stillFailed });
+        toast('⚠️ لسه فيه جلسات في السلسلة محتاجة مراجعة — حاول تاني أو راجعها يدويًا', true);
+      }
+    } catch {
+      toast('❌ خطأ غير متوقع أثناء إعادة المحاولة', true);
+    } finally {
+      setRetryingGroupLink(false);
+    }
   };
 
   const handleLinkExistingClient = async () => {
@@ -555,16 +610,23 @@ export function useSessionLinking(
       const realOrTempClientId = (clientOffline && clientQueued) ? clientTempId : (data as { id: string } | null)?.id;
       if (!realOrTempClientId) { showErrorToast('client_create', new Error('no id returned'), 'تعذّر إضافة الموكل. حاول مرة أخرى.', 'إضافة موكل'); return; }
       const isTempClientId = clientOffline && clientQueued;
-      const { error: linkErr, offline, queued } = await window.__dbWrite({
-        type: 'UPDATE',
-        table: 'case_sessions',
-        id: session.id,
-        data: withFkOfflineSentinel(isTempClientId, true, 'client_id', clientTempId, 'clients', name, { client_id: realOrTempClientId }),
-      });
-      if (linkErr) {
-        showErrorToast('session_client_link', linkErr, 'تمت إضافة الموكل لكن تعذّر ربطه بالجلسة. حاول تحديث الصفحة.', 'ربط الموكل بالجلسة');
+      // 🔒 FIX (نفس فئة باج "orphaned historical session" — 5 أغسطس 2026):
+      // كان هنا تحديث client_id لصف session.id بس — لو الجلسة دي عضو في
+      // سلسلة session_group_id، باقي أعضاء السلسلة (جلسات تاريخية) كانوا
+      // يفضلوا من غير الموكل الجديد رغم إنهم نفس الجلسة الحقيقية في
+      // التقويم. updateCaseSessionsForGroup بترجع [session.id] لوحدها لو
+      // مفيش session_group_id أصلاً (صفر تغيير سلوك للحالة العادية).
+      const { ok: groupOk, failedIds, offline, queued } = await updateCaseSessionsForGroup(
+        db, session,
+        withFkOfflineSentinel(isTempClientId, true, 'client_id', clientTempId, 'clients', name, { client_id: realOrTempClientId }),
+      );
+      if (!groupOk && failedIds.includes(session.id)) {
+        showErrorToast('session_client_link', new Error('group client link failed'), 'تمت إضافة الموكل لكن تعذّر ربطه بالجلسة. حاول تحديث الصفحة.', 'ربط الموكل بالجلسة');
         onClientAdded?.();
         return;
+      }
+      if (!groupOk) {
+        toast('⚠️ تم ربط الموكل بالجلسة، لكن حصل خطأ في تحديث بعض جلسات السلسلة التاريخية — راجعها يدويًا', true);
       }
       if (offline && queued) {
         toast('📥 إضافة الموكل وربطه بالجلسة محفوظة محلياً — ستُزامن عند عودة الإنترنت');
@@ -642,20 +704,24 @@ export function useSessionLinking(
       // قديمة/مختلفة عن ملف الموكل). الواجهة (StandaloneSessionDetailModal)
       // هي اللي بتعرض تنبيه التعارض قبل ما تنده الدالة دي لو فيه قيم
       // حرة مختلفة عن الموكل المختار.
-      const { error, offline, queued } = await window.__dbWrite({
-        type: 'UPDATE',
-        table: 'case_sessions',
-        data: {
-          client_id: selectedExistingClient.id,
-          plaintiff: selectedExistingClient.full_name || selectedExistingClient.client_name || null,
-          plaintiff_national_id: selectedExistingClient.national_id || null,
-          plaintiff_power_of_attorney: selectedExistingClient.cr_number || null,
-        },
-        id: session.id,
+      // 🔒 FIX (نفس فئة باج "orphaned historical session" — 5 أغسطس 2026):
+      // كان هنا تحديث صف session.id بس — لو الجلسة دي عضو في سلسلة
+      // session_group_id، باقي أعضاء السلسلة كانوا يفضلوا من غير الموكل
+      // ولا بيانات المدعي المحدّثة. updateCaseSessionsForGroup بتطبّق نفس
+      // الـ data على كل صفوف السلسلة (وبترجع [session.id] لوحدها لو مفيش
+      // session_group_id أصلاً — صفر تغيير سلوك للحالة العادية).
+      const { ok: groupOk, failedIds, offline, queued } = await updateCaseSessionsForGroup(db, session, {
+        client_id: selectedExistingClient.id,
+        plaintiff: selectedExistingClient.full_name || selectedExistingClient.client_name || null,
+        plaintiff_national_id: selectedExistingClient.national_id || null,
+        plaintiff_power_of_attorney: selectedExistingClient.cr_number || null,
       });
-      if (error) {
-        showErrorToast('session_client_link', error, 'تعذّر ربط الموكل بالجلسة. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'ربط الموكل بالجلسة');
+      if (!groupOk && failedIds.includes(session.id)) {
+        showErrorToast('session_client_link', new Error('group client link failed'), 'تعذّر ربط الموكل بالجلسة. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'ربط الموكل بالجلسة');
         return;
+      }
+      if (!groupOk) {
+        toast('⚠️ تم ربط الموكل بالجلسة، لكن حصل خطأ في تحديث بعض جلسات السلسلة التاريخية — راجعها يدويًا', true);
       }
       if (offline && queued) {
         toast('📥 الربط محفوظ محلياً — سيُزامن عند عودة الإنترنت');
@@ -724,6 +790,10 @@ export function useSessionLinking(
   return {
     linkingCase, linkingClient, linkingToCase, linkingExisting,
     createdCaseId, clientStep, setClientStep, foundClient, foundClientMatchType,
+    // 🆕 (زرار "أعد المحاولة" — 5 أغسطس 2026): الواجهة (خطوة 'done' في
+    // StandaloneSessionDetailModal.tsx) بتعرض الزرار لو groupLinkRetryContext
+    // مش null، وبتنده handleRetryGroupLink لما المستخدم يضغط عليه.
+    groupLinkRetryContext, retryingGroupLink, handleRetryGroupLink,
     clientSearch, searchResults, searching, selectedExistingClient, setSelectedExistingClient,
     // ⚡ NEW (7.2 جزء 2): partyList/partyIndex لعرض "طرف X من Y" وتحديد
     // الطرف الحالي في الواجهة، وhandleSkipParty لتخطي الطرف ده بس.
