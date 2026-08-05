@@ -228,6 +228,198 @@ export async function movePartiesFromSessionToCase(
   return allOk ? { ok: true } : { ok: false };
 }
 
+/**
+ * 🔒 FIX (باج "orphaned historical session" — تحويل جلسة مستقلة لقضية،
+ * 4 أغسطس 2026): لما جلسة مستقلة عندها session_group_id (يعني نتجت عن
+ * سلسلة "⚡ تحديث الجلسة" واحدة أو أكتر — شوف makeSessionGroupId فوق)،
+ * تحويل *أي عضو* في السلسلة لقضية لازم يسحب معاه كل باقي أعضاء السلسلة
+ * (الجلسات التاريخية اللي قبله وبعده)، مش الصف اللي اتدُس عليه بس —
+ * وإلا الجلسات التانية تفضل مستقلة (case_id = NULL) رغم إن التقويم
+ * لسه شايفها متسلسلة مع بعض عن طريق نفس session_group_id.
+ *
+ * بترجع IDs كل صفوف case_sessions اللي لازم تتحدّث (الجلسة الأصلية +
+ * كل إخواتها في نفس السلسلة) — بترجع [session.id] لوحده لو مفيش
+ * session_group_id أصلاً (جلسة مستقلة عادية معملهاش تحديث قبل كده،
+ * أو جلسة قديمة قبل الفيكس ده) — نفس سلوك "صف واحد بس" القديم بالظبط،
+ * صفر تغيير سلوك لغير الحالة اللي فيها فعلاً سلسلة.
+ */
+async function fetchSessionGroupIds(
+  db: SupabaseClient<Database>,
+  session: { id: string; session_group_id?: string | null },
+): Promise<string[]> {
+  if (!session.session_group_id) return [session.id];
+  const { data, error } = await db.from('case_sessions')
+    .select('id')
+    .eq('session_group_id', session.session_group_id);
+  if (error || !data || data.length === 0) return [session.id];
+  const ids = new Set((data as unknown as { id: string }[]).map((r) => r.id));
+  ids.add(session.id); // ضمان إن الجلسة الأصلية موجودة حتى لو الاستعلام لأي سبب رجّعها ناقصة
+  return Array.from(ids);
+}
+
+/**
+ * بتحدّث case_id لكل صفوف case_sessions في نفس سلسلة session_group_id
+ * (شوف fetchSessionGroupIds فوق) — بدل تحديث الجلسة اللي اتدُس عليها بس.
+ * بتنقل كمان أطراف case_parties الخاصة بكل صف من الصفوف دي للقضية
+ * الجديدة (movePartiesFromSessionToCase لكل واحد منها) — نفس الباج
+ * الأصلي كان بيسيب أطراف الجلسات التاريخية يتيمة (session_id قديم،
+ * case_id فاضل NULL) لأن النقل كان بيحصل لصف واحد بس زي التحديث.
+ *
+ * بترجع {ok:false, failedIds} لو أي صف فشل (تحديث case_id أو نقل
+ * أطرافه) — الـ caller بيقدر يعرض تحذير للمستخدم بدل فشل صامت.
+ */
+/**
+ * جزء داخلي واحد من linkSessionGroupToCase (تحت) — ربط جلسة واحدة بعينها
+ * بقضية (UPDATE case_id ثم نقل أطرافها) — اتفصلت لدالة مستقلة عشان
+ * retryFailedGroupSessionsLinkToCase (تحت) تقدر تعيد نفس المحاولة بالظبط
+ * لصفوف بعينها اتحددت مسبقًا (failedIds)، من غير ما تعيد استعلام السلسلة
+ * كلها من الأول ولا تلمس الصفوف اللي نجحت أصلاً. صفر تغيير سلوك لـ
+ * linkSessionGroupToCase نفسها.
+ */
+async function linkSingleSessionToCase(
+  db: SupabaseClient<Database>,
+  sid: string,
+  caseId: string,
+  caseOffline: boolean | undefined,
+  caseQueued: boolean | undefined,
+  caseTempId: string,
+  caseFallbackTitle: string | undefined,
+): Promise<{ ok: boolean }> {
+  const { error: linkErr } = await window.__dbWrite({
+    type: 'UPDATE',
+    table: 'case_sessions',
+    id: sid,
+    data: withFkOfflineSentinel(
+      caseOffline, caseQueued, 'case_id', caseTempId, 'cases', caseFallbackTitle,
+      { case_id: caseId },
+    ),
+  });
+  if (linkErr) return { ok: false };
+  const moveResult = await movePartiesFromSessionToCase(
+    db, sid, caseId, caseOffline, caseQueued, caseTempId, caseFallbackTitle,
+  );
+  return { ok: moveResult.ok };
+}
+
+export async function linkSessionGroupToCase(
+  db: SupabaseClient<Database>,
+  session: { id: string; session_group_id?: string | null },
+  caseId: string,
+  caseOffline: boolean | undefined,
+  caseQueued: boolean | undefined,
+  caseTempId: string,
+  caseFallbackTitle: string | undefined,
+): Promise<{ ok: boolean; failedIds: string[]; linkedCount: number }> {
+  const groupSessionIds = await fetchSessionGroupIds(db, session);
+  const failedIds: string[] = [];
+  for (const sid of groupSessionIds) {
+    const { ok } = await linkSingleSessionToCase(db, sid, caseId, caseOffline, caseQueued, caseTempId, caseFallbackTitle);
+    if (!ok) failedIds.push(sid);
+  }
+  return { ok: failedIds.length === 0, failedIds, linkedCount: groupSessionIds.length };
+}
+
+/**
+ * 🆕 (زرار "أعد المحاولة" — 5 أغسطس 2026): لو linkSessionGroupToCase فوق
+ * رجّعت failedIds (صف تاريخي واحد أو أكتر في السلسلة فشل تحديثه/نقل
+ * أطرافه رغم إن الجلسة الأساسية اترتبطت صح)، الدالة دي بتاخد نفس الـ
+ * failedIds ونفس caseId وتعيد المحاولة *للصفوف الفاشلة بس* — من غير ما
+ * تعيد جلب السلسلة كلها ولا تلمس الصفوف اللي نجحت من أول مرة. لو المستخدم
+ * فتح الجلسة اليتيمة دي بعدين وضغط "تحويل لقضية" تاني كان هيعمل قضية
+ * جديدة مكررة بدل ما يربطها بالقضية الموجودة بالفعل — الزرار ده بيقفل
+ * الفجوة دي مباشرة بدل ما يسيب المستخدم يقرا تحذير بس ويتصرف يدويًا.
+ *
+ * caseOffline/caseQueued/caseTempId/caseFallbackTitle بنفس معنى
+ * linkSessionGroupToCase — لازم تتبعت زي ما كانت وقت المحاولة الأصلية
+ * (caseId ممكن يكون لسه تمبيد أوفلاين لو القضية نفسها لسه ما اتزامنتش).
+ *
+ * بترجع {ok:true, failedIds:[]} لو كل الصفوف الفاشلة اتصلحت، أو
+ * {ok:false, failedIds:[...]} بقائمة اللي لسه فاشل (ممكن تكون نفس القايمة
+ * القديمة أو جزء منها) عشان الواجهة تقدر تعرض الزرار تاني.
+ */
+export async function retryFailedGroupSessionsLinkToCase(
+  db: SupabaseClient<Database>,
+  failedIds: string[],
+  caseId: string,
+  caseOffline: boolean | undefined,
+  caseQueued: boolean | undefined,
+  caseTempId: string,
+  caseFallbackTitle: string | undefined,
+): Promise<{ ok: boolean; failedIds: string[] }> {
+  const stillFailed: string[] = [];
+  for (const sid of failedIds) {
+    const { ok } = await linkSingleSessionToCase(db, sid, caseId, caseOffline, caseQueued, caseTempId, caseFallbackTitle);
+    if (!ok) stillFailed.push(sid);
+  }
+  return { ok: stillFailed.length === 0, failedIds: stillFailed };
+}
+
+/**
+ * 🔒 FIX (نفس فئة باج "orphaned historical session" فوق — 5 أغسطس 2026):
+ * نسخة عامة من نفس الفكرة لأي تحديث تاني على case_sessions غير ربط
+ * القضية (زي ربط موكل مباشرة بجلسة مستقلة عن طريق handleAddClientOnly/
+ * confirmLinkToExistingClient في useSessionLinking.ts) — بتاخد data
+ * جاهزة (بما فيها أي sentinel أوفلاين اتحسب already من الـ caller) وتطبّقها
+ * على كل صفوف نفس سلسلة session_group_id، مش الصف اللي اتدُس عليه بس.
+ * data لازم تكون نفسها لكل صفوف السلسلة (مفيش فرق بين صف وصف هنا، عكس
+ * linkSessionGroupToCase اللي معاها نقل case_parties لكل صف كمان).
+ */
+export async function updateCaseSessionsForGroup(
+  db: SupabaseClient<Database>,
+  session: { id: string; session_group_id?: string | null },
+  data: Record<string, unknown>,
+): Promise<{ ok: boolean; failedIds: string[]; linkedCount: number; offline?: boolean; queued?: boolean }> {
+  const groupSessionIds = await fetchSessionGroupIds(db, session);
+  const failedIds: string[] = [];
+  let offline: boolean | undefined;
+  let queued: boolean | undefined;
+  for (const sid of groupSessionIds) {
+    const result = await window.__dbWrite({ type: 'UPDATE', table: 'case_sessions', id: sid, data });
+    if (result.error != null) failedIds.push(sid);
+    // ⚡ offline/queued بيبقوا نفس القيمة عبر كل الكتابات في نفس الدفعة
+    // (نفس حالة الاتصال وقت التنفيذ) — بناخدهم من نتيجة الجلسة الأصلية
+    // (session.id) تحديدًا لو موجودة، وإلا أول نتيجة وصلت، عشان الـ
+    // caller يقدر يبني رسالة التوست الصح.
+    if (sid === session.id || offline === undefined) { offline = result.offline; queued = result.queued; }
+  }
+  return { ok: failedIds.length === 0, failedIds, linkedCount: groupSessionIds.length, offline, queued };
+}
+
+/**
+ * 🔒 FIX (تناسق "هوية" السلسلة — 5 أغسطس 2026): تعديل بيانات جلسة مستقلة
+ * (EditStandaloneModalForm.handleSave في StandaloneSessionDetailModal.tsx)
+ * كان بيحدّث صف session.id بس عن طريق safeUpdate — لو الجلسة دي عضو في
+ * سلسلة session_group_id، باقي أعضاء السلسلة (جلسات تاريخية) كانوا يفضلوا
+ * شايفين بيانات "هوية القضية" القديمة (المحكمة/رقم القضية/أسماء الأطراف)
+ * حتى بعد ما المستخدم يصححها في جلسة واحدة بس.
+ *
+ * ⚠️ متعمّد: مقصورة على حقول "الهوية" فقط (محكمة/عنوان/رقم قضية/نوع/دائرة/
+ * بيانات المدعي والمدعى عليه) — مش session_date/session_time/next_action/
+ * result، دول خاصين بكل جلسة (موعد ونتيجة) على حدة ومفروض يفضلوا مختلفين
+ * طبيعيًا عبر السلسلة.
+ *
+ * ⚠️ متعمّد كمان: بتستخدم db.update() مباشرة (مش __dbWrite) — نفس نمط
+ * safeUpdate في نداء الحفظ الأساسي في نفس الملف بالظبط (الشاشة دي كلها
+ * لسه مش متحوّلة لطابور الأوفلاين، مشكلة منفصلة موثّقة على جنب).
+ */
+export async function syncSessionIdentityToGroupSiblings(
+  db: SupabaseClient<Database>,
+  session: { id: string; session_group_id?: string | null },
+  identityData: Record<string, unknown>,
+): Promise<{ ok: boolean; failedIds: string[]; siblingCount: number }> {
+  const groupSessionIds = await fetchSessionGroupIds(db, session);
+  const siblingIds = groupSessionIds.filter((sid) => sid !== session.id);
+  if (siblingIds.length === 0) return { ok: true, failedIds: [], siblingCount: 0 };
+  const failedIds: string[] = [];
+  for (const sid of siblingIds) {
+    const { error } = await db.from('case_sessions')
+      .update(identityData as Database['public']['Tables']['case_sessions']['Update'])
+      .eq('id', sid);
+    if (error) failedIds.push(sid);
+  }
+  return { ok: failedIds.length === 0, failedIds, siblingCount: siblingIds.length };
+}
+
 // ══════════════════════════════════════════════════════════════
 //  خطة "المسمى القانوني" — بند مؤجل ثانٍ (استمرارية بيانات الجلسة القادمة،
 //  24 يوليو 2026): لما جلسة مستقلة فيها أكتر من شخص تحت أي طرف (ورثة/
