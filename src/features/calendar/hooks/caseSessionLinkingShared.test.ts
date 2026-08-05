@@ -3,7 +3,8 @@ import {
   makeOfflineTempId, isOfflineTempId, withCaseSelfOfflineSentinel, withFkOfflineSentinel,
   buildCaseInsertData, findMatchingClientByName,
   fetchSessionClientParties, matchClientsForParties, linkClientToParty,
-  copySessionPartiesToNewSession,
+  copySessionPartiesToNewSession, linkSessionGroupToCase, retryFailedGroupSessionsLinkToCase, updateCaseSessionsForGroup,
+  syncSessionIdentityToGroupSiblings,
 } from './caseSessionLinkingShared';
 import type { SessionClientParty } from './caseSessionLinkingShared';
 
@@ -461,3 +462,415 @@ describe('linkClientToParty', () => {
     expect(result).toEqual({ ok: false });
   });
 });
+
+// 🆕 (باج "orphaned historical session" — تحويل جلسة مستقلة لقضية،
+// 4 أغسطس 2026): جلسة عضو في سلسلة session_group_id (نتجت عن "⚡ تحديث
+// الجلسة" واحدة أو أكتر) كان تحويلها لقضية بيحدّث case_id للصف اللي
+// اتدُس عليه بس — باقي أعضاء السلسلة (جلسات تاريخية) كانوا يفضلوا
+// "يتيمين" (case_id=NULL) رغم إن التقويم لسه شايفهم متسلسلين مع بعض
+// عن طريق نفس session_group_id.
+describe('linkSessionGroupToCase', () => {
+  type DbWriteOp = { type: string; table: string; id?: string; data?: Record<string, unknown> };
+  function mockDbWrite(results: Record<string, { error: unknown }> = {}) {
+    const calls: DbWriteOp[] = [];
+    const fn = vi.fn(async (op: DbWriteOp) => {
+      calls.push(op);
+      return results[`${op.type}:${op.table}`] ?? { error: null };
+    });
+    return { fn, calls };
+  }
+
+  // case_sessions: .select('id').eq('session_group_id', ...) — awaited مباشرة.
+  // case_parties: .select('id').eq('session_id', ...) — awaited مباشرة كمان
+  // (movePartiesFromSessionToCase الأصلية)، افتراضيًا [] فاضية (مفيش أطراف).
+  function makeMockDb(
+    groupResult: { data?: unknown; error?: unknown } = { data: [], error: null },
+    partiesResult: { data?: unknown; error?: unknown } = { data: [], error: null },
+  ) {
+    const db = {
+      from: vi.fn((table: string) => {
+        if (table === 'case_sessions') {
+          return { select: vi.fn(() => ({ eq: vi.fn(() => Promise.resolve(groupResult)) })) };
+        }
+        if (table === 'case_parties') {
+          return { select: vi.fn(() => ({ eq: vi.fn(() => Promise.resolve(partiesResult)) })) };
+        }
+        return {};
+      }),
+    };
+    return db;
+  }
+
+  beforeEach(() => {
+    window.__dbWrite = undefined as unknown as typeof window.__dbWrite;
+  });
+
+  it('مفيش session_group_id → صف واحد بس بيتحدّث (نفس السلوك القديم، مفيش استعلام على case_sessions أصلاً)', async () => {
+    const { fn, calls } = mockDbWrite();
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const db = makeMockDb();
+    const result = await linkSessionGroupToCase(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      db as any, { id: 'session-1', session_group_id: null }, 'case-1', false, false, 'tmp-x', 'عنوان',
+    );
+    expect(result).toEqual({ ok: true, failedIds: [], linkedCount: 1 });
+    expect(db.from).not.toHaveBeenCalledWith('case_sessions');
+    expect(calls).toEqual([
+      { type: 'UPDATE', table: 'case_sessions', id: 'session-1', data: { case_id: 'case-1' } },
+    ]);
+  });
+
+  it('فيه session_group_id وله إخوات → كل صفوف السلسلة بتتحدّث بنفس case_id', async () => {
+    const { fn, calls } = mockDbWrite();
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const db = makeMockDb({ data: [{ id: 'session-1' }, { id: 'session-old-9' }], error: null });
+    const result = await linkSessionGroupToCase(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      db as any, { id: 'session-1', session_group_id: 'group-abc' }, 'case-1', false, false, 'tmp-x', 'عنوان',
+    );
+    expect(result.ok).toBe(true);
+    expect(result.linkedCount).toBe(2);
+    const sessionCalls = calls.filter((c) => c.table === 'case_sessions');
+    expect(sessionCalls.map((c) => c.id).sort()).toEqual(['session-1', 'session-old-9']);
+    expect(sessionCalls.every((c) => c.data?.case_id === 'case-1')).toBe(true);
+  });
+
+  it('الاستعلام عن السلسلة رجّع من غير الجلسة الأصلية (edge case) → الجلسة الأصلية بتتضاف لقايمة التحديث برضه', async () => {
+    const { fn, calls } = mockDbWrite();
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const db = makeMockDb({ data: [{ id: 'session-old-9' }], error: null });
+    const result = await linkSessionGroupToCase(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      db as any, { id: 'session-1', session_group_id: 'group-abc' }, 'case-1', false, false, 'tmp-x', 'عنوان',
+    );
+    expect(result.linkedCount).toBe(2);
+    const sessionIds = calls.filter((c) => c.table === 'case_sessions').map((c) => c.id).sort();
+    expect(sessionIds).toEqual(['session-1', 'session-old-9']);
+  });
+
+  it('خطأ في استعلام السلسلة → فولباك لصف واحد بس (نفس السلوك القديم بدل ما يفشل كله)', async () => {
+    const { fn, calls } = mockDbWrite();
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const db = makeMockDb({ data: null, error: new Error('query failed') });
+    const result = await linkSessionGroupToCase(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      db as any, { id: 'session-1', session_group_id: 'group-abc' }, 'case-1', false, false, 'tmp-x', 'عنوان',
+    );
+    expect(result).toEqual({ ok: true, failedIds: [], linkedCount: 1 });
+    expect(calls).toEqual([
+      { type: 'UPDATE', table: 'case_sessions', id: 'session-1', data: { case_id: 'case-1' } },
+    ]);
+  });
+
+  it('صف تاريخي فشل تحديث case_id بتاعه → متتحاولش نقل أطرافه (case_parties)، بس الصف التاني (اللي نجح) بينقل أطرافه عادي', async () => {
+    const calls: DbWriteOp[] = [];
+    const fn = vi.fn(async (op: DbWriteOp) => {
+      calls.push(op);
+      if (op.table === 'case_sessions' && op.id === 'session-old-9') return { error: new Error('fail') };
+      return { error: null };
+    });
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    // partiesResult: صف case_parties واحد — لو الكود حاول ينقل أطراف صف فشل
+    // تحديث case_id بتاعه، هيبقى فيه أكتر من UPDATE:case_parties واحدة.
+    const db = makeMockDb(
+      { data: [{ id: 'session-1' }, { id: 'session-old-9' }], error: null },
+      { data: [{ id: 'party-1' }], error: null },
+    );
+    const result = await linkSessionGroupToCase(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      db as any, { id: 'session-1', session_group_id: 'group-abc' }, 'case-1', false, false, 'tmp-x', 'عنوان',
+    );
+    expect(result.ok).toBe(false);
+    expect(result.failedIds).toEqual(['session-old-9']);
+    // صف واحد بس (session-1 اللي نجح) هو اللي وصل لمرحلة نقل الأطراف.
+    expect(calls.filter((c) => c.table === 'case_parties')).toHaveLength(1);
+  });
+
+  it('نقل أطراف صف في السلسلة فشل (case_parties) → ok=false، الصف ده في failedIds حتى لو case_id بتاعه اتحدّث صح', async () => {
+    const calls: DbWriteOp[] = [];
+    const fn = vi.fn(async (op: DbWriteOp) => {
+      calls.push(op);
+      if (op.table === 'case_parties') return { error: new Error('fail') };
+      return { error: null };
+    });
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const db = makeMockDb(
+      { data: [{ id: 'session-1' }, { id: 'session-old-9' }], error: null },
+      { data: [{ id: 'party-1' }], error: null },
+    );
+    const result = await linkSessionGroupToCase(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      db as any, { id: 'session-1', session_group_id: 'group-abc' }, 'case-1', false, false, 'tmp-x', 'عنوان',
+    );
+    expect(result.ok).toBe(false);
+    expect(result.failedIds.sort()).toEqual(['session-1', 'session-old-9']);
+  });
+
+  it('caseId تمبيد أوفلاين → كل صفوف السلسلة بتاخد _offlineFkTempId', async () => {
+    const { fn, calls } = mockDbWrite();
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const db = makeMockDb({ data: [{ id: 'session-1' }, { id: 'session-old-9' }], error: null });
+    const tempCaseId = makeOfflineTempId();
+    await linkSessionGroupToCase(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      db as any, { id: 'session-1', session_group_id: 'group-abc' }, tempCaseId, true, true, tempCaseId, 'عنوان مؤقت',
+    );
+    const sessionCalls = calls.filter((c) => c.table === 'case_sessions');
+    expect(sessionCalls).toHaveLength(2);
+    for (const c of sessionCalls) {
+      expect(c.data?._offlineFkTempId).toEqual([
+        { field: 'case_id', tempId: tempCaseId, table: 'cases', fallbackNameValue: 'عنوان مؤقت' },
+      ]);
+    }
+  });
+});
+
+// 🆕 (زرار "أعد المحاولة" — 5 أغسطس 2026): retryFailedGroupSessionsLinkToCase
+// بتاخد قائمة IDs محددة مسبقًا (بدل ما تجيب السلسلة كلها من جديد زي
+// linkSessionGroupToCase) وتعيد نفس محاولة الربط لها بس.
+describe('retryFailedGroupSessionsLinkToCase', () => {
+  type DbWriteOp = { type: string; table: string; id?: string; data?: Record<string, unknown> };
+
+  beforeEach(() => {
+    window.__dbWrite = undefined as unknown as typeof window.__dbWrite;
+  });
+
+  function makeMockDb(partiesResult: { data?: unknown; error?: unknown } = { data: [], error: null }) {
+    return {
+      from: vi.fn((table: string) => {
+        if (table === 'case_parties') {
+          return { select: vi.fn(() => ({ eq: vi.fn(() => Promise.resolve(partiesResult)) })) };
+        }
+        return {};
+      }),
+    };
+  }
+
+  it('كل الصفوف الفاشلة بتتربط بنجاح في المحاولة الجديدة → ok=true, failedIds=[]', async () => {
+    const calls: DbWriteOp[] = [];
+    const fn = vi.fn(async (op: DbWriteOp) => { calls.push(op); return { error: null }; });
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const db = makeMockDb();
+    const result = await retryFailedGroupSessionsLinkToCase(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      db as any, ['session-old-9'], 'case-1', false, false, 'tmp-x', 'عنوان',
+    );
+    expect(result).toEqual({ ok: true, failedIds: [] });
+    const sessionCalls = calls.filter((c) => c.table === 'case_sessions');
+    expect(sessionCalls).toEqual([
+      { type: 'UPDATE', table: 'case_sessions', id: 'session-old-9', data: { case_id: 'case-1' } },
+    ]);
+    // مفيش استعلام على case_sessions.select — بتاخد الـ IDs جاهزة، مش بتجيبها تاني.
+    expect(db.from).not.toHaveBeenCalledWith('case_sessions');
+  });
+
+  it('صف لسه فاشل بعد إعادة المحاولة → ok=false، بيفضل في failedIds', async () => {
+    const calls: DbWriteOp[] = [];
+    const fn = vi.fn(async (op: DbWriteOp) => {
+      calls.push(op);
+      if (op.table === 'case_sessions' && op.id === 'session-old-9') return { error: new Error('still failing') };
+      return { error: null };
+    });
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const db = makeMockDb();
+    const result = await retryFailedGroupSessionsLinkToCase(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      db as any, ['session-old-9', 'session-old-11'], 'case-1', false, false, 'tmp-x', 'عنوان',
+    );
+    expect(result.ok).toBe(false);
+    expect(result.failedIds).toEqual(['session-old-9']);
+  });
+
+  it('caseId تمبيد أوفلاين → الصفوف بتاخد _offlineFkTempId زي linkSessionGroupToCase بالظبط', async () => {
+    const calls: DbWriteOp[] = [];
+    const fn = vi.fn(async (op: DbWriteOp) => { calls.push(op); return { error: null }; });
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const db = makeMockDb();
+    const tempCaseId = makeOfflineTempId();
+    await retryFailedGroupSessionsLinkToCase(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      db as any, ['session-old-9'], tempCaseId, true, true, tempCaseId, 'عنوان مؤقت',
+    );
+    const sessionCalls = calls.filter((c) => c.table === 'case_sessions');
+    expect(sessionCalls[0]?.data?._offlineFkTempId).toEqual([
+      { field: 'case_id', tempId: tempCaseId, table: 'cases', fallbackNameValue: 'عنوان مؤقت' },
+    ]);
+  });
+
+  it('نقل أطراف صف فشل → الصف ده في failedIds حتى لو case_id بتاعه اتحدّث صح', async () => {
+    const calls: DbWriteOp[] = [];
+    const fn = vi.fn(async (op: DbWriteOp) => {
+      calls.push(op);
+      if (op.table === 'case_parties') return { error: new Error('fail') };
+      return { error: null };
+    });
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const db = makeMockDb({ data: [{ id: 'party-1' }], error: null });
+    const result = await retryFailedGroupSessionsLinkToCase(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      db as any, ['session-old-9'], 'case-1', false, false, 'tmp-x', 'عنوان',
+    );
+    expect(result).toEqual({ ok: false, failedIds: ['session-old-9'] });
+  });
+});
+
+// 🆕 (باج "orphaned historical session" — نسخة عامة، 5 أغسطس 2026):
+// نفس فكرة linkSessionGroupToCase فوق بس لتحديثات case_sessions التانية
+// (زي ربط موكل مباشرة بجلسة مستقلة) اللي مش عن طريق linkSessionGroupToCase.
+describe('updateCaseSessionsForGroup', () => {
+  type DbWriteOp = { type: string; table: string; id?: string; data?: Record<string, unknown> };
+  function mockDbWrite(perIdError: Record<string, unknown> = {}, perIdResult: Record<string, { offline?: boolean; queued?: boolean }> = {}) {
+    const calls: DbWriteOp[] = [];
+    const fn = vi.fn(async (op: DbWriteOp) => {
+      calls.push(op);
+      const extra = op.id ? (perIdResult[op.id] ?? {}) : {};
+      return { error: op.id ? (perIdError[op.id] ?? null) : null, ...extra };
+    });
+    return { fn, calls };
+  }
+
+  function makeMockDb(groupResult: { data?: unknown; error?: unknown } = { data: [], error: null }) {
+    return {
+      from: vi.fn((table: string) => {
+        if (table === 'case_sessions') {
+          return { select: vi.fn(() => ({ eq: vi.fn(() => Promise.resolve(groupResult)) })) };
+        }
+        return {};
+      }),
+    };
+  }
+
+  beforeEach(() => {
+    window.__dbWrite = undefined as unknown as typeof window.__dbWrite;
+  });
+
+  it('مفيش session_group_id → __dbWrite بيتنادى مرة واحدة بس بنفس الـ data المرسلة', async () => {
+    const { fn, calls } = mockDbWrite();
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const db = makeMockDb();
+    const result = await updateCaseSessionsForGroup(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      db as any, { id: 'session-1', session_group_id: null }, { client_id: 'client-1' },
+    );
+    expect(result.ok).toBe(true);
+    expect(result.linkedCount).toBe(1);
+    expect(calls).toEqual([{ type: 'UPDATE', table: 'case_sessions', id: 'session-1', data: { client_id: 'client-1' } }]);
+  });
+
+  it('فيه إخوات في السلسلة → نفس الـ data بتتبعت لكل صف', async () => {
+    const { fn, calls } = mockDbWrite();
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const db = makeMockDb({ data: [{ id: 'session-1' }, { id: 'session-old-9' }], error: null });
+    const result = await updateCaseSessionsForGroup(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      db as any, { id: 'session-1', session_group_id: 'group-abc' }, { client_id: 'client-1' },
+    );
+    expect(result.linkedCount).toBe(2);
+    const ids = calls.map((c) => c.id).sort();
+    expect(ids).toEqual(['session-1', 'session-old-9']);
+    expect(calls.every((c) => c.data?.client_id === 'client-1')).toBe(true);
+  });
+
+  it('offline/queued بترجع من نتيجة الجلسة الأصلية (session.id) بالذات', async () => {
+    const { fn } = mockDbWrite({}, { 'session-1': { offline: true, queued: true }, 'session-old-9': { offline: false, queued: false } });
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const db = makeMockDb({ data: [{ id: 'session-1' }, { id: 'session-old-9' }], error: null });
+    const result = await updateCaseSessionsForGroup(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      db as any, { id: 'session-1', session_group_id: 'group-abc' }, { client_id: 'client-1' },
+    );
+    expect(result.offline).toBe(true);
+    expect(result.queued).toBe(true);
+  });
+
+  it('صف تاريخي فشل تحديثه → ok=false، failedIds فيه الصف ده بس', async () => {
+    const { fn } = mockDbWrite({ 'session-old-9': new Error('fail') });
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const db = makeMockDb({ data: [{ id: 'session-1' }, { id: 'session-old-9' }], error: null });
+    const result = await updateCaseSessionsForGroup(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      db as any, { id: 'session-1', session_group_id: 'group-abc' }, { client_id: 'client-1' },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.failedIds).toEqual(['session-old-9']);
+  });
+});
+
+// 🆕 (تناسق "هوية" السلسلة — 5 أغسطس 2026): بعكس updateCaseSessionsForGroup
+// فوق (بتستخدم __dbWrite)، الدالة دي بتستخدم db.update() مباشرة — نفس نمط
+// safeUpdate في نداء الحفظ الأساسي بـ StandaloneSessionDetailModal.tsx
+// (الشاشة دي لسه مش متحوّلة لطابور الأوفلاين بالكامل).
+describe('syncSessionIdentityToGroupSiblings', () => {
+  type UpdateCall = { table: string; data: Record<string, unknown>; id: string };
+
+  // db.from('case_sessions').select('id').eq('session_group_id', ...) —
+  // fetchSessionGroupIds الداخلية. وdb.from('case_sessions').update(data).eq('id', ...)
+  // — الكتابة الفعلية لكل أخ في السلسلة.
+  function makeMockDb(
+    groupResult: { data?: unknown; error?: unknown } = { data: [], error: null },
+    updateErrors: Record<string, unknown> = {},
+  ) {
+    const updateCalls: UpdateCall[] = [];
+    const db = {
+      from: vi.fn((table: string) => ({
+        select: vi.fn(() => ({ eq: vi.fn(() => Promise.resolve(groupResult)) })),
+        update: vi.fn((data: Record<string, unknown>) => ({
+          eq: vi.fn((_col: string, id: string) => {
+            updateCalls.push({ table, data, id });
+            return Promise.resolve({ error: updateErrors[id] ?? null });
+          }),
+        })),
+      })),
+    };
+    return { db, updateCalls };
+  }
+
+  it('مفيش session_group_id → مفيش أي db.update خالص، siblingCount=0', async () => {
+    const { db, updateCalls } = makeMockDb();
+    const result = await syncSessionIdentityToGroupSiblings(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      db as any, { id: 'session-1', session_group_id: null }, { court: 'محكمة الجيزة' },
+    );
+    expect(result).toEqual({ ok: true, failedIds: [], siblingCount: 0 });
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it('فيه session_group_id بس الجلسة الأصلية هي الوحيدة (مفيش إخوات فعليين) → مفيش db.update، siblingCount=0', async () => {
+    const { db, updateCalls } = makeMockDb({ data: [{ id: 'session-1' }], error: null });
+    const result = await syncSessionIdentityToGroupSiblings(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      db as any, { id: 'session-1', session_group_id: 'group-abc' }, { court: 'محكمة الجيزة' },
+    );
+    expect(result).toEqual({ ok: true, failedIds: [], siblingCount: 0 });
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it('فيه إخوات → db.update بيتنادى لكل أخ بنفس الـ data، مش على الجلسة الأصلية نفسها', async () => {
+    const { db, updateCalls } = makeMockDb({ data: [{ id: 'session-1' }, { id: 'session-old-9' }, { id: 'session-old-3' }], error: null });
+    const identityData = { court: 'محكمة الجيزة', plaintiff: 'أحمد محمد' };
+    const result = await syncSessionIdentityToGroupSiblings(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      db as any, { id: 'session-1', session_group_id: 'group-abc' }, identityData,
+    );
+    expect(result.ok).toBe(true);
+    expect(result.siblingCount).toBe(2);
+    const ids = updateCalls.map((c) => c.id).sort();
+    expect(ids).toEqual(['session-old-3', 'session-old-9']);
+    expect(updateCalls.every((c) => c.data === identityData)).toBe(true);
+  });
+
+  it('أخ فشل تحديثه → ok=false، failedIds فيه الأخ ده بس', async () => {
+    const { db } = makeMockDb(
+      { data: [{ id: 'session-1' }, { id: 'session-old-9' }], error: null },
+      { 'session-old-9': new Error('fail') },
+    );
+    const result = await syncSessionIdentityToGroupSiblings(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      db as any, { id: 'session-1', session_group_id: 'group-abc' }, { court: 'محكمة الجيزة' },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.failedIds).toEqual(['session-old-9']);
+    expect(result.siblingCount).toBe(2);
+  });
+});
+
