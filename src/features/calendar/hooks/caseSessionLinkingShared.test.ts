@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   makeOfflineTempId, isOfflineTempId, withCaseSelfOfflineSentinel, withFkOfflineSentinel,
   buildCaseInsertData, findMatchingClientByName,
-  fetchSessionClientParties, matchClientsForParties, linkClientToParty,
+  fetchSessionClientParties, matchClientsForParties, linkClientToParty, unlinkClientFromParty,
   copySessionPartiesToNewSession, linkSessionGroupToCase, retryFailedGroupSessionsLinkToCase, updateCaseSessionsForGroup,
   syncSessionIdentityToGroupSiblings,
 } from './caseSessionLinkingShared';
@@ -459,6 +459,55 @@ describe('linkClientToParty', () => {
     const { fn } = mockDbWrite({ 'UPDATE:cases': { error: new Error('fail') } });
     window.__dbWrite = fn as unknown as typeof window.__dbWrite;
     const result = await linkClientToParty('party-1', 'client-1', true, 'case-1', undefined);
+    expect(result).toEqual({ ok: false });
+  });
+});
+
+describe('unlinkClientFromParty', () => {
+  type DbWriteOp = { type: string; table: string; id?: string; data?: Record<string, unknown> };
+  function mockDbWrite(results: Record<string, { error: unknown }> = {}) {
+    const calls: DbWriteOp[] = [];
+    const fn = vi.fn(async (op: DbWriteOp) => {
+      calls.push(op);
+      return results[`${op.type}:${op.table}`] ?? { error: null };
+    });
+    return { fn, calls };
+  }
+
+  beforeEach(() => {
+    window.__dbWrite = undefined as unknown as typeof window.__dbWrite;
+  });
+
+  it('طرف مش أساسي (isPrimaryParty=false) → UPDATE واحدة بس على case_parties (client_id=null)، مفيش أي لمسة لـ cases', async () => {
+    const { fn, calls } = mockDbWrite();
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const result = await unlinkClientFromParty('party-2', false, 'case-1');
+    expect(result).toEqual({ ok: true });
+    expect(calls).toEqual([{ type: 'UPDATE', table: 'case_parties', id: 'party-2', data: { client_id: null } }]);
+  });
+
+  it('الطرف الأساسي (isPrimaryParty=true) → UPDATE على case_parties وUPDATE على cases.client_id=null مع بعض', async () => {
+    const { fn, calls } = mockDbWrite();
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const result = await unlinkClientFromParty('party-1', true, 'case-1');
+    expect(result).toEqual({ ok: true });
+    expect(calls).toEqual([
+      { type: 'UPDATE', table: 'case_parties', id: 'party-1', data: { client_id: null } },
+      { type: 'UPDATE', table: 'cases', id: 'case-1', data: { client_id: null } },
+    ]);
+  });
+
+  it('فشل UPDATE على case_parties → ok=false حتى لو الطرف مش أساسي', async () => {
+    const { fn } = mockDbWrite({ 'UPDATE:case_parties': { error: new Error('fail') } });
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const result = await unlinkClientFromParty('party-2', false, 'case-1');
+    expect(result).toEqual({ ok: false });
+  });
+
+  it('فشل UPDATE على cases (طرف أساسي) → ok=false حتى لو case_parties نجحت', async () => {
+    const { fn } = mockDbWrite({ 'UPDATE:cases': { error: new Error('fail') } });
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const result = await unlinkClientFromParty('party-1', true, 'case-1');
     expect(result).toEqual({ ok: false });
   });
 });
