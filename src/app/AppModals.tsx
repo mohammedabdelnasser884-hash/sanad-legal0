@@ -93,6 +93,10 @@ interface AppModalsProps {
     handleLinkClientForParty: (caseId: string, partyId: string, clientId: string, isPrimaryParty: boolean, onAfterLink: () => void) => void | Promise<void>;
     // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 4): عكس handleLinkClient.
     handleUnlinkClient: (caseId: string) => void | Promise<void>;
+    // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، "إصلاح 5" — 5 أغسطس 2026): مرآة
+    // لـ handleUnlinkClient فوق بس لطرف بعينه — شوف useCaseActions.ts
+    // (handleUnlinkClientForParty) وInfoSection.tsx (زرار فك الربط لكل طرف).
+    handleUnlinkClientForParty: (caseId: string, partyId: string, isPrimaryParty: boolean, onAfterLink: () => void) => void | Promise<void>;
     // ⚡ CHANGED (خطة توحيد إنشاء الموكل، Phase 1): بقت مجرد فتح لموديل
     // "إنشاء موكل جديد" الموحّد — شوف App.tsx (handleOpenCreateClientForCase).
     handleCreateAndLinkClient: (caseId: string, plaintiffName: string, plaintiffNationalId?: string | null, plaintiffPoa?: string | null, plaintiffAddress?: string | null) => void;
@@ -148,7 +152,7 @@ function AppModals({
     setCases, setCasesFilter, setCasesPage,
     fetchCases, fetchTodaySessions, fetchUpcomingSessions, fetchMissedSessions, onStandaloneSessionSaved,
     fetchClients, clientSearch,
-    handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleLinkClientForParty, handleUnlinkClient, handleCreateAndLinkClient,
+    handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleLinkClientForParty, handleUnlinkClient, handleUnlinkClientForParty, handleCreateAndLinkClient,
     handleOpenCreateClientForSession, handleOpenCreateClientForSessionCase,
     handleOpenCreateClientForSessionParty, handleOpenCreateClientForCaseParty,
     handleOpenCreateClientForSessionPartyOnly,
@@ -246,7 +250,7 @@ function AppModals({
                 setCases((prev) => prev.map((c) => c.id === selectedCase?.id ? { ...c, status: newStatus } : c));
                 setCasesFilter(newStatus); setCasesPage(0); fetchCases(0, newStatus);
             },
-            onDelete: handleDeleteCase, onEdit: handleUpdateCase, onLinkClient: handleLinkClient, onLinkClientForParty: handleLinkClientForParty, onUnlinkClient: handleUnlinkClient, onCreateAndLinkClient: handleCreateAndLinkClient,
+            onDelete: handleDeleteCase, onEdit: handleUpdateCase, onLinkClient: handleLinkClient, onLinkClientForParty: handleLinkClientForParty, onUnlinkClient: handleUnlinkClient, onUnlinkClientForParty: handleUnlinkClientForParty, onCreateAndLinkClient: handleCreateAndLinkClient,
             // ⚡ NEW (مرحلة 13.1): زرار "إنشاء موكل" لكل طرف عليه ⭐ في تفاصيل القضية.
             // 🔧 FIX (بناء فشل — عدم تطابق تواقيع): CaseDetailView بيستخدم
             // امضاء مبسّط (caseId, party, isPrimaryParty, onAfterLink) بينما
