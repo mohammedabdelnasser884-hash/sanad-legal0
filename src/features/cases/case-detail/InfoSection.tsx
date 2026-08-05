@@ -41,6 +41,12 @@ interface InfoSectionProps {
   // handleUnlinkClient (useCaseActions.ts).
   unlinkingClient?: boolean;
   onUnlinkClient?: () => void | Promise<void>;
+  // ⚡ NEW ("إصلاح 5" — 5 أغسطس 2026): مرآة لـ onUnlinkClient فوق بس لطرف
+  // بعينه من caseParties — بيصفّر case_parties.client_id للطرف ده (+
+  // cases.client_id لو الطرف أساسي)، من غير ما يلمس بيانات القضية التانية.
+  // نفس نمط onLinkClientForParty بالظبط — شوف useCaseActions.ts
+  // (handleUnlinkClientForParty).
+  onUnlinkClientForParty?: (partyId: string, isPrimaryParty: boolean) => void | Promise<void>;
   // ⚡ NEW (خطة تعدد الأطراف، مرحلة 13.1 — 23 يوليو 2026): زرار "إنشاء
   // موكل" لطرف بعينه من caseParties — بديل onCreateAndLinkClient لما فيه
   // أكتر من طرف عليه ⭐ (شوف قسم 9 في الخطة). caseData/CaseDetailView هي
@@ -53,7 +59,7 @@ interface InfoRow {
   value: string | null;
 }
 
-function InfoSection({ caseData, client, sessions, notes, docs, caseParties = [], clients = [], linkingClient = false, onLinkClient, onLinkClientForParty, onCreateAndLinkClient, unlinkingClient = false, onUnlinkClient, onCreateAndLinkClientForParty }: InfoSectionProps) {
+function InfoSection({ caseData, client, sessions, notes, docs, caseParties = [], clients = [], linkingClient = false, onLinkClient, onLinkClientForParty, onCreateAndLinkClient, unlinkingClient = false, onUnlinkClient, onUnlinkClientForParty, onCreateAndLinkClientForParty }: InfoSectionProps) {
   // ⚡ NEW (مرحلة 13.1 — قسم 9 في الخطة): كل الأطراف عليهم ⭐ (is_client)،
   // والأطراف منهم اللي لسه مش مربوطة بموكل (client_id فاضي) — دي اللي
   // محتاجة زرار "إنشاء موكل". الطرف الأول (بترتيب sort_order، نفس ترتيب
@@ -82,6 +88,10 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
   // ⚡ NEW: تأكيد فك الربط inline جوه نفس الكارت (بدل مودال منفصل) — نفس
   // مبدأ حساسية الفعل العكسي، بس هنا مدمج مكان واحد مع زرار الربط.
   const [showUnlinkConfirm, setShowUnlinkConfirm] = useState(false);
+  // ⚡ NEW ("إصلاح 5" — 5 أغسطس 2026): نفس فكرة showUnlinkConfirm فوق بس
+  // لكل طرف من caseParties لوحده — بتخزّن id الطرف اللي حالياً بيظهر له
+  // تأكيد فك الربط inline (null = مفيش تأكيد ظاهر لأي طرف).
+  const [unlinkPartyConfirmId, setUnlinkPartyConfirmId] = useState<string | null>(null);
   return React.createElement('div', {className: "space-y-4 fade-in"},
                 // بيانات القضية
                 React.createElement('div', {className: "bg-premium-card border border-white/5 rounded-2xl p-4 space-y-0"},
@@ -146,17 +156,50 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                     (() => {
                         const plaintiffs = caseParties.filter((p) => p.side === 'plaintiff');
                         const defendants = caseParties.filter((p) => p.side === 'defendant');
+                        // ⚡ NEW ("إصلاح 5" — 5 أغسطس 2026): زرار "فك ربط" inline صغير
+                        // يظهر بس للأطراف المربوطة فعليًا بموكل (p.client_id موجود)،
+                        // وonUnlinkClientForParty متوفرة. بيفتح تأكيد صغير جوه نفس
+                        // الصف بدل مودال منفصل (نفس مبدأ showUnlinkConfirm فوق، بس
+                        // مُخزّن بـid الطرف عشان يدعم أكتر من طرف في نفس الوقت).
                         const renderParty = (p: CasePartyRow, colorClass: string) => React.createElement('div', {
                             key: p.id,
-                            className: "flex items-center justify-between gap-3"
+                            className: "space-y-1.5"
                         },
-                            React.createElement('span', {className: "text-[10px] text-slate-400 font-bold"}, p.capacity || 'الصفة غير محددة'),
-                            ' ',
-                            React.createElement('span', {className: "flex items-center gap-1.5"},
-                                p.is_client && React.createElement('span', {
-                                    className: "text-[8px] font-black text-premium-gold bg-premium-gold/10 rounded-full px-1.5 py-0.5"
-                                }, 'موكل'),
-                                React.createElement('span', {className: `text-[11px] font-black ${colorClass}`}, p.name)
+                            React.createElement('div', {className: "flex items-center justify-between gap-3"},
+                                React.createElement('span', {className: "text-[10px] text-slate-400 font-bold"}, p.capacity || 'الصفة غير محددة'),
+                                ' ',
+                                React.createElement('span', {className: "flex items-center gap-1.5"},
+                                    p.is_client && React.createElement('span', {
+                                        className: "text-[8px] font-black text-premium-gold bg-premium-gold/10 rounded-full px-1.5 py-0.5"
+                                    }, 'موكل'),
+                                    React.createElement('span', {className: `text-[11px] font-black ${colorClass}`}, p.name),
+                                    p.client_id && onUnlinkClientForParty && unlinkPartyConfirmId !== p.id && React.createElement('button', {
+                                        onClick: () => setUnlinkPartyConfirmId(p.id),
+                                        'data-testid': `info-unlink-party-${p.id}`,
+                                        className: "text-[9px] font-black text-rose-400"
+                                    }, '🔓')
+                                )
+                            ),
+                            p.client_id && onUnlinkClientForParty && unlinkPartyConfirmId === p.id && React.createElement('div', {
+                                className: "bg-white/5 border border-white/10 rounded-xl p-2 flex items-center justify-between gap-2"
+                            },
+                                React.createElement('span', {className: "text-[9px] text-slate-400 font-bold"}, `فك ربط "${p.name}" عن الموكل؟`),
+                                React.createElement('div', {className: "flex gap-1.5 shrink-0"},
+                                    React.createElement('button', {
+                                        disabled: unlinkingClient,
+                                        'data-testid': `info-unlink-party-confirm-${p.id}`,
+                                        onClick: async () => {
+                                            await onUnlinkClientForParty(p.id, p.id === primaryPartyId);
+                                            setUnlinkPartyConfirmId(null);
+                                        },
+                                        className: "bg-rose-500 text-white rounded-lg px-2 py-1 text-[9px] font-black disabled:opacity-60"
+                                    }, unlinkingClient ? '...' : 'فك الربط'),
+                                    React.createElement('button', {
+                                        disabled: unlinkingClient,
+                                        onClick: () => setUnlinkPartyConfirmId(null),
+                                        className: "bg-white/5 border border-white/10 text-slate-300 rounded-lg px-2 py-1 text-[9px] font-black disabled:opacity-60"
+                                    }, 'إلغاء')
+                                )
                             )
                         );
                         // 🆕 (خطة "المسمى القانوني" — مرحلة 5): يظهر بس لو الجهة
