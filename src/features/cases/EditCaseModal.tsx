@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { I } from '../../constants';
 import { Inp } from '@/shared/ui/Inp';
 import { Sel } from '@/shared/ui/Sel';
@@ -292,15 +292,19 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
     });
 
     // الطرف اللي لازم يتقفل (readOnly) — الطرف المربوط فعليًا بموكل حي من
-    // clients (نفس فكرة قفل حقول "الموكل" القديمة). بيتحدد بمطابقة client_id
-    // (بيتحسب مرة واحدة وقت الـ mount زي initialParties فوق، ومش بيتغيّر لو
-    // المستخدم بدّل ⭐ طرف تاني لاحقًا — نفس سلوك الحقول المقفولة القديمة
-    // اللي كانت بتتحدد وقت فتح الفورم بس).
-    const [linkedPartyId] = useState<string | null>(() => {
+    // clients (نفس فكرة قفل حقول "الموكل" القديمة). بيتحدد بمطابقة client_id.
+    // ⚡ FIX (تقرير التحقّق — النقطة 6، الثغرة الثانية): كان useState لقطة
+    // واحدة وقت الـmount بس — لو المستخدم ربط طرفًا جديدًا بالموكل الأساسي
+    // بعد فتح الفورم (عن طريق دروب-داون "ربط بموكل من النظام")، الطرف الجديد
+    // مكنش بيتحسب كـlinkedPartyId، فكان لسه بيتعرض له سلوت الربط بدل ما
+    // يتقفل بالكامل زي المفروض. useMemo بيتحسب من partyFields.plaintiffs/
+    // defendants الحيّة (بدل initialParties الثابتة)، فيتحدّث تلقائيًا مع أي
+    // تغيير فعلي في الأطراف.
+    const linkedPartyId = useMemo<string | null>(() => {
         if (!isLinked) return null;
-        const all = [...initialParties.plaintiffs, ...initialParties.defendants];
+        const all = [...partyFields.plaintiffs, ...partyFields.defendants];
         return all.find((p) => p.client_id === caseData.client_id)?.id ?? null;
-    });
+    }, [isLinked, partyFields.plaintiffs, partyFields.defendants, caseData.client_id]);
     // ⚡ CHANGED (بيانات الموكل مش قابلة للتعديل من داخل القضية): القفل مش
     // مقتصر على linkedPartyId (الطرف الأساسي بتاع القضية) بس دلوقتي — أي
     // طرف اتربط بموكل حقيقي (سواء الأساسي أو عن طريق دروب-داون "ربط بموكل
