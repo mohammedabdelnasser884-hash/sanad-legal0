@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from '../../../shared/lib/notifications';
 import { showErrorToast } from '../../../shared/lib/errorReporting';
@@ -32,6 +32,17 @@ import type { PartyFieldValue, PartySide } from '@/shared/parties/partyTypes';
 // 2026): نفس دالة الملخص المستخدمة في InfoSection.tsx (تفاصيل القضية) —
 // "الاسم الأول + آخرين" بدل عرض شخص واحد بس بصفته "الموكل"/"الخصم" ثابتة.
 import { summarizePartySide, type PartyPersonLike } from '@/shared/parties/partyDisplay';
+// 🆕 (خطة توحيد قفل الطرف، المرحلة 2 — 6 أغسطس 2026)
+import {
+    getPartyState,
+    isLinkedState,
+    isOrphanState,
+    isOrphanedLink,
+    canUnlinkParty,
+    getPartyStateMessage,
+    getPartyStateBadge,
+    type PartyDomainContext,
+} from '@/shared/parties/partyDomainService';
 import type { CaseSessionRow, ClientRow } from '../../../types';
 import type { MappedCase } from '../../../hooks/useAppData';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -160,7 +171,9 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
     // المحذوف): الجلسة عندها client_id فعلي، لكن الأب مش لاقي صف الموكل
     // (اتمسح/soft-deleted). الحقول بترجع حرة تلقائيًا (isLinked=false)
     // من غير أي تغيير هنا — الإضافة الوحيدة تنبيه واضح للمستخدم.
-    const isOrphaned = !!session.client_id && !isLinked;
+    // ⚡ CHANGED (خطة توحيد قفل الطرف، المرحلة 2): isOrphanedLink() الموحّدة
+    // بدل الشرط المكتوب يدويًا — نفس النتيجة، مصدر واحد.
+    const isOrphaned = isOrphanedLink(session.client_id, linkedClient);
     const [form, setForm] = useState<StandaloneEditForm>({
         court: session.court || '',
         title: session.title || '',
@@ -232,6 +245,14 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
             }],
         };
     });
+    // ⚡ NEW (خطة توحيد قفل الطرف، المرحلة 2): سياق الربط الموحّد — نفس
+    // فكرة EditCaseModal.tsx بالحرف (شوف تعليقها هناك للتفاصيل).
+    const domainContext = useMemo<PartyDomainContext>(() => {
+        const byId = new Map(clients.map((c) => [c.id, c]));
+        if (linkedClient) byId.set(linkedClient.id, linkedClient);
+        return { primaryClientId: session.client_id || null, clients: Array.from(byId.values()) };
+    }, [clients, linkedClient, session.client_id]);
+
     const partyFields = usePartyFields({
         initialPlaintiffs: initialParties.plaintiffs,
         initialDefendants: initialParties.defendants,
@@ -241,6 +262,9 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
             plaintiff: session.plaintiff_legal_title || '',
             defendant: session.defendant_legal_title || '',
         },
+        // 🆕 (المرحلة 2): نفس فكرة EditCaseModal.tsx — يغذّي فاليديشن
+        // الاسم بالأطراف الـorphan فعليًا (إصلاح باگ 5.5).
+        domainContext,
     });
 
     // الطرف اللي لازم يتقفل (readOnly) — الطرف المربوط فعليًا بموكل حي من
@@ -251,25 +275,77 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
         const all = [...initialParties.plaintiffs, ...initialParties.defendants];
         return all.find((p) => p.client_id === session.client_id)?.id ?? null;
     });
-    // ⚡ CHANGED (بيانات الموكل مش قابلة للتعديل من داخل الجلسة): القفل
-    // بقى على أي طرف عنده client_id (مش بس الطرف الأساسي المرتبط بـ
-    // session.client_id) — نفس التغيير اللي حصل في EditCaseModal.tsx.
-    const renderPartyReadOnly = (party: PartyFieldValue) => !!party.client_id;
-    // ⚡ NEW: زرار "عدّل من ملف الموكل" لأي طرف *غير* الأساسي مربوط بموكل
-    // حقيقي (client_id جاله من case_parties وقت إنشاء الجلسة عن طريق ربط
-    // لكل طرف على حدة) — نفس فكرة renderPartyExtra في EditCaseModal.tsx.
+    // ⚡ CHANGED (المرحلة 2): بدل !!party.client_id مباشرة — طرف orphan
+    // (أساسي أو ثانوي) بيرجع false (قابل للتعديل الحر) دلوقتي.
+    const renderPartyReadOnly = (party: PartyFieldValue) => isLinkedState(getPartyState(party, domainContext));
+    // ⚡ CHANGED (المرحلة 2 — إصلاح باگ 5.1، dead-end حقيقي): قبل كده
+    // الدالة دي كانت بترجع null بالكامل (مفيش أي محتوى إضافي خالص) لو
+    // linkedPartyClient مش موجود — يعني طرف ثانوي اتربط بموكل وبعدين
+    // الموكل اتمسح كان بيفضل مقفول (renderPartyReadOnly فوق) بلا أي مخرج:
+    // بلا تنبيه، بلا زرار unlink (الملف ده أصلًا معهوش دروب-داون "ربط
+    // بموكل من النظام" زي EditCaseModal.tsx — الإصلاح هنا هو أول زرار فك
+    // ربط بيتضاف للملف ده أصلًا، مش بس تعديل موجود).
+    // ⚡ NEW (خطة توحيد قفل الطرف — المرحلة 3، "preview قبل فك الربط"، 6
+    // أغسطس 2026): نفس نمط EditCaseModal.tsx بالحرف — طرف LINKED فعليًا
+    // (موكل حي) بيمر بخطوة تأكيد صغيرة قبل ما زرار "🔓 فك الربط" ينفذ.
+    // طرف ORPHAN_PARTY (مالوش موكل حي أصلًا) بيتفك على طول زي ما كان،
+    // مفيش حاجة تستاهل preview لموكل اتمسح بالفعل.
+    const [unlinkConfirmPartyId, setUnlinkConfirmPartyId] = useState<string | null>(null);
+
     const renderPartyExtra = (party: PartyFieldValue) => {
         if (party.id === linkedPartyId || !party.client_id) return null;
-        const linkedPartyClient = clients.find((c) => c.id === party.client_id);
-        if (!onOpenClientProfile || !linkedPartyClient) return null;
-        return React.createElement('div', { className: 'flex items-center justify-between' },
-            React.createElement('p', { className: 'text-[9px] text-slate-500' }, '🔗 مربوط بموكل من النظام — بيانات الطرف ده بتتقرا من ملف الموكل'),
-            React.createElement('button', {
+        const state = getPartyState(party, domainContext);
+        const linkedPartyClient = clients.find((c) => c.id === party.client_id) || null;
+        const confirmingUnlink = unlinkConfirmPartyId === party.id;
+        return React.createElement('div', { className: 'space-y-2' },
+            isOrphanState(state) && React.createElement('div', { className: 'bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2', 'data-testid': `edit-standalone-session-party-orphaned-warning-${party.id}` },
+                React.createElement('p', { className: 'text-[9px] text-amber-400 font-bold leading-relaxed' }, `⚠️ ${getPartyStateMessage(state)}`)
+            ),
+            isLinkedState(state) && onOpenClientProfile && linkedPartyClient && React.createElement('div', { className: 'flex items-center justify-between' },
+                React.createElement('p', { className: 'text-[9px] text-slate-500' }, '🔗 مربوط بموكل من النظام — بيانات الطرف ده بتتقرا من ملف الموكل'),
+                React.createElement('button', {
+                    type: 'button',
+                    onClick: () => onOpenClientProfile(linkedPartyClient),
+                    className: 'text-[9px] font-black text-premium-gold shrink-0',
+                    'data-testid': `edit-standalone-session-open-client-profile-${party.id}`,
+                }, '✏️ عدّل من ملف الموكل')
+            ),
+            // 🆕 زرار فك الربط — كان مفقود بالكامل قبل كده، وده أصل الـ
+            // dead-end. متاح لأي طرف عنده client_id (حي أو orphan) — بيصفّر
+            // client_id بس محليًا في الفورم (نفس منطق linkClientToParty في
+            // EditCaseModal.tsx وقت اختيار "— بدون ربط —")، فيرجع الطرف
+            // بيانات حرة قابلة للتعديل فورًا.
+            // ⚡ CHANGED (المرحلة 3): طرف LINKED فعليًا بيفتح تأكيد أول
+            // بدل ما ينفذ فورًا؛ طرف ORPHAN_PARTY (مفيش موكل حي يتفك عنه
+            // فعليًا) لسه بينفذ على طول.
+            canUnlinkParty(state) && !confirmingUnlink && React.createElement('button', {
                 type: 'button',
-                onClick: () => onOpenClientProfile(linkedPartyClient),
-                className: 'text-[9px] font-black text-premium-gold shrink-0',
-                'data-testid': `edit-standalone-session-open-client-profile-${party.id}`,
-            }, '✏️ عدّل من ملف الموكل')
+                onClick: () => {
+                    if (isLinkedState(state) && linkedPartyClient) { setUnlinkConfirmPartyId(party.id); return; }
+                    partyFields.updateParty(party.id, 'client_id', null);
+                },
+                className: 'text-[10px] font-bold text-rose-400 mt-1',
+                'data-testid': `edit-standalone-session-unlink-party-${party.id}`,
+            }, '🔓 فك الربط عن هذا الطرف'),
+            confirmingUnlink && React.createElement('div', { className: 'bg-rose-500/10 border border-rose-500/20 rounded-xl p-2.5 space-y-2', 'data-testid': `edit-standalone-session-unlink-preview-${party.id}` },
+                React.createElement('p', { className: 'text-[9px] text-rose-300 font-bold leading-relaxed' },
+                    `⚠️ هيتم فك ربط "${party.name || 'هذا الطرف'}" عن الموكل "${linkedPartyClient?.full_name}". بيانات الطرف (الاسم/الرقم القومي/العنوان/التوكيل) هتفضل زي ما هي دلوقتي كنسخة يدوية قابلة للتعديل الحر، ومش هتتحدّث تلقائيًا من ملف الموكل تاني.`
+                ),
+                React.createElement('div', { className: 'flex gap-2' },
+                    React.createElement('button', {
+                        type: 'button',
+                        onClick: () => { partyFields.updateParty(party.id, 'client_id', null); setUnlinkConfirmPartyId(null); },
+                        className: 'flex-1 py-2 rounded-lg bg-rose-500 text-white text-[10px] font-black',
+                        'data-testid': `edit-standalone-session-unlink-confirm-${party.id}`,
+                    }, 'فك الربط'),
+                    React.createElement('button', {
+                        type: 'button',
+                        onClick: () => setUnlinkConfirmPartyId(null),
+                        className: 'flex-1 py-2 rounded-lg bg-white/5 border border-white/10 text-slate-300 text-[10px] font-black',
+                        'data-testid': `edit-standalone-session-unlink-cancel-${party.id}`,
+                    }, 'إلغاء')
+                )
+            ),
         );
     };
 
@@ -532,7 +608,7 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
                             '⚠️ الموكل محذوف — البيانات دي آخر ما هو معروف عن الموكل، وبقت قابلة للتعديل الحر.'
                         )
                     ),
-                    React.createElement(PartyFieldsGroup, { controller: partyFields, testIdPrefix: 'edit-standalone-session', renderPartyReadOnly, renderPartyExtra }),
+                    React.createElement(PartyFieldsGroup, { controller: partyFields, testIdPrefix: 'edit-standalone-session', renderPartyReadOnly, renderPartyExtra, getPartyState: (party: PartyFieldValue) => getPartyState(party, domainContext) }),
                     React.createElement('div', { className: 'border-t border-white/5 my-1' }),
                     React.createElement(Inp, { label: 'الإجراء القادم', value: form.next_action, onChange: set('next_action'), placeholder: 'مثال: تقديم مذكرة دفاع' }),
                     React.createElement('div', { className: 'h-4' })
@@ -1009,13 +1085,18 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
     // بـ session_id) — بس هنا للعرض القرائي فقط. جلسة قديمة/بلا صفوف
     // ترجع array فاضية، وبنعمل fallback لعمودي plaintiff/defendant
     // القدامى تحت زي ما كان يحصل بالظبط قبل التعديل ده.
-    const [sessionParties, setSessionParties] = useState<{ side: PartySide; name: string; capacity: string }[]>([]);
+    // ⚡ CHANGED (خطة توحيد قفل الطرف — المرحلة 3، سد فجوة 5.4، 6 أغسطس
+    // 2026): client_id بقى جزء من الـselect — قبل كده الاستعلام كان
+    // بيجيب side/name/capacity بس، فمكانش فيه بيانات كفاية لحساب حالة
+    // الطرف (getPartyState) وعرض شارة في العرض القرائي هنا. مفيش تغيير
+    // في شكل fallback الأعمدة القديمة تحت — عمود جديد بس بيتضاف كخيار.
+    const [sessionParties, setSessionParties] = useState<{ side: PartySide; name: string; capacity: string; client_id: string | null }[]>([]);
     useEffect(() => {
         let cancelled = false;
-        db.from('case_parties').select('side,name,capacity').eq('session_id', partialSession.id).order('sort_order', { ascending: true })
+        db.from('case_parties').select('side,name,capacity,client_id').eq('session_id', partialSession.id).order('sort_order', { ascending: true })
             .then(({ data, error }) => {
                 if (cancelled) return;
-                setSessionParties(error ? [] : ((data as unknown as { side: PartySide; name: string; capacity: string }[]) || []));
+                setSessionParties(error ? [] : ((data as unknown as { side: PartySide; name: string; capacity: string; client_id: string | null }[]) || []));
             });
         return () => { cancelled = true; };
     }, [partialSession.id, db]);
@@ -1051,7 +1132,9 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
     // المحذوف): hasClient=true (session.client_id موجود) لكن linkedClient
     // طلع null — يعني الموكل ده اتحذف (soft-deleted) بعد ما الجلسة
     // اتربطت بيه، مش إن الجلسة مش مربوطة بحد أصلاً.
-    const isOrphaned = hasClient && !linkedClient;
+    // ⚡ CHANGED (خطة توحيد قفل الطرف، المرحلة 2): isOrphanedLink() الموحّدة
+    // بدل الشرط اليدوي — نفس النتيجة بالظبط (hasClient && !linkedClient).
+    const isOrphaned = isOrphanedLink(session.client_id, linkedClient);
 
     // كائن قضية اصطناعي خفيف بيتبنى من بيانات الجلسة المستقلة نفسها (مفيش قضية حقيقية أصلاً)
     // عشان يتمرر لـ SessionUpdateModal اللي بيتوقع caseData: MappedCase — نفس القيم بالظبط
@@ -1088,6 +1171,21 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
     const defendantSummary = summarizePartySide(defendantPersons);
     const partyLine = (s: ReturnType<typeof summarizePartySide>) =>
         s ? (s.othersCount > 0 ? `${s.primaryName} وآخرين` : s.primaryName) : null;
+    // ⚡ NEW (خطة توحيد قفل الطرف — المرحلة 3، سد فجوة 5.4، 6 أغسطس 2026):
+    // شارة نصية صغيرة (إيموجي) بتتلحق باسم أول شخص مسمّى في الجهة، لو
+    // بيانات case_parties.client_id متاحة له (بعد إضافتها للاستعلام
+    // فوق). صفوف الـfallback القديمة (plaintiff/defendant المفردين،
+    // جلسة قبل تعدد الأطراف) client_id مالهاش قيمة أصلًا فبترجع '' —
+    // نفس شكل العرض القديم بالظبط بلا أي تغيير. الصفوف هنا كلها للعرض
+    // القرائي فقط (rows أدناه بتاخد value: string|null بسيط، مش JSX)،
+    // فالشارة نص مضغوط جنب الاسم بدل pill ملوّن كامل زي كارت الفورم.
+    const sessionDomainContext: PartyDomainContext = { primaryClientId: session.client_id || null, clients };
+    const partyStateBadgeSuffix = (persons: PartyPersonLike[]): string => {
+        const first = persons[0] as (PartyPersonLike & { client_id?: string | null }) | undefined;
+        if (!first?.client_id) return '';
+        const badge = getPartyStateBadge(getPartyState({ client_id: first.client_id }, sessionDomainContext));
+        return badge ? ` ${badge.emoji}` : '';
+    };
 
     const rows: { label: string; value: string | null; key?: string }[] = [
         { label: '📅 التاريخ', value: session.session_date || null },
@@ -1096,9 +1194,9 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
         { label: '📋 رقم القضية', value: session.case_number || null },
         { label: '📂 نوع القضية', value: session.case_type || null },
         { label: '⚖️ الدائرة', value: session.circuit_number || null },
-        { label: '👤 الطرف الأول', value: partyLine(plaintiffSummary), key: 'primaryParty' },
+        { label: '👤 الطرف الأول', value: partyLine(plaintiffSummary) ? partyLine(plaintiffSummary) + partyStateBadgeSuffix(plaintiffPersons) : null, key: 'primaryParty' },
         { label: '🏷 صفة الطرف الأول', value: plaintiffSummary?.primaryCapacity || null },
-        { label: '👤 الطرف الثاني', value: partyLine(defendantSummary) },
+        { label: '👤 الطرف الثاني', value: partyLine(defendantSummary) ? partyLine(defendantSummary) + partyStateBadgeSuffix(defendantPersons) : null },
         { label: '🏷 صفة الطرف الثاني', value: defendantSummary?.primaryCapacity || null },
         { label: '⚡ الإجراء القادم', value: session.next_action || null },
         { label: '📝 ما تم', value: session.result || null },
