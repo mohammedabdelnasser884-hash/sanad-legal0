@@ -2,6 +2,7 @@ import React from 'react';
 import { Inp } from '../ui/Inp';
 import { PoaInput } from '../ui/PoaInput';
 import { toast } from '../lib/notifications';
+import { getPartyStateBadge, type PartyLinkState } from './partyDomainService';
 import type { PartyFieldValue, PartySide } from './partyTypes';
 
 // نفس هيلبر "أرقام فقط بحد أقصى" المستخدم في NewCaseModal.tsx/
@@ -58,20 +59,35 @@ interface PartyFieldsProps {
     // المفردة قبل تعدد الأطراف). الصفة (capacity) فضلت قابلة للتعديل دايمًا
     // (كانت كده حتى قبل القفل القديم)، ونجمة ⭐/زرار الحذف مش متأثرين.
     readOnly?: boolean;
+    // ⚡ NEW (خطة توحيد قفل الطرف — المرحلة 3، Badges/UI، 6 أغسطس 2026):
+    // الحالة الموحّدة للطرف ده (من partyDomainService.getPartyState) —
+    // اختيارية عمدًا: الفورمات اللي لسه معهاش سياق ربط (NewCaseModal/
+    // NewStandaloneSessionModal، أطراف يدوية دايمًا) مش بتبعتها فيفضل
+    // الكارت زي ما هو من غير أي شارة. لو اتبعتت، شارة ملوّنة صغيرة
+    // (🟢🔵🟠🟣) بتتعرض جنب العنوان — بديل بصري سريع للتنبيه النصي
+    // (extraContent) اللي كل فورم بيبنيه بنفسه.
+    state?: PartyLinkState;
 }
 
 const readOnlyInputCls = 'w-full p-3 text-xs rounded-xl border border-white/10 bg-white/5 text-slate-300 placeholder-slate-600 cursor-not-allowed';
 
 export function PartyFields({
-    party, index, side, canRemove, onChange, onRemove, onToggleIsClient, nationalIdError, nameWarning, testIdPrefix, extraContent, readOnly = false,
+    party, index, side, canRemove, onChange, onRemove, onToggleIsClient, nationalIdError, nameWarning, testIdPrefix, extraContent, readOnly = false, state,
 }: PartyFieldsProps) {
     const title = ordinalAr(index + 1);
     const tid = (name: string) => (testIdPrefix ? `${testIdPrefix}-${name}` : undefined);
+    const badge = state ? getPartyStateBadge(state) : null;
 
     return React.createElement('div', { className: 'rounded-2xl border border-white/10 bg-white/5 p-3 mb-2 space-y-2', 'data-testid': tid('card') },
-        // ── رأس البطاقة: العنوان + نجمة "موكلنا" + زرار الحذف ──
+        // ── رأس البطاقة: العنوان + شارة الحالة + نجمة "موكلنا" + زرار الحذف ──
         React.createElement('div', { className: 'flex items-center justify-between' },
-            React.createElement('span', { className: 'text-[11px] font-black text-slate-300' }, title),
+            React.createElement('div', { className: 'flex items-center gap-1.5' },
+                React.createElement('span', { className: 'text-[11px] font-black text-slate-300' }, title),
+                badge && React.createElement('span', {
+                    className: `text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${badge.className}`,
+                    'data-testid': tid('state-badge'),
+                }, `${badge.emoji} ${badge.label}`)
+            ),
             React.createElement('div', { className: 'flex items-center gap-2' },
                 React.createElement('button', {
                     type: 'button',
