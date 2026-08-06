@@ -5,6 +5,7 @@ import { I } from '../../constants';
 import { useNestedModalBackButton } from '../lib/useNestedModalBackButton';
 import type { UsePartyFieldsReturn } from './usePartyFields';
 import type { PartySide, PartyFieldValue } from './partyTypes';
+import type { PartyLinkState } from './partyDomainService';
 
 // ══════════════════════════════════════════════════════════════
 //  PartySubform — النموذج الفرعي اللي بيتفتح لما يتضغط على PartySideCard.
@@ -27,11 +28,16 @@ interface PartySubformProps {
     testIdPrefix?: string;
     renderPartyExtra?: (party: PartyFieldValue) => React.ReactNode;
     renderPartyReadOnly?: (party: PartyFieldValue) => boolean;
+    // ⚡ NEW (خطة توحيد قفل الطرف — المرحلة 3، Badges/UI): بديل موحّد
+    // لبناء نص/شارة الحالة يدويًا داخل renderPartyExtra في كل فورم —
+    // اختيارية، بتتمرر لـPartyFields.tsx كـ`state` عشان تعرض الشارة
+    // الملوّنة (🟢🔵🟠🟣) جنب عنوان الكارت.
+    getPartyState?: (party: PartyFieldValue) => PartyLinkState;
     onClose: () => void;
 }
 
 export function PartySubform({
-    isOpen, side, title, addLabel, controller, testIdPrefix, renderPartyExtra, renderPartyReadOnly, onClose,
+    isOpen, side, title, addLabel, controller, testIdPrefix, renderPartyExtra, renderPartyReadOnly, getPartyState, onClose,
 }: PartySubformProps) {
     useNestedModalBackButton(isOpen, onClose);
 
@@ -65,6 +71,7 @@ export function PartySubform({
             testIdPrefix: testIdPrefix ? `${testIdPrefix}-${side}-${index}` : undefined,
             extraContent: renderPartyExtra ? renderPartyExtra(party) : undefined,
             readOnly: renderPartyReadOnly ? renderPartyReadOnly(party) : false,
+            state: getPartyState ? getPartyState(party) : undefined,
         })
     );
 
