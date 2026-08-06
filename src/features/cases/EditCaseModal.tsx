@@ -8,6 +8,17 @@ import { db } from '../../supabaseClient';
 import { usePartyFields } from '@/shared/parties/usePartyFields';
 import { PartyFieldsGroup } from '@/shared/parties/PartyFieldsGroup';
 import type { PartyFieldValue, PartySide } from '@/shared/parties/partyTypes';
+// 🆕 (خطة توحيد قفل الطرف، المرحلة 2 — 6 أغسطس 2026): مصدر الحقيقة
+// الموحّد لحالة قفل/ربط أي طرف، بدل !!party.client_id المباشر.
+import {
+    getPartyState,
+    isLinkedState,
+    isOrphanState,
+    isOrphanedLink,
+    canCreateNewClientFromParty,
+    getPartyStateMessage,
+    type PartyDomainContext,
+} from '@/shared/parties/partyDomainService';
 import { useFormDraft } from '@/shared/hooks/useFormDraft';
 import { useUnsavedChangesGuard } from '@/shared/hooks/useUnsavedChangesGuard';
 import type { MappedCase } from '../../hooks/useAppData';
@@ -144,7 +155,12 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
     // (اتمسح/soft-deleted). الحقول بترجع حرة تلقائيًا (isLinked=false)
     // من غير أي تغيير هنا — الإضافة الوحيدة هي تنبيه واضح للمستخدم بدل
     // ما يفتكر إن القضية دي مكانتش مربوطة بحد أصلاً.
-    const isOrphaned = !!caseData.client_id && !isLinked;
+    // ⚡ CHANGED (خطة توحيد قفل الطرف، المرحلة 2): بدل الشرط المكرر
+    // `!!caseData.client_id && !isLinked`، بنستخدم isOrphanedLink()
+    // الموحّدة من partyDomainService — نفس النتيجة بالظبط، لكن من مصدر
+    // واحد بدل 4 نسخ متفرقة (EditCaseModal، StandaloneSessionDetailModal
+    // بنسختيه، InfoSection).
+    const isOrphaned = isOrphanedLink(caseData.client_id, linkedClient);
     const splitNum = (num: string) => {
         if(!num||num==='—') return {n:'',y:''};
         const parts = num.split('/');
@@ -279,6 +295,19 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
             }],
         };
     });
+    // ⚡ NEW (خطة توحيد قفل الطرف، المرحلة 2): سياق الربط الموحّد —
+    // primaryClientId هو caseData.client_id (بغض النظر لو orphan دلوقتي
+    // أو لأ، getPartyState هو اللي بيقرر)، وقائمة clients بندمج معاها
+    // linkedClient نفسه احتياطًا (لو مش موجود أصلًا في clients لأي سبب —
+    // نفس نمط linkedClients في CaseDetailView.tsx). بيتحسب من جديد في كل
+    // render عمدًا (مش initial-only) عشان orphan تتحدّث فورًا لو clients
+    // اتغيّرت (مثلاً موكل اتضاف لسه من مكان تاني).
+    const domainContext = useMemo<PartyDomainContext>(() => {
+        const byId = new Map(clients.map((c) => [c.id, c]));
+        if (linkedClient) byId.set(linkedClient.id, linkedClient);
+        return { primaryClientId: caseData.client_id || null, clients: Array.from(byId.values()) };
+    }, [clients, linkedClient, caseData.client_id]);
+
     const partyFields = usePartyFields({
         initialPlaintiffs: initialParties.plaintiffs,
         initialDefendants: initialParties.defendants,
@@ -289,6 +318,10 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
             plaintiff: caseData.plaintiff_legal_title || '',
             defendant: caseData.defendant_legal_title || '',
         },
+        // 🆕 (المرحلة 2): يغذّي فاليديشن الاسم (casePartiesValidation.ts)
+        // بالأطراف الـorphan فعليًا، عشان اسم طرف orphan يخضع لنفس فحص
+        // أي اسم يدوي (إصلاح باگ 5.5).
+        domainContext,
     });
 
     // الطرف اللي لازم يتقفل (readOnly) — الطرف المربوط فعليًا بموكل حي من
@@ -311,7 +344,11 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
     // من النظام" جوه renderPartyExtra تحت) بياناته الشخصية تتقفل. الصفة
     // (capacity) فضلت قابلة للتعديل دايمًا زي ما هي — دي دور الطرف في
     // القضية دي بالذات، مش بيانات الموكل نفسه.
-    const renderPartyReadOnly = (party: PartyFieldValue) => !!party.client_id;
+    // ⚡ CHANGED (المرحلة 2): بدل !!party.client_id مباشرة — دلوقتي طرف
+    // orphan (أساسي أو ثانوي، الموكل المربوط بيه اتمسح) بيرجع false
+    // (قابل للتعديل الحر)، مش true زي قبل كده. isLinkedState بترجع true
+    // بس للحالتين LINKED/PRIMARY_CLIENT (موكل حي فعليًا).
+    const renderPartyReadOnly = (party: PartyFieldValue) => isLinkedState(getPartyState(party, domainContext));
 
     // ══════════════ حفظ مسودة تلقائي (خطة 1 أغسطس 2026) ══════════════
     // نفس منطق NewCaseModal.tsx بالحرف، بس المفتاح هنا متضمّن caseData.id
@@ -357,6 +394,15 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
         partyFields.updateParty(partyId,'address',picked.address || '');
     };
 
+    // ⚡ NEW (خطة توحيد قفل الطرف — المرحلة 3، "preview قبل فك الربط"،
+    // 6 أغسطس 2026): فك ربط طرف *مربوط فعليًا بموكل حي* (LINKED، مش
+    // ORPHAN_PARTY — orphan أصلًا مالوش موكل حي يتفك عنه فعليًا) بقى
+    // بيمر بخطوة تأكيد صغيرة جوه نفس كارت الطرف بدل ما ينفذ فورًا من
+    // اختيار "— بدون ربط —" في الدروب-داون مباشرة — نفس النمط المستخدم
+    // بالفعل في InfoSection.tsx (unlinkPartyConfirmId، "إصلاح 5" — 5
+    // أغسطس 2026). partyId واحد بس ممكن يكون في وضع التأكيد في نفس الوقت.
+    const [unlinkConfirmPartyId, setUnlinkConfirmPartyId] = useState<string | null>(null);
+
     // ⚡ NEW (مرحلة 4 خطوة 2): بعد حفظ موكل جديد عبر الموديل الموحّد (هدف
     // 'localParty' — الطرف هنا لسه صف محلي في partyFields، حتى لو كانت
     // القضية نفسها محفوظة بالفعل)، بنطبّق بياناته فورًا من onLinked (نفس
@@ -376,13 +422,24 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
     // فوق، مفيش داعي يتعرض له سلوت الربط أصلاً).
     const renderPartyExtra = (party: PartyFieldValue) => {
         if(!party.is_client || party.id === linkedPartyId) return null;
-        // ⚡ NEW: الطرف ده مربوط بموكل حقيقي (client_id) — بياناته مقفولة
-        // دلوقتي (renderPartyReadOnly فوق). دروب-داون الربط فضل موجود
-        // (لسه بيسمح بتغيير الموكل أو فك الربط)، وبنضيف جنبه زرار "عدّل من
-        // ملف الموكل" يوجّهه لفورم تعديل الموكل نفسه مباشرة.
+        // ⚡ CHANGED (المرحلة 2 — إصلاح باگ 5.1): الحالة الموحّدة بدل فحص
+        // client_id/linkedPartyClient المتفرق. طرف LINKED/PRIMARY_CLIENT
+        // بياناته مقفولة ("عدّل من ملف الموكل" يظهر). طرف ORPHAN_PARTY
+        // (client_id موجود لكن الموكل اتمسح) كان قبل كده بيوصل لـdead-end
+        // (دروب-داون الربط كان بيعرض قيمة client_id مش موجودة أصلًا في
+        // الخيارات، وزرار "إنشاء موكل جديد" كان مخفي بالكامل) — دلوقتي
+        // بيتعرضله تنبيه واضح + الدروب-داون بترجع لـ"— بدون ربط —" (مش
+        // قيمة orphan شبحية) + زرار "إنشاء موكل جديد" بيرجع يظهر بدل ما
+        // يفضل مخفي للأبد.
+        const state = getPartyState(party, domainContext);
         const linkedPartyClient = party.client_id ? clients.find((c: ClientRow) => c.id === party.client_id) : null;
+        const orphanMessage = getPartyStateMessage(state);
+        const confirmingUnlink = unlinkConfirmPartyId === party.id;
         return React.createElement('div',{className:'space-y-2'},
-            party.client_id && onOpenClientProfile && linkedPartyClient && React.createElement('div',{className:'flex items-center justify-between'},
+            isOrphanState(state) && React.createElement('div',{className:'bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2', 'data-testid':`edit-case-party-orphaned-warning-${party.id}`},
+                React.createElement('p',{className:'text-[9px] text-amber-400 font-bold leading-relaxed'}, `⚠️ ${orphanMessage}`)
+            ),
+            isLinkedState(state) && onOpenClientProfile && linkedPartyClient && React.createElement('div',{className:'flex items-center justify-between'},
                 React.createElement('p',{className:'text-[9px] text-slate-500'},'🔗 مربوط بموكل من النظام — بيانات الطرف ده بتتقرا من ملف الموكل'),
                 React.createElement('button',{
                     type:'button',
@@ -391,13 +448,44 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
                     'data-testid':`edit-case-open-client-profile-${party.id}`,
                 },'✏️ عدّل من ملف الموكل')
             ),
-            clients.length>0 && React.createElement(Sel,{
+            // ⚡ CHANGED (المرحلة 3 — preview قبل فك الربط): لو الطرف ده
+            // LINKED فعليًا (موكل حي) واختار المستخدم "— بدون ربط —"، منعملش
+            // linkClientToParty فورًا — بنفتح تأكيد صغير جوه الكارت الأول.
+            // أي اختيار تاني (ربط بموكل جديد، أو فك ربط طرف orphan أصلًا
+            // مالوش موكل حي حاليًا) بينفذ على طول زي ما كان.
+            clients.length>0 && !confirmingUnlink && React.createElement(Sel,{
                 label:"ربط بموكل من النظام (اختياري)",
-                value:party.client_id || '',
-                onChange:(e: React.ChangeEvent<HTMLSelectElement>) =>linkClientToParty(party.id,e.target.value),
+                // ⚡ FIX (باگ 5.1): قيمة orphan (client_id مش موجود في clients)
+                // كانت بتتعرض كأنها اختيار حقيقي في الدروب-داون (قيمة بلا
+                // خيار مطابق) — دلوقتي بترجع لـ"— بدون ربط —" بوضوح.
+                value: linkedPartyClient ? party.client_id! : '',
+                onChange:(e: React.ChangeEvent<HTMLSelectElement>) => {
+                    const newVal = e.target.value;
+                    if(!newVal && isLinkedState(state) && linkedPartyClient){ setUnlinkConfirmPartyId(party.id); return; }
+                    linkClientToParty(party.id,newVal);
+                },
                 options:[{value:'',label:'— بدون ربط (بيانات يدوية) —'},...clients.map((c: ClientRow) =>({value:c.id,label:c.full_name}))]
             }),
-            !party.client_id && openNewClientModal && React.createElement('button',{
+            confirmingUnlink && React.createElement('div',{className:'bg-rose-500/10 border border-rose-500/20 rounded-xl p-2.5 space-y-2', 'data-testid':`edit-case-unlink-preview-${party.id}`},
+                React.createElement('p',{className:'text-[9px] text-rose-300 font-bold leading-relaxed'},
+                    `⚠️ هيتم فك ربط "${party.name || 'هذا الطرف'}" عن الموكل "${linkedPartyClient?.full_name}". بيانات الطرف (الاسم/الرقم القومي/العنوان/التوكيل) هتفضل زي ما هي دلوقتي كنسخة يدوية قابلة للتعديل الحر، ومش هتتحدّث تلقائيًا من ملف الموكل تاني.`
+                ),
+                React.createElement('div',{className:'flex gap-2'},
+                    React.createElement('button',{
+                        type:'button',
+                        onClick:()=>{ linkClientToParty(party.id,''); setUnlinkConfirmPartyId(null); },
+                        className:'flex-1 py-2 rounded-lg bg-rose-500 text-white text-[10px] font-black',
+                        'data-testid':`edit-case-unlink-confirm-${party.id}`,
+                    },'فك الربط'),
+                    React.createElement('button',{
+                        type:'button',
+                        onClick:()=>setUnlinkConfirmPartyId(null),
+                        className:'flex-1 py-2 rounded-lg bg-white/5 border border-white/10 text-slate-300 text-[10px] font-black',
+                        'data-testid':`edit-case-unlink-cancel-${party.id}`,
+                    },'إلغاء')
+                )
+            ),
+            canCreateNewClientFromParty(state) && openNewClientModal && React.createElement('button',{
                 type:'button',
                 onClick:()=>openNewClientModal({
                     initialData:{full_name:party.name || '', national_id:party.national_id || '', cr_number:party.power_of_attorney || '', address:party.address || ''},
@@ -575,7 +663,7 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
                     "⚠️ الموكل محذوف — البيانات دي آخر ما هو معروف عن الموكل، وبقت قابلة للتعديل الحر. تقدر تربط القضية بموكل تاني من تاب البيانات."
                 )
             ),
-            React.createElement(PartyFieldsGroup, {controller:partyFields, testIdPrefix:'edit-case', renderPartyReadOnly, renderPartyExtra}),
+            React.createElement(PartyFieldsGroup, {controller:partyFields, testIdPrefix:'edit-case', renderPartyReadOnly, renderPartyExtra, getPartyState:(party: PartyFieldValue) => getPartyState(party, domainContext)}),
 
             // ══════════════ بيانات إضافية ══════════════
             React.createElement('div', {className:"border-t border-white/10 pt-4 mt-2"},
