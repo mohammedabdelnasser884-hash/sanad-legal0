@@ -104,6 +104,16 @@ export interface PartyLegalTitles {
 export function validateParties(
     parties: PartyFieldValue[],
     legalTitles: PartyLegalTitles = { plaintiff: '', defendant: '' },
+    // 🆕 (خطة توحيد قفل الطرف، المرحلة 2 — 6 أغسطس 2026): مجموعة ids
+    // الأطراف اللي عندهم client_id لكن الموكل المربوط بيهم اتمسح/مش
+    // مرئي (حالة ORPHAN_PARTY/ORPHAN من partyDomainService.getPartyState).
+    // بيتحدد بمعرفة الفورم المستدعي (اللي عنده access لقائمة clients)،
+    // مش هنا — الدالة دي لسه معزولة عن أي مصدر بيانات خارجي عمدًا.
+    // ⚠️ إصلاح باگ 5.2: قبل كده أي طرف عنده client_id (بما فيه orphan)
+    // كان بيتخطى فحص صيغة الاسم بالكامل — دلوقتي الفحص بيتخطى بس للأطراف
+    // اللي لسه مربوطة فعليًا بموكل حي؛ الطرف الـorphan بياناته بقت حرة
+    // (نفس renderPartyReadOnly)، فلازم اسمه يخضع لنفس فحص أي اسم يدوي.
+    orphanedPartyIds?: Set<string>,
 ): PartiesValidationResult {
     const errors: PartyValidationError[] = [];
     const warnings: PartyValidationWarning[] = [];
@@ -136,7 +146,12 @@ export function validateParties(
         // حتى لو المستخدم مش لامس اسم الطرف ده أصلاً وعايز يعدّل حاجة
         // تانية غير مرتبطة. الفحص الصحيح لصيغة اسم الموكل مكانه clientValidation.ts
         // (وقت إضافة/تعديل الموكل نفسه من شاشته)، مش هنا.
-        if (p.client_id) continue;
+        // 🆕 (خطة توحيد قفل الطرف، المرحلة 2 — إصلاح باگ 5.5): إلا لو
+        // الطرف ده orphan فعليًا (موجود في orphanedPartyIds) — بيانات
+        // الموكل القديم بقت حرة ومصدرها الفورم نفسه دلوقتي (نفس
+        // renderPartyReadOnly المبني على getPartyState)، فلازم اسمه
+        // يخضع لنفس فحص أي اسم يدوي بدل ما يفضل من غير فحص للأبد.
+        if (p.client_id && !orphanedPartyIds?.has(p.id)) continue;
 
         if (p.side === 'plaintiff') {
             // 🆕 الطرف الأول: ثلاثي إلزامي دايمًا (خطأ مانع)، بغض النظر عن is_client.
