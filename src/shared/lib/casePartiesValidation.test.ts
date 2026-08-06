@@ -266,4 +266,48 @@ describe('validateParties', () => {
             expect(result.valid).toBe(true);
         });
     });
+
+    // ══════════════════════════════════════════════════════════
+    // 🆕 خطة توحيد قفل الطرف — المرحلة 2 (6 أغسطس 2026): باگ 5.5.
+    // orphanedPartyIds (Set) بيحدد الأطراف اللي client_id بتاعها مش
+    // موجود فعليًا (الموكل اتمسح) — دول لازم يخضعوا لفحص الاسم زي أي
+    // اسم يدوي، مش يتخطوا الفحص زي الطرف المربوط فعليًا بموكل حي.
+    // ══════════════════════════════════════════════════════════
+    describe('orphanedPartyIds — إصلاح باگ 5.5', () => {
+        it('بدون orphanedPartyIds خالص: نفس السلوك القديم — client_id بيتخطى فحص الاسم (توافق خلفي)', () => {
+            const parties = [
+                party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد', capacity: 'مدعي', national_id: '12345678901234', client_id: 'c1' }),
+            ];
+            const result = validateParties(parties);
+            expect(result.valid).toBe(true);
+        });
+
+        it('لو الطرف موجود في orphanedPartyIds: فحص الاسم الثلاثي بيتطبّق زي أي اسم يدوي (مش بيتخطى)', () => {
+            const parties = [
+                party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد', capacity: 'مدعي', national_id: '12345678901234', client_id: 'c1-deleted' }),
+            ];
+            const result = validateParties(parties, undefined, new Set(['p1']));
+            expect(result.valid).toBe(false);
+            expect(result.errors.some((e) => e.partyId === 'p1' && e.field === 'name')).toBe(true);
+        });
+
+        it('لو الطرف موجود في orphanedPartyIds واسمه صحيح فعلاً: بيعدي عادي', () => {
+            const parties = [
+                party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد محمد علي', capacity: 'مدعي', national_id: '12345678901234', client_id: 'c1-deleted' }),
+            ];
+            const result = validateParties(parties, undefined, new Set(['p1']));
+            expect(result.valid).toBe(true);
+        });
+
+        it('orphanedPartyIds بيأثر بس على الطرف المذكور فيها، مش كل الأطراف المربوطة', () => {
+            const parties = [
+                party({ id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد', capacity: 'مدعي', national_id: '12345678901234', client_id: 'c1-orphan' }),
+                party({ id: 'd1', side: 'defendant', is_client: false, name: 'محمود', capacity: 'مدعى عليه', client_id: 'c2-still-live' }),
+            ];
+            const result = validateParties(parties, undefined, new Set(['p1']));
+            // p1 (orphan) بيرفض لاسمه الناقص، d1 (لسه مربوط حقيقي) بيعدي
+            expect(result.errors.some((e) => e.partyId === 'p1')).toBe(true);
+            expect(result.errors.some((e) => e.partyId === 'd1')).toBe(false);
+        });
+    });
 });
