@@ -10,11 +10,10 @@ import type { MappedCase } from '../../../hooks/useAppData';
 //   - db.from('case_fees').select('total_fees,paid_fees').is('deleted_at',null)              [fetchGrandSummary]
 //   - db.from('case_fees').select('*',{count}).eq('status',s).is(...).order(...).range(...)  [fetchFees]
 //   - db.from('fee_payments').select('*').in('fee_id',ids).order('payment_date',...)         [fetchFees payments]
-//   - db.from('case_fees').insert([...]).select().single()                                    [handleSave create]
-//   - db.from('fee_payments').insert([...])                                                    [handleSave، دفعة مقدّمة وقت الإنشاء]
-//   - db.from('fee_payments').select('amount').eq('fee_id', id)                                [realPaid recompute — handleSave/handleDeletePayment]
-//   - db.from('case_fees').update({...}).eq('id', id)                                          [handleSave]
+//   - db.from('fee_payments').select('amount').eq('fee_id', id)                                [realPaid recompute — handleDeletePayment]
+//   - db.from('case_fees').update({...}).eq('id', id)                                          [handleSave — فرع التعديل (editId) عن طريق safeUpdate]
 //   - db.rpc('record_fee_payment', {...})                                                       [handleAddPayment — نداء ذرّي واحد]
+//   - db.rpc('create_fee_with_advance', {...})                                                  [handleSave — فرع الإنشاء، نداء ذرّي واحد (المرحلة 5)]
 // 🆕 (21 يوليو — المرحلة 6): حذف/تحديث حذف الدفعة (fee_payments)، والأرشفة/الاسترجاع/الحذف
 // النهائي لسجل الأتعاب (case_fees) بقوا بينادوا window.__dbWrite بدل db.from
 // مباشرة — نفس نمط useCaseDetailActions.test.ts (dbWriteMock() تحت):
@@ -190,35 +189,31 @@ describe('useFeesActions', () => {
   });
 
   describe('handleSave — إنشاء سجل أتعاب جديد', () => {
-    it('من غير دفعة مقدّمة → INSERT بـ paid_fees=0 و status محسوبة من computeFeeStatus(total,0)', async () => {
-      mockDb.setResult('case_fees:insert', { data: { id: 'new-fee-1' }, error: null });
+    // ⚡ FIX (المرحلة 5): إنشاء أتعاب جديدة (بدفعة مقدّمة أو من غيرها) بيعدي
+    // دلوقتي عن طريق db.rpc('create_fee_with_advance', …) — نداء ذرّي واحد
+    // بدل insert/insert/select/update منفصلين (راجع migration
+    // 01-create-fee-with-advance-rpc.sql). حساب paid_fees/status بقى مسؤولية
+    // الـRPC نفسها جوه القاعدة، مش الفرونت إند — فالتستات هنا بتتأكد من شكل
+    // الـpayload المبعوت للـRPC، مش من insert/update منفصلين بعد كده.
+
+    it('من غير دفعة مقدّمة → RPC بـ p_paid_amount=0', async () => {
+      mockDb.setResult('rpc:create_fee_with_advance', { data: { id: 'new-fee-1' }, error: null });
       const { result } = await renderFeesHook();
 
       act(() => { result.current.setForm({ ...result.current.form, case_id: 'case-1', total: '1000' }); });
       await act(async () => { await result.current.handleSave(); });
 
-      expect(mockDb.insertSpy).toHaveBeenCalledWith('case_fees', [expect.objectContaining({
-        case_id: 'case-1', case_title: 'قضية عمالية', total_fees: 1000, paid_fees: 0, status: 'deferred',
-      })]);
-      // مفيش دفعة مقدّمة → مفروض مفيش insert على fee_payments خالص
-      expect(mockDb.insertSpy).not.toHaveBeenCalledWith('fee_payments', expect.anything());
+      expect(mockDb.rpcSpy).toHaveBeenCalledWith('create_fee_with_advance', expect.objectContaining({
+        p_case_id: 'case-1', p_case_title: 'قضية عمالية', p_total_fees: 1000, p_paid_amount: 0,
+      }));
+      // مفيش أي insert/update يدوي على case_fees أو fee_payments من الفرونت إند
+      expect(mockDb.insertSpy).not.toHaveBeenCalled();
+      expect(mockDb.updateSpy).not.toHaveBeenCalled();
       expect(toast).toHaveBeenCalledWith('✅ تم إضافة الأتعاب');
     });
 
-    it('total=0 → status المحسوبة تبقى open (مطابق لمنطق computeFeeStatus الحقيقي)', async () => {
-      mockDb.setResult('case_fees:insert', { data: { id: 'new-fee-2' }, error: null });
-      const { result } = await renderFeesHook();
-
-      act(() => { result.current.setForm({ ...result.current.form, case_id: 'case-1', total: '0' }); });
-      await act(async () => { await result.current.handleSave(); });
-
-      expect(mockDb.insertSpy).toHaveBeenCalledWith('case_fees', [expect.objectContaining({ status: 'open' })]);
-    });
-
-    it('بدفعة مقدّمة (paid) → بيسجّل الدفعة في fee_payments، يعيد جمع realPaid، ويحدّث case_fees بالمجموع الفعلي', async () => {
-      mockDb.setResult('case_fees:insert', { data: { id: 'new-fee-3' }, error: null });
-      // المجموع الفعلي بعد تسجيل الدفعة (بيتقرا من fee_payments، مش من form.paid مباشرة)
-      mockDb.setResult('fee_payments:eqFeeId', { data: [{ amount: 300 }], error: null });
+    it('بدفعة مقدّمة (paid) → RPC بـ p_paid_amount والتاريخ المدخلين', async () => {
+      mockDb.setResult('rpc:create_fee_with_advance', { data: { id: 'new-fee-3' }, error: null });
       const { result } = await renderFeesHook();
 
       act(() => {
@@ -226,12 +221,23 @@ describe('useFeesActions', () => {
       });
       await act(async () => { await result.current.handleSave(); });
 
-      expect(mockDb.insertSpy).toHaveBeenCalledWith('fee_payments', [expect.objectContaining({
-        fee_id: 'new-fee-3', amount: 300, notes: 'مقدم أتعاب',
-      })]);
-      expect(mockDb.updateSpy).toHaveBeenCalledWith('case_fees', expect.objectContaining({
-        paid_fees: 300, status: 'deferred', last_payment_date: '2026-07-16',
+      expect(mockDb.rpcSpy).toHaveBeenCalledWith('create_fee_with_advance', expect.objectContaining({
+        p_case_id: 'case-1', p_total_fees: 1000, p_paid_amount: 300, p_payment_date: '2026-07-16',
       }));
+      expect(toast).toHaveBeenCalledWith('✅ تم إضافة الأتعاب');
+    });
+
+    it('فشل الـRPC → توست خطأ، مفيش تصفير للفورم', async () => {
+      mockDb.setResult('rpc:create_fee_with_advance', { data: null, error: { message: 'db error' } });
+      const { result } = await renderFeesHook();
+
+      act(() => { result.current.setForm({ ...result.current.form, case_id: 'case-1', total: '1000' }); });
+      await act(async () => { await result.current.handleSave(); });
+
+      expect(toast).toHaveBeenCalledWith('❌ فشل حفظ الأتعاب الجديدة — تحقق من الاتصال وأعد المحاولة', true);
+      // فشل الـRPC لازم يوقف الفلو فورًا — مفيش logActivity ولا توست نجاح
+      expect(logActivity).not.toHaveBeenCalled();
+      expect(toast).not.toHaveBeenCalledWith('✅ تم إضافة الأتعاب');
     });
   });
 
