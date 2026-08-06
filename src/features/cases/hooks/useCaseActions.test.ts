@@ -250,6 +250,27 @@ describe('useCaseActions', () => {
       expect(params.fetchCases).toHaveBeenCalled();
     });
 
+    // ⚡ FIX (المرحلة 6 — تنبيه عند فشل تسجيل الجلسة الأولى): الإدراج فى
+    // case_sessions كان بينفّذ من غير فحص نتيجته — لو فشل، القضية كانت
+    // بتتسجل عادي وتوست النجاح يظهر وكأن كل حاجة تمام، من غير أي إشارة
+    // لضياع الجلسة الأولى. دلوقتي بنلقط { error } ونظهر تنبيه صريح.
+    it('نجاح أونلاين لكن فشل INSERT الجلسة الأولى (id القضية موجود) → توست تحذير صريح، وبيكمل باقي الخطوات (مفيش توقف)', async () => {
+      dbWriteMock().mockResolvedValue({
+        error: null, offline: false, queued: false, data: { id: 'new-case-3' },
+      });
+      mockDb.setResult('case_sessions:insert', { data: null, error: { message: 'insert failed' } });
+      const params = makeParams();
+      const { handleSaveCase } = useCaseActions(params);
+
+      await handleSaveCase({ title: 'قضية بجلسة فاشلة', date: '2026-08-04' });
+
+      expect(toast).toHaveBeenCalledWith('⚠️ القضية اتسجلت، بس فشل تسجيل الجلسة الأولى — أضفها يدويًا من صفحة القضية', true);
+      // نفس مبدأ فشل أطراف الدعوى الجزئي: توست تحذير + استمرار الفلو (مفيش توقف مبكر)
+      expect(toast).toHaveBeenCalledWith('✅ تم الحفظ في نظام سند!');
+      expect(params.fetchCases).toHaveBeenCalled();
+      expect(params.setShowCaseModal).toHaveBeenCalledWith(false);
+    });
+
     it('offline/queued مع تاريخ جلسة → بيحفظ الجلسة في الطابور بـ _offlineCaseTitle، توست حفظ محلي، وتحديث تفاؤلي للـ state', async () => {
       dbWriteMock().mockResolvedValue({
         error: null, offline: true, queued: true,
@@ -544,6 +565,27 @@ describe('useCaseActions', () => {
       expect(mockDb.insertSpy).toHaveBeenCalledWith('case_sessions', [expect.objectContaining({
         case_id: 'case-1', session_date: '2026-09-01', session_time: 'مسائي',
       })]);
+    });
+
+    // ⚡ FIX (المرحلة 6 — امتداد): نفس بگ handleSaveCase — INSERT الجلسة
+    // الجديدة كان بينفّذ من غير فحص نتيجته. لو فشل، التعديل على القضية
+    // نفسه كان ينجح (توست نجاح عادي) من غير أي إشارة لضياع الجلسة.
+    it('تغيير تاريخ الجلسة لكن فشل INSERT الجلسة الجديدة → توست تحذير صريح، وبيكمل باقي الخطوات (مفيش توقف)', async () => {
+      dbWriteMock().mockResolvedValue({
+        error: null, offline: false, queued: false, conflict: false,
+        data: { updated_at: '2026-07-16T12:00:00.000Z' },
+      });
+      mockDb.setResult('case_sessions:maybeSingle', { data: null, error: null });
+      mockDb.setResult('case_sessions:insert', { data: null, error: { message: 'insert failed' } });
+      const existingCase = makeCase({ id: 'case-1', date: '2026-07-01' });
+      const params = makeParams({ cases: [existingCase], selectedCase: existingCase });
+      const { handleUpdateCase } = useCaseActions(params);
+
+      await handleUpdateCase('case-1', { title: 'قضية بجلسة تعديل فاشلة', date: '2026-09-02' });
+
+      expect(toast).toHaveBeenCalledWith('⚠️ التعديل اتحفظ، بس فشل تسجيل الجلسة الجديدة — أضفها يدويًا من صفحة القضية', true);
+      expect(toast).toHaveBeenCalledWith('✅ تم تحديث القضية');
+      expect(params.fetchCases).toHaveBeenCalled();
     });
 
     it('تغيير تاريخ الجلسة لكن فيه جلسة موجودة بالفعل بنفس التاريخ → مفيش INSERT مكرر', async () => {
