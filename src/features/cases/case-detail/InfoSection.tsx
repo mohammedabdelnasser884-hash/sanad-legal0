@@ -8,6 +8,8 @@ import { findClientDataMismatches, type FieldMismatch } from '../../calendar/hoo
 // 🆕 (خطة "المسمى القانوني" — مرحلة 5): منطق موحّد لعرض المسمى القانوني
 // عند تعدد الأشخاص تحت طرف واحد — نفس الدالة مستخدمة في هيدر CaseDetailView.tsx.
 import { summarizePartySide } from '../../../shared/parties/partyDisplay';
+// 🆕 (خطة توحيد قفل الطرف، المرحلة 2 — 6 أغسطس 2026)
+import { isOrphanedLink } from '../../../shared/parties/partyDomainService';
 
 interface InfoSectionProps {
   caseData: MappedCase;
@@ -74,7 +76,9 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
   // يعني القضية *كانت* مربوطة بموكل اتمسح (soft-deleted) بعد كده، مش
   // إن القضية دي مكانتش مربوطة بحد أصلاً. الفرق مهم للمستخدم عشان
   // يفهم ليه فجأة الحقول رجعت حرة.
-  const isOrphaned = !!caseData.client_id && !client;
+  // ⚡ CHANGED (خطة توحيد قفل الطرف، المرحلة 2): isOrphanedLink() الموحّدة
+  // بدل الشرط اليدوي — نفس النتيجة بالظبط.
+  const isOrphaned = isOrphanedLink(caseData.client_id, client);
   const [linkStep, setLinkStep] = useState<'closed' | 'choice' | 'pickExisting' | 'confirmMismatch'>('closed');
   const [pickedClientId, setPickedClientId] = useState('');
   // ⚡ NEW (Phase 3 — 4 أغسطس 2026): null = المسار القديم ("ربط بموكل
