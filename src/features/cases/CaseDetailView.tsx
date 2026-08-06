@@ -28,6 +28,11 @@ import type { ClientModalContext } from '../clients/hooks/useClientActions';
 // المنفصلة (plaintiff/defendant) المستخدمة سابقًا في الهيدر بس (بند 4 من
 // قسم 5 في الخطة).
 import { summarizePartySide } from '../../shared/parties/partyDisplay';
+// 🆕 (خطة توحيد قفل الطرف — المرحلة 3، سد فجوة 5.3، 6 أغسطس 2026): مؤشر
+// orphan في الهيدر — كان مؤجل عمدًا في المرحلة 2 (linkedClients كانت
+// بتتجاهل الأطراف الـorphan بصمت، بلا أي مؤشر) لحد ما مرحلة الـBadges
+// تجهز مصدر الشارة الموحّد.
+import { isPartyOrphaned, type PartyDomainContext } from '../../shared/parties/partyDomainService';
 
 // شكل عنصر حالة القضية (نفس الحقول المستخدمة فعليًا في مصفوفة statuses تحت)
 interface CaseStatusOption {
@@ -166,6 +171,16 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
         }
         return Array.from(byId.values());
     }, [client, caseParties, clients]);
+
+    // ⚡ NEW (المرحلة 3 — سد فجوة 5.3): عدد الأطراف عندهم client_id لكن
+    // الموكل المربوط بيه اتحذف/مش مرئي (orphan) — بغض النظر لو أساسي
+    // (caseData.client_id) أو ثانوي، getPartyState/isPartyOrphaned هي
+    // اللي بتقرر. بيتحسب مرة واحدة لكل تغيير في caseParties/clients،
+    // نفس نمط linkedClients فوق بالظبط.
+    const orphanedPartiesCount = React.useMemo(() => {
+        const ctx: PartyDomainContext = { primaryClientId: caseData.client_id || null, clients };
+        return caseParties.filter((party) => isPartyOrphaned(party, ctx)).length;
+    }, [caseParties, clients, caseData.client_id]);
 
     // لما مودال الواتساب يتفتح، بنختار افتراضيًا أول موكل عنده رقم فعلي
     // (أو أول واحد في القايمة لو مفيش حد عنده رقم) — نفس السلوك القديم
@@ -543,12 +558,21 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
                     // ⚡ FIX (تقرير التحقّق — النقطة 4 + الإصلاح 2): كان بيعرض
                     // `client` (الأساسي القديم) بس — دلوقتي بيعرض كل الموكلين
                     // المرتبطين فعليًا (linkedClients)، بعنوان "الموكل"/"الموكلون (N)".
-                    linkedClients.length > 0 && React.createElement('div', {className: "flex items-center gap-1.5 flex-wrap"},
-                        React.createElement('span', {className: "text-[9px] text-white/40 font-bold"}, linkedClients.length > 1 ? `الموكلون (${linkedClients.length})` : "الموكل"),
-                        ...linkedClients.map((c: ClientRow) => React.createElement('span', {key: c.id, className: "flex items-center gap-1"},
-                            React.createElement('span', {className: "text-[10px] text-emerald-400 font-black"}, c.full_name),
-                            c.phone && React.createElement('a',{href:`tel:${c.phone}`,className:"text-[9px] text-slate-500"},c.phone)
-                        ))
+                    (linkedClients.length > 0 || orphanedPartiesCount > 0) && React.createElement('div', {className: "flex items-center gap-1.5 flex-wrap"},
+                        linkedClients.length > 0 && React.createElement(React.Fragment, null,
+                            React.createElement('span', {className: "text-[9px] text-white/40 font-bold"}, linkedClients.length > 1 ? `الموكلون (${linkedClients.length})` : "الموكل"),
+                            ...linkedClients.map((c: ClientRow) => React.createElement('span', {key: c.id, className: "flex items-center gap-1"},
+                                React.createElement('span', {className: "text-[10px] text-emerald-400 font-black"}, c.full_name),
+                                c.phone && React.createElement('a',{href:`tel:${c.phone}`,className:"text-[9px] text-slate-500"},c.phone)
+                            ))
+                        ),
+                        // ⚡ NEW (المرحلة 3 — سد فجوة 5.3): شارة "موكل محذوف" لو فيه
+                        // طرف عنده client_id لكن الموكل اتمسح — بتظهر جنب قائمة
+                        // الموكلين الأحياء، أو لوحدها لو مفيش أي موكل حي أصلًا.
+                        orphanedPartiesCount > 0 && React.createElement('span', {
+                            className: "text-[9px] px-1.5 py-0.5 rounded-full border text-violet-400 bg-violet-500/10 border-violet-500/20 font-bold",
+                            'data-testid': 'case-detail-orphaned-clients-badge',
+                        }, `🟣 ${orphanedPartiesCount} موكل محذوف`)
                     )
                 )
             ),
