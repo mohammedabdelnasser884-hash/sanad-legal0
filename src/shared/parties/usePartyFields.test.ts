@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { usePartyFields } from './usePartyFields';
+import type { PartyDomainContext } from './partyDomainService';
 
 // ══════════════════════════════════════════════════════════════════
 // تستات usePartyFields — خطة تعدد الأطراف، مرحلة 3 (22 يوليو 2026).
@@ -117,6 +118,42 @@ describe('usePartyFields', () => {
         act(() => result.current.updateParty(result.current.defendants[0].id, 'name', 'محمود سعيد إبراهيم'));
         act(() => result.current.updateParty(result.current.defendants[0].id, 'capacity', 'مدعى عليه'));
 
+        expect(result.current.validation.valid).toBe(true);
+    });
+
+    // ══════════════════════════════════════════════════════════
+    // 🆕 خطة توحيد قفل الطرف — المرحلة 2 (6 أغسطس 2026): domainContext
+    // بيغذّي validateParties بالأطراف الـorphan فعليًا (باگ 5.5).
+    // ══════════════════════════════════════════════════════════
+    it('من غير domainContext: طرف عنده client_id بيعدي فحص الاسم زي ما كان (توافق خلفي)', () => {
+        const { result } = renderHook(() => usePartyFields({
+            initialPlaintiffs: [
+                { id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد', capacity: 'مدعي', national_id: '12345678901234', address: '', power_of_attorney: '', client_id: 'c1' },
+            ],
+        }));
+        expect(result.current.validation.valid).toBe(true);
+    });
+
+    it('مع domainContext وطرف orphan (client_id مش موجود في clients): فحص الاسم بيتفعّل ويرفض', () => {
+        const ctx: PartyDomainContext = { primaryClientId: null, clients: [] }; // c1 مش موجود خالص → orphan
+        const { result } = renderHook(() => usePartyFields({
+            initialPlaintiffs: [
+                { id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد', capacity: 'مدعي', national_id: '12345678901234', address: '', power_of_attorney: '', client_id: 'c1' },
+            ],
+            domainContext: ctx,
+        }));
+        expect(result.current.validation.valid).toBe(false);
+        expect(result.current.validation.errors.some((e) => e.partyId === 'p1' && e.field === 'name')).toBe(true);
+    });
+
+    it('مع domainContext لكن الموكل لسه موجود في clients: مش orphan — فحص الاسم لسه متخطّى', () => {
+        const ctx: PartyDomainContext = { primaryClientId: null, clients: [{ id: 'c1' }] };
+        const { result } = renderHook(() => usePartyFields({
+            initialPlaintiffs: [
+                { id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد', capacity: 'مدعي', national_id: '12345678901234', address: '', power_of_attorney: '', client_id: 'c1' },
+            ],
+            domainContext: ctx,
+        }));
         expect(result.current.validation.valid).toBe(true);
     });
 
