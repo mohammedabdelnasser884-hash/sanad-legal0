@@ -3,6 +3,7 @@ import { PartySideCard } from './PartySideCard';
 import { PartySubform } from './PartySubform';
 import type { UsePartyFieldsReturn } from './usePartyFields';
 import type { PartySide, PartyFieldValue } from './partyTypes';
+import type { PartyLinkState } from './partyDomainService';
 
 // ══════════════════════════════════════════════════════════════
 //  PartyFieldsGroup — بلوك "أطراف الدعوى" الكامل. بدل العرض المفتوح
@@ -20,9 +21,13 @@ interface PartyFieldsGroupProps {
     testIdPrefix?: string;
     renderPartyExtra?: (party: PartyFieldValue) => React.ReactNode;
     renderPartyReadOnly?: (party: PartyFieldValue) => boolean;
+    // ⚡ NEW (خطة توحيد قفل الطرف — المرحلة 3، Badges/UI، 6 أغسطس 2026):
+    // اختيارية — بتتمرر لـPartySideCard (شارة مجمّعة على الكارت المطوي)
+    // ولـPartySubform → PartyFields (شارة كل شخص لوحده).
+    getPartyState?: (party: PartyFieldValue) => PartyLinkState;
 }
 
-export function PartyFieldsGroup({ controller, testIdPrefix, renderPartyExtra, renderPartyReadOnly }: PartyFieldsGroupProps) {
+export function PartyFieldsGroup({ controller, testIdPrefix, renderPartyExtra, renderPartyReadOnly, getPartyState }: PartyFieldsGroupProps) {
     const { plaintiffs, defendants, validation } = controller;
 
     // أي كارت مفتوح دلوقتي (طرف واحد بس ممكن يتفتح في نفس الوقت) — null
@@ -47,6 +52,7 @@ export function PartyFieldsGroup({ controller, testIdPrefix, renderPartyExtra, r
             errors: validation.errors,
             dimEmpty: plaintiffsEmpty && !defendantsEmpty,
             onOpen: () => setOpenSide('plaintiff'),
+            getPartyState,
         }),
         React.createElement(PartySideCard, {
             side: 'defendant',
@@ -55,6 +61,7 @@ export function PartyFieldsGroup({ controller, testIdPrefix, renderPartyExtra, r
             errors: validation.errors,
             dimEmpty: defendantsEmpty && !plaintiffsEmpty,
             onOpen: () => setOpenSide('defendant'),
+            getPartyState,
         }),
 
         generalError && React.createElement('p', { className: 'text-[10px] text-rose-400 mt-2', 'data-testid': testIdPrefix ? `${testIdPrefix}-general-error` : undefined }, generalError),
@@ -68,6 +75,7 @@ export function PartyFieldsGroup({ controller, testIdPrefix, renderPartyExtra, r
             testIdPrefix,
             renderPartyExtra,
             renderPartyReadOnly,
+            getPartyState,
             onClose: () => setOpenSide(null),
         }),
         React.createElement(PartySubform, {
@@ -79,6 +87,7 @@ export function PartyFieldsGroup({ controller, testIdPrefix, renderPartyExtra, r
             testIdPrefix,
             renderPartyExtra,
             renderPartyReadOnly,
+            getPartyState,
             onClose: () => setOpenSide(null),
         })
     );
