@@ -339,7 +339,15 @@ export function useCaseActions(params: {
             // بنفس العنوان اتسجلوا في نفس اللحظة تقريبًا)
             const newCaseId: string | null = insertedCase?.id || null;
             if (form.date && newCaseId) {
-                await db.from('case_sessions').insert([{
+                // 🔒 FIX (المرحلة 6 — تنبيه عند فشل تسجيل الجلسة الأولى):
+                // الإدراج ده كان بينفّذ من غير أي فحص لنتيجته — لو فشل (مشكلة
+                // شبكة/RLS/أي سبب تاني)، القضية كانت بتتسجل عادي والمستخدم
+                // ياخد "✅ تم الحفظ في نظام سند!" وكأن كل حاجة تمام، بينما
+                // الجلسة الأولى ضاعت بصمت تمامًا من غير أي أثر. دلوقتي بنلقط
+                // { error } ونظهر نفس تنبيه "الجلسة الأولى محتاجة تتضاف يدويًا"
+                // المستخدم فعليًا فى حالة newCaseId المفقود تحت — نفس الرسالة،
+                // نفس القناة، السبب مختلف بس النتيجة للمستخدم واحدة.
+                const { error: sessionError } = await db.from('case_sessions').insert([{
                     case_id: newCaseId,
                     session_date: form.date,
                     session_time: form.session_time || 'صباحي',
@@ -349,6 +357,9 @@ export function useCaseActions(params: {
                     result: null,
                     next_action: null,
                 }]);
+                if (sessionError) {
+                    toast('⚠️ القضية اتسجلت، بس فشل تسجيل الجلسة الأولى — أضفها يدويًا من صفحة القضية', true);
+                }
             } else if (form.date && !newCaseId) {
                 // حالة نادرة: القضية اتسجلت بنجاح لكن السيرفر معادش الصف
                 // المُدرج (مثلاً سياسة RLS بتمنع SELECT بعد INSERT) — القضية
@@ -690,7 +701,11 @@ export function useCaseActions(params: {
                             .eq('session_date', form.date)
                             .maybeSingle();
                         if (!existing) {
-                            await db.from('case_sessions').insert([{
+                            // 🔒 FIX (المرحلة 6 — امتداد): نفس بگ handleSaveCase بالظبط
+                            // (الإدراج كان بينفّذ من غير فحص نتيجته) — لو فشل هنا، التعديل
+                            // على القضية نفسه كان بينجح والمستخدم مايعرفش إن الجلسة
+                            // الجديدة ضاعت بصمت. نفس التنبيه ونفس فلسفة الاستمرار.
+                            const { error: sessionError } = await db.from('case_sessions').insert([{
                                 case_id: caseId,
                                 session_date: form.date,
                                 session_time: form.session_time || 'صباحي',
@@ -700,6 +715,9 @@ export function useCaseActions(params: {
                                 result: null,
                                 next_action: null,
                             }]);
+                            if (sessionError) {
+                                toast('⚠️ التعديل اتحفظ، بس فشل تسجيل الجلسة الجديدة — أضفها يدويًا من صفحة القضية', true);
+                            }
                         }
                     }
                 }
