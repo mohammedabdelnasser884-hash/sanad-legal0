@@ -1,6 +1,7 @@
 import React from 'react';
 import type { PartyFieldValue, PartySide } from './partyTypes';
 import type { PartyValidationError } from '../lib/casePartiesValidation';
+import { getPartyStateBadge, isOrphanState, isLinkedState, type PartyLinkState } from './partyDomainService';
 
 // ══════════════════════════════════════════════════════════════
 //  PartySideCard — الكارت المطوي الواحد لطرف كامل (الطرف الأول/الثاني)،
@@ -21,6 +22,12 @@ interface PartySideCardProps {
     // تبان بلون أفتح توجّه الانتباه تلقائيًا (بند 3-د من الخطة).
     dimEmpty: boolean;
     onOpen: () => void;
+    // ⚡ NEW (خطة توحيد قفل الطرف — المرحلة 3، Badges/UI، 6 أغسطس 2026):
+    // اختيارية — لو اتبعتت، بتتحسب حالة كل شخص جوه الجهة دي وتتعرض شارة
+    // مجمّعة واحدة على الكارت المطوي نفسه (قبل حتى ما يتفتح النموذج
+    // الفرعي)، عشان orphan/linked يبانوا من نظرة واحدة على مستوى الجهة.
+    // أولوية العرض: orphan (لازم انتباه) قبل linked (معلومة عادية).
+    getPartyState?: (party: PartyFieldValue) => PartyLinkState;
 }
 
 // خرائط قصيرة لتحويل حقل الخطأ لعبارة مختصرة تظهر جوه الكارت نفسه، بدل
@@ -43,8 +50,20 @@ function shortReason(error: PartyValidationError): string {
     return 'بيانات ناقصة';
 }
 
-export function PartySideCard({ side, title, list, errors, dimEmpty, onOpen }: PartySideCardProps) {
+export function PartySideCard({ side, title, list, errors, dimEmpty, onOpen, getPartyState }: PartySideCardProps) {
     const partyIds = new Set(list.map((p) => p.id));
+
+    // ⚡ NEW (المرحلة 3): شارة مجمّعة على مستوى الجهة كلها — orphan (أي
+    // شخص فيها) بتغلب على linked (كلهم مربوطين بموكلين أحياء)، وبترجع
+    // null لو مفيش أي حالة تستاهل شارة (كلهم MANUAL، أو getPartyState مش
+    // متبعتة أصلًا).
+    const sideBadge = (() => {
+        if (!getPartyState) return null;
+        const states = list.map(getPartyState);
+        if (states.some(isOrphanState)) return getPartyStateBadge('ORPHAN_PARTY');
+        if (states.some(isLinkedState)) return getPartyStateBadge('LINKED');
+        return null;
+    })();
     const sideError = errors.find(
         (e) => partyIds.has(e.partyId) || (e.partyId === '' && e.field === 'legal_title' && e.side === side)
     );
@@ -91,7 +110,13 @@ export function PartySideCard({ side, title, list, errors, dimEmpty, onOpen }: P
         'data-testid': `party-side-card-${side}`,
     },
         React.createElement('div', { className: 'flex items-center justify-between' },
-            React.createElement('span', { className: titleCls }, sideError ? `⚠️ ${title}` : title),
+            React.createElement('div', { className: 'flex items-center gap-1.5' },
+                React.createElement('span', { className: titleCls }, sideError ? `⚠️ ${title}` : title),
+                !sideError && sideBadge && React.createElement('span', {
+                    className: `text-[8px] font-bold px-1.5 py-0.5 rounded-full border ${sideBadge.className}`,
+                    'data-testid': `party-side-card-${side}-state-badge`,
+                }, `${sideBadge.emoji} ${sideBadge.label}`)
+            ),
             React.createElement('span', { className: 'text-slate-500 text-sm' }, '›')
         ),
         React.createElement('p', { className: bodyCls }, bodyText)
