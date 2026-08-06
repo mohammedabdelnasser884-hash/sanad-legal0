@@ -13,6 +13,8 @@
 import { useCallback, useMemo, useState } from 'react';
 import { createEmptyParty, type PartyFieldValue, type PartySide } from './partyTypes';
 import { validateParties, type PartiesValidationResult, type PartyLegalTitles } from '../lib/casePartiesValidation';
+// 🆕 (خطة توحيد قفل الطرف، المرحلة 2 — 6 أغسطس 2026)
+import { isPartyOrphaned, type PartyDomainContext } from './partyDomainService';
 
 // id محلي للفورم بس — نفس نمط توليد offlineTempId الفعلي في
 // useCaseActions.ts (`tmp-${Date.now()}-${random}`)، بادئة مختلفة
@@ -30,6 +32,14 @@ export interface UsePartyFieldsOptions {
     // defendant_legal_title (قضية/جلسة قائمة بالفعل). لو مش متبعتة: تبدأ
     // فاضية زي أي قضية/جلسة جديدة.
     initialLegalTitles?: PartyLegalTitles;
+    // 🆕 (خطة توحيد قفل الطرف، المرحلة 2 — 6 أغسطس 2026): سياق الربط
+    // الحيّ (primaryClientId + قائمة clients المتاحة للمستخدم الحالي) —
+    // بيتمرر *بقيمته الحالية في كل render* (مش هيتقفل زي initialPlaintiffs،
+    // ده مش قيمة ابتدائية بس). بيُستخدم فقط لحساب الأطراف الـorphan
+    // (getPartyState) عشان فاليديشن الاسم في casePartiesValidation.ts
+    // تتفرق بين طرف مربوط فعليًا وطرف orphan (باگ 5.5). مش متبعتة =
+    // مفيش أطراف orphan تتحسب (نفس السلوك القديم قبل التوحيد).
+    domainContext?: PartyDomainContext;
 }
 
 export interface UsePartyFieldsReturn {
@@ -113,7 +123,24 @@ export function usePartyFields(options: UsePartyFieldsOptions = {}): UsePartyFie
         setParties((prev) => prev.map((p) => (p.id === id ? { ...p, is_client: !p.is_client } : p)));
     }, []);
 
-    const validation = useMemo(() => validateParties(parties, legalTitles), [parties, legalTitles]);
+    // 🆕 (المرحلة 2): محسوبة من domainContext الحالي (لو اتبعت) — مش
+    // state منفصل، عشان تتحدّث تلقائيًا مع أي تغيير في parties أو
+    // domainContext (زي لما clients تتحمّل لأول مرة من الأب).
+    const orphanedPartyIds = useMemo(() => {
+        if (!options.domainContext) return undefined;
+        const ctx = options.domainContext;
+        const ids = new Set<string>();
+        for (const p of parties) {
+            if (isPartyOrphaned(p, ctx)) ids.add(p.id);
+        }
+        return ids;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [parties, options.domainContext]);
+
+    const validation = useMemo(
+        () => validateParties(parties, legalTitles, orphanedPartyIds),
+        [parties, legalTitles, orphanedPartyIds],
+    );
 
     // 🆕 (خطة حفظ المسودات التلقائي — 1 أغسطس 2026): استبدال كامل، بلا
     // فحوصات "أول طرف في الجهة" زي removeParty — الاستدعاء الوحيد المتوقع
