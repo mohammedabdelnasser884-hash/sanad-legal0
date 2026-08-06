@@ -248,27 +248,27 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
                 setSaving(false);
                 return;
             }
-            const {data:inserted, error} = await db.from('case_fees')
-                .insert([{...payload, paid_fees:0, status: computeFeeStatus(payload.total_fees, initialPaidAmount)}]).select().single();
+            // 🔒 FIX (المرحلة 5 — RPC ذرّية create_fee_with_advance): كان ده
+            // لحد 4 استعلامات منفصلة (insert case_fees → insert fee_payments
+            // → select لإعادة حساب المجموع → update case_fees) بلا transaction
+            // حقيقية بينهم — فشل نت فى النص كان بيسيب سجل أتعاب متسجل بدفعة
+            // مقدّمة فى fee_payments بينما case_fees.paid_fees/status لسه صفر
+            // (نفس مشكلة H-2 اللي اتحلت فى handleAddPayment/المرحلة 4، بس
+            // هنا فى مسار الإنشاء). دلوقتي الأربعة بقوا جوه RPC واحدة بتتنفذ
+            // فى transaction حقيقية على مستوى القاعدة — إما تنجح كلها أو
+            // ترجع كلها.
+            const { data: inserted, error } = await db.rpc('create_fee_with_advance', {
+                p_case_id: payload.case_id,
+                p_case_title: payload.case_title,
+                p_client_id: payload.client_id,
+                p_client_name: payload.client_name,
+                p_receiver: payload.receiver,
+                p_total_fees: payload.total_fees,
+                p_notes: payload.notes,
+                p_paid_amount: initialPaidAmount,
+                p_payment_date: form.payment_date || null,
+            });
             if(error){ toast('❌ فشل حفظ الأتعاب الجديدة — تحقق من الاتصال وأعد المحاولة', true); setSaving(false); return; }
-            if(inserted && initialPaidAmount>0){
-                await db.from('fee_payments').insert([{
-                    fee_id: inserted.id,
-                    amount: initialPaidAmount,
-                    payment_date: form.payment_date||new Date().toISOString().slice(0,10),
-                    notes: 'مقدم أتعاب',
-                    received_by: form.receiver||null,
-                    client_id: clientId,
-                    client_name: clientName
-                }]);
-                const {data:allPays} = await db.from('fee_payments').select('amount').eq('fee_id',inserted.id);
-                const realPaid = (allPays||[]).reduce((s: number, p: { amount: number | null }) => s+(p.amount||0), 0);
-                await db.from('case_fees').update({
-                    paid_fees: realPaid,
-                    status: computeFeeStatus(payload.total_fees, realPaid),
-                    last_payment_date: form.payment_date||new Date().toISOString().slice(0,10)
-                }).eq('id',inserted.id);
-            }
             toast('✅ تم إضافة الأتعاب');
             logActivity(db, 'إضافة أتعاب', {
                 entity_type: 'fee', entity_id: inserted?.id, details: clientName || form.case_id,
