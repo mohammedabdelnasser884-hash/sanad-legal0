@@ -852,7 +852,7 @@ describe('useSessionLinking', () => {
       await act(async () => { await result.current.confirmLinkToExistingClient(); });
 
       expect(dbWrite.callsFor('UPDATE:case_parties')[0]).toEqual(expect.objectContaining({
-        id: 'party-2', data: { client_id: 'client-9' },
+        id: 'party-2', data: { client_id: 'client-9', name: 'محمود علي', national_id: '', power_of_attorney: '', address: '' },
       }));
       expect(dbWrite.callsFor('UPDATE:case_sessions')).toHaveLength(0);
       expect(result.current.linkedIdlePartyIds.has('party-2')).toBe(true);
@@ -873,7 +873,7 @@ describe('useSessionLinking', () => {
       await act(async () => { await result.current.confirmLinkToExistingClient(); });
 
       expect(dbWrite.callsFor('UPDATE:case_parties')[0]).toEqual(expect.objectContaining({
-        id: 'party-1', data: { client_id: 'client-1' },
+        id: 'party-1', data: { client_id: 'client-1', name: 'أحمد محمد', national_id: '', power_of_attorney: '', address: '' },
       }));
       expect(dbWrite.callsFor('UPDATE:case_sessions')[0]).toEqual(expect.objectContaining({
         id: 'session-y', data: { client_id: 'client-1' },
