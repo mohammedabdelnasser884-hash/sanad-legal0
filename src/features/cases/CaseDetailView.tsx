@@ -67,14 +67,14 @@ interface CaseDetailViewProps {
     // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، Phase 3 — 4 أغسطس 2026): مرآة
     // لـ onLinkClient فوق، بس بيربط طرف بعينه من case_parties (بدل القضية
     // كلها) — شوف useCaseActions.ts (handleLinkClientForParty) وInfoSection.tsx.
-    onLinkClientForParty?: (caseId: string, partyId: string, clientId: string, isPrimaryParty: boolean, onAfterLink: () => void) => void | Promise<void>;
+    onLinkClientForParty?: (caseId: string, partyId: string, clientId: string, isPrimaryParty: boolean, knownUpdatedAt: string | null, onAfterLink: () => void) => void | Promise<void>;
     // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 4): زرار "فك الربط" جوه
     // EditCaseModal — بيصفّر client_id بس (handleUnlinkClient في App.tsx).
     onUnlinkClient?: (caseId: string) => void | Promise<void>;
     // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، "إصلاح 5" — 5 أغسطس 2026): مرآة
     // لـ onUnlinkClient فوق بس لطرف بعينه من case_parties (بدل القضية
     // كلها) — شوف useCaseActions.ts (handleUnlinkClientForParty) وInfoSection.tsx.
-    onUnlinkClientForParty?: (caseId: string, partyId: string, isPrimaryParty: boolean, onAfterLink: () => void) => void | Promise<void>;
+    onUnlinkClientForParty?: (caseId: string, partyId: string, isPrimaryParty: boolean, knownUpdatedAt: string | null, onAfterLink: () => void) => void | Promise<void>;
     // ⚡ CHANGED (خطة توحيد إنشاء الموكل، Phase 1): مبقتش بترجع نتيجة تكرار
     // ولا async — مجرد فتح لموديل "إنشاء موكل جديد" الموحّد (NewClientModal)
     // مليان ببيانات المدعي. شوف App.tsx (handleOpenCreateClientForCase).
@@ -626,9 +626,9 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
                 // caseParties (والوسم/الزرار الخاص بالطرف ده) تتحدّث فورًا،
                 // بنفس نمط onCreateAndLinkClientForParty تحت بالظبط.
                 onLinkClientForParty: onLinkClientForParty
-                    ? async (partyId: string, clientId: string, isPrimaryParty: boolean) => {
+                    ? async (partyId: string, clientId: string, isPrimaryParty: boolean, knownUpdatedAt: string | null) => {
                         setLinkingClient(true);
-                        try { await onLinkClientForParty(caseData.id, partyId, clientId, isPrimaryParty, () => fetchSessions()); }
+                        try { await onLinkClientForParty(caseData.id, partyId, clientId, isPrimaryParty, knownUpdatedAt, () => fetchSessions()); }
                         finally { setLinkingClient(false); }
                       }
                     : undefined,
@@ -653,9 +653,9 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
                 // caseParties (والوسم/الزرار الخاص بالطرف ده) تتحدّث فورًا،
                 // بنفس نمط onLinkClientForParty فوق بالظبط.
                 onUnlinkClientForParty: onUnlinkClientForParty
-                    ? async (partyId: string, isPrimaryParty: boolean) => {
+                    ? async (partyId: string, isPrimaryParty: boolean, knownUpdatedAt: string | null) => {
                         setUnlinkingClient(true);
-                        try { await onUnlinkClientForParty(caseData.id, partyId, isPrimaryParty, () => fetchSessions()); }
+                        try { await onUnlinkClientForParty(caseData.id, partyId, isPrimaryParty, knownUpdatedAt, () => fetchSessions()); }
                         finally { setUnlinkingClient(false); }
                       }
                     : undefined,
