@@ -31,6 +31,7 @@ const recalcNextHearing = vi.fn();
 vi.mock('../../../shared/lib/dataAccess', () => ({ recalcNextHearing: (...a: unknown[]) => recalcNextHearing(...a) }));
 
 import { useSessionLinking } from './useSessionLinking';
+import type { SessionWithLegacyFields } from './useSessionLinking';
 import type { CaseSessionRow } from '../../../types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '../../../database.types';
@@ -133,14 +134,14 @@ function makeMockDb(
   } as unknown as SupabaseClient<Database> & { ilikeSpy: typeof ilikeSpy };
 }
 
-function makeSession(overrides: Partial<CaseSessionRow> = {}): CaseSessionRow {
+function makeSession(overrides: Partial<SessionWithLegacyFields> = {}): SessionWithLegacyFields {
   return {
     id: 'session-1', title: null, case_number: '10 لسنة 2026', court: 'محكمة الجيزة', case_type: 'مدني',
     plaintiff: 'أحمد محمد', plaintiff_role: null, plaintiff_national_id: null, plaintiff_power_of_attorney: null,
     defendant: null, defendant_role: null, defendant_national_id: null, circuit_number: null,
     session_hall: null, session_time: null, court_level: null, secretary_hall: null, secretary_name: null,
     secretary_mobile: null, ...overrides,
-  } as CaseSessionRow;
+  } as SessionWithLegacyFields;
 }
 
 describe('useSessionLinking', () => {
@@ -847,7 +848,7 @@ describe('useSessionLinking', () => {
       await waitFor(() => { expect(result.current.idlePartyList).toHaveLength(2); });
 
       act(() => { result.current.startExistingClientSearch(result.current.idlePartyList[1]); });
-      act(() => { result.current.setSelectedExistingClient({ id: 'client-9', full_name: 'محمود علي', client_name: null, national_id: null, cr_number: null }); });
+      act(() => { result.current.setSelectedExistingClient({ id: 'client-9', full_name: 'محمود علي', client_name: null, national_id: null, cr_number: null, address: null }); });
 
       await act(async () => { await result.current.confirmLinkToExistingClient(); });
 
@@ -868,7 +869,7 @@ describe('useSessionLinking', () => {
       await waitFor(() => { expect(result.current.idlePartyList).toHaveLength(2); });
 
       act(() => { result.current.startExistingClientSearch(result.current.idlePartyList[0]); });
-      act(() => { result.current.setSelectedExistingClient({ id: 'client-1', full_name: 'أحمد محمد', client_name: null, national_id: null, cr_number: null }); });
+      act(() => { result.current.setSelectedExistingClient({ id: 'client-1', full_name: 'أحمد محمد', client_name: null, national_id: null, cr_number: null, address: null }); });
 
       await act(async () => { await result.current.confirmLinkToExistingClient(); });
 
@@ -885,7 +886,7 @@ describe('useSessionLinking', () => {
       const session = makeSession({ id: 'session-legacy', plaintiff: 'اسم قديم' });
       const { result } = renderHook(() => useSessionLinking(session, mockDb, vi.fn()));
 
-      act(() => { result.current.setSelectedExistingClient({ id: 'client-legacy', full_name: 'موكل قديم', client_name: null, national_id: '999', cr_number: '5' }); });
+      act(() => { result.current.setSelectedExistingClient({ id: 'client-legacy', full_name: 'موكل قديم', client_name: null, national_id: '999', cr_number: '5', address: null }); });
       await act(async () => { await result.current.confirmLinkToExistingClient(); });
 
       expect(dbWrite.callsFor('UPDATE:case_parties')).toHaveLength(0);
@@ -904,7 +905,7 @@ describe('useSessionLinking', () => {
       const session = makeSession({ id: 'session-legacy', session_group_id: 'group-xyz', plaintiff: 'اسم قديم' });
       const { result } = renderHook(() => useSessionLinking(session, mockDb, vi.fn()));
 
-      act(() => { result.current.setSelectedExistingClient({ id: 'client-legacy', full_name: 'موكل قديم', client_name: null, national_id: '999', cr_number: '5' }); });
+      act(() => { result.current.setSelectedExistingClient({ id: 'client-legacy', full_name: 'موكل قديم', client_name: null, national_id: '999', cr_number: '5', address: null }); });
       await act(async () => { await result.current.confirmLinkToExistingClient(); });
 
       const calls = dbWrite.callsFor('UPDATE:case_sessions');
