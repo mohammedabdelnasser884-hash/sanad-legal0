@@ -53,14 +53,14 @@ export function useSessionsPartiesMap(sessions: PartiesSourceSession[]): Session
         ]).then(([byCaseRes, bySessionRes]) => {
             if (cancelled) return;
             const byCaseId: Record<string, PartyDisplayRow[]> = {};
-            (byCaseRes.data || []).forEach((p: any) => {
+            (byCaseRes.data || []).forEach((p: Record<string, unknown>) => {
                 if (!p.case_id) return;
-                (byCaseId[p.case_id] ||= []).push(p as PartyDisplayRow);
+                (byCaseId[p.case_id as string] ||= []).push(p as unknown as PartyDisplayRow);
             });
             const bySessionId: Record<string, PartyDisplayRow[]> = {};
-            (bySessionRes.data || []).forEach((p: any) => {
+            (bySessionRes.data || []).forEach((p: Record<string, unknown>) => {
                 if (!p.session_id) return;
-                (bySessionId[p.session_id] ||= []).push(p as PartyDisplayRow);
+                (bySessionId[p.session_id as string] ||= []).push(p as unknown as PartyDisplayRow);
             });
             setIndex({ byCaseId, bySessionId });
         });
