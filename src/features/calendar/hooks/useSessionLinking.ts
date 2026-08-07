@@ -25,6 +25,30 @@ import type { OpenCreateClientForSessionParty } from './useClientLinking';
 // case_sessions مفيهاش عمود عنوان أصلاً (فاز 3)، فمفيش داعي لـ address هنا.
 export type ClientSearchResult = { id: string; full_name: string | null; client_name: string | null; national_id: string | null; cr_number: string | null; address: string | null };
 
+// ⚡ FIX (F.4، 6 أغسطس 2026): plaintiff/plaintiff_role/plaintiff_national_id/
+// plaintiff_power_of_attorney/defendant/defendant_role/defendant_national_id/
+// plaintiff_legal_title/defendant_legal_title اتشالوا من case_sessions فعليًا
+// (Tables<'case_sessions'> بقت من غيرهم)، فمسار "الاسم الواحد القديم" تحت
+// (فولباك جلسة من قبل مرحلة تعدد الأطراف) مبقاش عنده مصدر حقيقي للبيانات دي
+// من الاستعلامات الحديثة. سايبين المنطق نفسه زي ما هو (صفر تغيير سلوك —
+// أي جلسة حقيقية جاية من Supabase دلوقتي هتكون كل الحقول دي عندها undefined
+// فعليًا فالفولباك هيوصل لـ notfound طبيعي، بالظبط زي لو مفيش مدعي) بس بنوسّع
+// نوع session هنا عشان لسه يقبل الحقول دي كاختيارية — تحديدًا عشان أي كود
+// قديم/تستات لسه بتبني كائن جلسة بالشكل القديم يفضل يتصرّف بنفس الشكل.
+type LegacySessionPartyFields = {
+  plaintiff?: string | null;
+  plaintiff_role?: string | null;
+  plaintiff_national_id?: string | null;
+  plaintiff_power_of_attorney?: string | null;
+  defendant?: string | null;
+  defendant_role?: string | null;
+  defendant_national_id?: string | null;
+  plaintiff_legal_title?: string | null;
+  defendant_legal_title?: string | null;
+};
+type SessionWithLegacyFields = CaseSessionRow & LegacySessionPartyFields;
+export type { SessionWithLegacyFields };
+
 /**
  * منطق ربط جلسة مستقلة *محفوظة بالفعل* (session already في الـ DB، مش
  * بيانات form لسه ما اتحفظتش) — بيغطي 3 مسارات:
@@ -36,7 +60,7 @@ export type ClientSearchResult = { id: string; full_name: string | null; client_
  *     بـ client_id بتاعه (case_sessions.client_id) من غير إنشاء قضية.
  */
 export function useSessionLinking(
-  session: CaseSessionRow,
+  session: SessionWithLegacyFields,
   db: SupabaseClient<Database>,
   onDone: () => void,
   onClientAdded?: () => void,
@@ -192,6 +216,10 @@ export function useSessionLinking(
           // بموكل حي، الاسم/الرقم القومي/التوكيل/العنوان بياخدوا من ملف
           // الموكل نفسه — مش من نسخة الجلسة اللي ممكن تكون بقت قديمة.
           // plaintiffRole فضل من الجلسة عمدًا (خاصية الجلسة مش الموكل).
+          // ⚡ FIX (F.4، 6 أغسطس 2026): كل قراءات session.plaintiff* هنا لسه
+          // شغالة (session بقى SessionWithLegacyFields) — أي جلسة حقيقية
+          // جاية من Supabase هتكون كل الحقول دي undefined عندها طبيعي
+          // (العمود اتشال فعليًا)، فالسلوك النهائي زيه بالظبط.
           plaintiff: (linkedClient ? linkedClient.full_name : session.plaintiff) || null,
           plaintiffRole: session.plaintiff_role,
           plaintiffNationalId: (linkedClient ? linkedClient.national_id : session.plaintiff_national_id) || null,
@@ -313,6 +341,11 @@ export function useSessionLinking(
         return;
       }
       // ── fallback: جلسة قديمة قبل مرحلة 6 (مفيش case_parties خاصة بيها) ──
+      // ⚡ FIX (F.4، 6 أغسطس 2026): عمود session.plaintiff نفسه اتشال من
+      // case_sessions الحقيقية (Tables<'case_sessions'>)، بس السطر تحت لسه
+      // بيتصرف صح — session بقى SessionWithLegacyFields (فوق) فالحقل ده
+      // اختياري (undefined لأي جلسة حقيقية جاية من Supabase، فبيوصل لـ
+      // notfound طبيعي زي ما كان بيحصل قبل كده لما plaintiff فاضي).
       const plaintiffName = session.plaintiff?.trim();
       if (!plaintiffName) { setClientStep('notfound'); return; }
       // ⚡ FIX (توحيد): findMatchingClientByName بدل استعلام + حساب matchType
@@ -483,6 +516,9 @@ export function useSessionLinking(
       return;
     }
     // ── fallback: جلسة قديمة (مسار الاسم الواحد القديم، صفر تغيير سلوك) ──
+    // ⚡ FIX (F.4، 6 أغسطس 2026): session بقى SessionWithLegacyFields فوق —
+    // القراءات تحت لسه شغالة زي ما هي، وأي جلسة حقيقية جاية من Supabase
+    // هتكون الحقول دي undefined عندها طبيعي (العمود اتشال فعليًا).
     setLinkingToCase(true);
     try {
       const name = session.plaintiff?.trim();
@@ -495,7 +531,7 @@ export function useSessionLinking(
       // التوكيل مسجل لموكل موجود بالفعل (نفس المكتب) — راجع clientValidation.ts.
       // ⚡ NEW (19 يوليو 2026): session.plaintiff_power_of_attorney بيتبعت
       // كـ cr_number دلوقتي (كان مفقود من الفحص خالص قبل كده).
-      const dup = await checkClientDuplicate(db, { full_name: name, national_id: session.plaintiff_national_id, cr_number: session.plaintiff_power_of_attorney });
+      const dup = await checkClientDuplicate(db, { full_name: name, national_id: session.plaintiff_national_id ?? null, cr_number: session.plaintiff_power_of_attorney ?? null });
       // ⚡ NEW: بدل توست بس، بنستخدم نفس خطوة "found" الموجودة (بتربط
       // cases.client_id عبر createdCaseId، متسق مع باقي الدالة دي).
       if (dup.duplicate) {
@@ -575,6 +611,8 @@ export function useSessionLinking(
   const handleAddClientOnly = async () => {
     setLinkingClient(true);
     try {
+      // ⚡ FIX (F.4، 6 أغسطس 2026): session بقى SessionWithLegacyFields فوق —
+      // القراءات تحت لسه شغالة زي ما هي (نفس فيكس handleAddClientOnlyForParty فوق).
       const name = session.plaintiff?.trim();
       if (!name) return;
       const nameErr = validateFullNameParts(name);
@@ -585,13 +623,15 @@ export function useSessionLinking(
       // التوكيل مسجل لموكل موجود بالفعل (نفس المكتب) — راجع clientValidation.ts.
       // ⚡ NEW (19 يوليو 2026): session.plaintiff_power_of_attorney بيتبعت
       // كـ cr_number دلوقتي (كان مفقود من الفحص خالص قبل كده).
-      const dup = await checkClientDuplicate(db, { full_name: name, national_id: session.plaintiff_national_id, cr_number: session.plaintiff_power_of_attorney });
+      const dup = await checkClientDuplicate(db, { full_name: name, national_id: session.plaintiff_national_id ?? null, cr_number: session.plaintiff_power_of_attorney ?? null });
       // ⚡ NEW: بدل توست بس، بنستخدم نفس خطوة "searching"/"selectedExistingClient"
       // الموجودة فعلاً (البحث اليدوي) — بنحط الموكل المطابق كـ"مختار" على
       // طول، فبيبان زرار "ربط" الجاهز من غير ما المستخدم يدوّر عليه.
       if (dup.duplicate) {
         if (dup.client) {
-          setSelectedExistingClient({ id: dup.client.id, full_name: dup.client.full_name, client_name: dup.client.full_name, national_id: null, cr_number: null });
+          // ⚡ FIX (missing 'address' — F.4): ClientSearchResult بقى محتاج address
+          // (case_sessions مفيهاش عمود عنوان أصلاً، فـ null هنا زي ما كان الحال دايمًا).
+          setSelectedExistingClient({ id: dup.client.id, full_name: dup.client.full_name, client_name: dup.client.full_name, national_id: null, cr_number: null, address: null });
           setClientStep('searching');
         } else toast(dup.message!, true);
         return;
