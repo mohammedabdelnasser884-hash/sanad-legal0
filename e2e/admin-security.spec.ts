@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { login, openAdminSection, createTestUser, expectToast } from './utils';
+import { login, openAdminSection, createTestUser, deleteTestUser, expectToast } from './utils';
 
 // المرحلة 6 (الأدمن) — دفعة 3 (جزء 1): الأمان.
 //
@@ -11,10 +11,22 @@ import { login, openAdminSection, createTestUser, expectToast } from './utils';
 // مباشرة على صف profiles بتاعه هو بس.
 //
 // ⚠️ شرط أساسي: حساب E2E_TEST_EMAIL لازم يكون Admin/Owner.
+// 🆕 (بند 1.5 — تنظيف تلقائي، 6 أغسطس 2026): نفس الآلية المضافة في
+// admin-users.spec.ts — كل تست بيسجّل اسمه في cleanupName، وafterEach
+// بيحذفه نهائيًا (deleteTestUser بتفتح قسم "المستخدمين" مش "الأمان" —
+// نفس المستخدم بيظهر في الاتنين، والحذف من أي مكان بيمسحه من كله).
+let cleanupName: string | null = null;
+
+test.beforeEach(() => { cleanupName = null; });
+
+test.afterEach(async ({ page }) => {
+  if (cleanupName) await deleteTestUser(page, cleanupName);
+});
 
 test('بطاقة المستخدم التجريبي بتظهر في قسم الأمان بالأزرار التلاتة', async ({ page }) => {
   await login(page);
   const fullName = 'أمان اختبار ' + Date.now();
+  cleanupName = fullName;
   await createTestUser(page, fullName);
 
   await openAdminSection(page, 'security');
@@ -28,6 +40,7 @@ test('بطاقة المستخدم التجريبي بتظهر في قسم الأ
 test('قفل حساب المستخدم التجريبي ثم فتحه', async ({ page }) => {
   await login(page);
   const fullName = 'قفل اختبار ' + Date.now();
+  cleanupName = fullName;
   await createTestUser(page, fullName);
 
   await openAdminSection(page, 'security');
@@ -50,6 +63,7 @@ test('قفل حساب المستخدم التجريبي ثم فتحه', async ({
 test('إلغاء تأكيد القفل ما بيغيّرش حالة الحساب', async ({ page }) => {
   await login(page);
   const fullName = 'إلغاء قفل اختبار ' + Date.now();
+  cleanupName = fullName;
   await createTestUser(page, fullName);
 
   await openAdminSection(page, 'security');
@@ -64,6 +78,7 @@ test('إلغاء تأكيد القفل ما بيغيّرش حالة الحساب
 test('تسجيل خروج من جميع الأجهزة لمستخدم تجريبي (بلا جلسة نشطة فعلاً)', async ({ page }) => {
   await login(page);
   const fullName = 'خروج اختبار ' + Date.now();
+  cleanupName = fullName;
   await createTestUser(page, fullName);
 
   await openAdminSection(page, 'security');
@@ -78,6 +93,7 @@ test('تسجيل خروج من جميع الأجهزة لمستخدم تجريب
 test('زر تغيير كلمة المرور من قسم الأمان بيفتح المودال الصحيح', async ({ page }) => {
   await login(page);
   const fullName = 'باسورد اختبار ' + Date.now();
+  cleanupName = fullName;
   await createTestUser(page, fullName);
 
   await openAdminSection(page, 'security');
