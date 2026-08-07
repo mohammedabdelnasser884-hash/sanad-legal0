@@ -27,6 +27,15 @@ export interface PartyFieldValue {
     // لو الطرف اتربط بموكل من النظام (فورمات لاحقة، مش جزء من مرحلة 3) —
     // null لو لسه بيانات حرة مكتوبة يدويًا.
     client_id: string | null;
+    // 🆕 (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 2، 6 أغسطس 2026): قيمة
+    // case_parties.updated_at كما جاية من الداتابيز وقت تحميل الفورم —
+    // مستخدمة كـknownUpdatedAt للقفل التفاؤلي (safeUpdate/window.__dbWrite)
+    // وقت أي UPDATE لاحق على الصف ده (syncCaseParties/syncSessionParties).
+    // undefined = مفيش نظير حقيقي في case_parties لسه (طرف legacy-*/party-*
+    // جديد لسه ما اتحفظش، هيبقى INSERT مش UPDATE أصلاً). null = طرف حقيقي
+    // بس القيمة مش متاحة لأي سبب (fallback آمن: يتجاهل الفحص زي أي مكان
+    // تاني في المشروع بيستخدم knownUpdatedAt).
+    updated_at?: string | null;
 }
 
 export function createEmptyParty(side: PartySide, id: string): PartyFieldValue {
