@@ -880,7 +880,7 @@ describe('useSessionLinking', () => {
       }));
     });
 
-    it('confirmLinkToExistingClient من غير existingClientTargetPartyId (المسار القديم) → UPDATE:case_sessions بالحقول الحرة التلاتة زي ما كان بالظبط، ومفيش UPDATE:case_parties', async () => {
+    it('confirmLinkToExistingClient من غير existingClientTargetPartyId (المسار القديم) → UPDATE:case_sessions بـ client_id بس (F.3: صفر أعمدة legacy)، ومفيش UPDATE:case_parties', async () => {
       const mockDb = makeMockDb({ data: [], error: null }, []);
       const session = makeSession({ id: 'session-legacy', plaintiff: 'اسم قديم' });
       const { result } = renderHook(() => useSessionLinking(session, mockDb, vi.fn()));
@@ -891,7 +891,7 @@ describe('useSessionLinking', () => {
       expect(dbWrite.callsFor('UPDATE:case_parties')).toHaveLength(0);
       expect(dbWrite.callsFor('UPDATE:case_sessions')[0]).toEqual(expect.objectContaining({
         id: 'session-legacy',
-        data: { client_id: 'client-legacy', plaintiff: 'موكل قديم', plaintiff_national_id: '999', plaintiff_power_of_attorney: '5' },
+        data: { client_id: 'client-legacy' },
       }));
       expect(result.current.clientStep).toBe('done');
     });
