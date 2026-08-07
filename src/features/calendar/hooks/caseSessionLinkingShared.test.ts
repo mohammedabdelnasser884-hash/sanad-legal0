@@ -111,13 +111,6 @@ describe('buildCaseInsertData', () => {
       case_number: '123 لسنة 2026',
       court: 'محكمة الجيزة الابتدائية',
       case_type: 'مدني',
-      plaintiff: 'أحمد محمد',
-      plaintiff_role: 'مدعي',
-      plaintiff_national_id: '29001010100000',
-      plaintiff_power_of_attorney: '456/2026',
-      defendant: 'شركة س',
-      defendant_role: 'مدعى عليه',
-      defendant_national_id: null,
       circuit_number: '5',
       session_hall: 'قاعة 3',
       session_time: '10:00',
@@ -128,6 +121,21 @@ describe('buildCaseInsertData', () => {
       status: 'نشطة',
       _offlineTempId: 'tmp-1',
     });
+  });
+
+  // 🆕 (F.3 — 6 أغسطس 2026): buildCaseInsertData بقى مابيكتبش أي عمود legacy خالص
+  it('F.3: صفر أعمدة legacy (plaintiff/defendant وتوابعهم) في الناتج، حتى لو الحقول جاية في fields', () => {
+    const result = buildCaseInsertData(baseFields, 'عنوان القضية', 'tmp-legacy');
+    expect(result).not.toHaveProperty('plaintiff');
+    expect(result).not.toHaveProperty('plaintiff_role');
+    expect(result).not.toHaveProperty('plaintiff_national_id');
+    expect(result).not.toHaveProperty('plaintiff_power_of_attorney');
+    expect(result).not.toHaveProperty('plaintiff_address');
+    expect(result).not.toHaveProperty('defendant');
+    expect(result).not.toHaveProperty('defendant_role');
+    expect(result).not.toHaveProperty('defendant_national_id');
+    expect(result).not.toHaveProperty('plaintiff_legal_title');
+    expect(result).not.toHaveProperty('defendant_legal_title');
   });
 
   it('لو existingClientId اتبعت (مسار جلسة محفوظة بالفعل)، عمود client_id بيتبعت حتى لو null', () => {
@@ -143,23 +151,19 @@ describe('buildCaseInsertData', () => {
     expect(result.court_name).toBe('عنوان بديل'); // fallback للعنوان لو مفيش محكمة
     expect(result.case_number_official).toBe('عنوان بديل');
     expect(result.case_number).toBeNull();
-    expect(result.plaintiff).toBeNull();
+    expect(result).not.toHaveProperty('plaintiff');
   });
 
-  // 🆕 (خطة "المسمى القانوني" — بند مؤجل، 24 يوليو 2026)
-  it('plaintiffLegalTitle/defendantLegalTitle بيتكتبوا في plaintiff_legal_title/defendant_legal_title', () => {
+  // 🔁 (F.3 — 6 أغسطس 2026): استبدال اختبار "plaintiffLegalTitle بيتكتب على عمود"
+  // القديم — دلوقتي plaintiffLegalTitle/defendantLegalTitle بيتم تجاهلهم في
+  // buildCaseInsertData خالص حتى لو اتبعتوا في fields (مفيش عمود يتكتبوا عليه بعد النهاردة)
+  it('F.3: plaintiffLegalTitle/defendantLegalTitle متبعتين في fields بس بيتجاهلوا في buildCaseInsertData (مفيش عمود legacy يتكتبوا عليه)', () => {
     const result = buildCaseInsertData(
       { ...baseFields, plaintiffLegalTitle: 'ورثة المرحوم أحمد علي', defendantLegalTitle: 'الشركاء في شركة كذا' },
       'عنوان القضية', 'tmp-5',
     );
-    expect(result.plaintiff_legal_title).toBe('ورثة المرحوم أحمد علي');
-    expect(result.defendant_legal_title).toBe('الشركاء في شركة كذا');
-  });
-
-  it('من غير plaintiffLegalTitle/defendantLegalTitle (الحالة الغالبة، طرف واحد) → null، صفر تغيير سلوك', () => {
-    const result = buildCaseInsertData(baseFields, 'عنوان القضية', 'tmp-6');
-    expect(result.plaintiff_legal_title).toBeNull();
-    expect(result.defendant_legal_title).toBeNull();
+    expect(result).not.toHaveProperty('plaintiff_legal_title');
+    expect(result).not.toHaveProperty('defendant_legal_title');
   });
 });
 
