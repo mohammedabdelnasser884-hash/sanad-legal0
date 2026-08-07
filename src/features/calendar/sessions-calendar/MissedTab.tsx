@@ -4,6 +4,8 @@ import { I } from '../../../constants';
 import { MONTHS_AR2, DAYS_AR_FULL, toDateStr } from './constants';
 import SessionCard from './SessionCard';
 import TaskCard from './TaskCard';
+import { useSessionsPartiesMap, lookupParties } from '@/shared/parties/useSessionsPartiesMap';
+import { derivePartiesLine } from '@/shared/parties/partiesDisplay';
 import type { MappedCase, MappedClient } from '../../../hooks/useAppData';
 import type { SessionCaseEmbed, TaskFeedItem } from '@/shared/hooks/useDashboardFeed';
 import type { CalendarSessionRow } from './CalendarTab';
@@ -34,7 +36,7 @@ function MissedTab({ cases, clients, onOpenCase, onOpenReminders, onOpenStandalo
         // جلسات فات تاريخها وليس فيها result ولا next_action (لم تُحدَّث)
         Promise.all([
             db.from('case_sessions')
-              .select('id,session_date,session_time,session_floor,session_hall,case_id,client_id,description,result,next_action,title,case_number,court,case_type,plaintiff,defendant,circuit_number,plaintiff_role,defendant_role,plaintiff_legal_title,defendant_legal_title,cases(id,title,plaintiff,defendant,plaintiff_legal_title,defendant_legal_title,court_name,case_type,case_number_official,client_id)')
+              .select('id,session_date,session_time,session_floor,session_hall,case_id,client_id,description,result,next_action,title,case_number,court,case_type,circuit_number,cases(id,title,court_name,case_type,case_number_official,client_id)')
               .lt('session_date', todayStr)
               .order('session_date', { ascending: false })
               .limit(50)
@@ -62,6 +64,9 @@ function MissedTab({ cases, clients, onOpenCase, onOpenReminders, onOpenStandalo
         const ago  = diff === 0 ? 'اليوم' : diff === 1 ? 'منذ أمس' : `منذ ${diff} يوم`;
         return { dayName, day, month, year, ago, diff };
     };
+
+    // ⚡ NEW (خطة تفكيك الأعمدة القديمة، المرحلة B.1) — راجع نفس التعليق في CalendarTab.tsx.
+    const partiesIndex = useSessionsPartiesMap(sessions);
 
     if (loading) return React.createElement('div', { className: "flex items-center justify-center py-10 gap-2 text-slate-500 text-xs" },
         React.createElement(I.Spin), "جاري التحميل...");
@@ -118,7 +123,12 @@ function MissedTab({ cases, clients, onOpenCase, onOpenReminders, onOpenStandalo
                     React.createElement('div', { className: "flex-1 min-w-0" },
                         React.createElement('div', { className: "flex items-center justify-between gap-1" },
                             React.createElement('p', { className: "text-[10.5px] font-black text-white leading-tight flex-1 truncate" },
-                                (linkedCase?.title) || s.title || ((linkedCase?.plaintiff && linkedCase?.defendant) ? linkedCase.plaintiff + ' ضد ' + linkedCase.defendant : null) || s.description || '— جلسة مستقلة —'
+                                (linkedCase?.title) || s.title
+                                || derivePartiesLine(lookupParties(s, partiesIndex), {
+                                    plaintiff: linkedCase?.plaintiff, defendant: linkedCase?.defendant,
+                                    plaintiffLegalTitle: linkedCase?.plaintiff_legal_title, defendantLegalTitle: linkedCase?.defendant_legal_title,
+                                })
+                                || s.description || '— جلسة مستقلة —'
                             ),
                             React.createElement('span', {
                                 className: "text-[6.5px] px-1.5 py-0.5 rounded-full font-black bg-rose-500/15 text-rose-400 shrink-0"
