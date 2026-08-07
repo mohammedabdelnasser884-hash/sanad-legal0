@@ -7,6 +7,7 @@ import DatePicker from '@/shared/ui/DatePicker';
 import { usePartyFields } from '@/shared/parties/usePartyFields';
 import { PartyFieldsGroup } from '@/shared/parties/PartyFieldsGroup';
 import type { PartyFieldValue } from '@/shared/parties/partyTypes';
+import { findPartyDataMismatches, type FieldMismatch } from '../calendar/hooks/caseSessionLinkingShared';
 import { useFormDraft } from '@/shared/hooks/useFormDraft';
 import { useUnsavedChangesGuard } from '@/shared/hooks/useUnsavedChangesGuard';
 import type { ClientRow, ProfileRow } from '../../types';
@@ -101,6 +102,21 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
         partyFields.updateParty(partyId,'address',picked.address || '');
     };
 
+    // ⚡ NEW (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 1، فقرة 1 من التقرير):
+    // نفس فكرة EditCaseModal.tsx بالحرف — فحص تعارض قبل الاستبدال الصامت.
+    const [linkMismatchState, setLinkMismatchState] = useState<{ partyId: string; clientId: string; mismatches: FieldMismatch[] } | null>(null);
+    const requestLinkClientToParty = (party: PartyFieldValue, clientId: string) => {
+        if(!clientId){ linkClientToParty(party.id,''); return; }
+        const picked = clients.find((c: ClientRow) => c.id===clientId);
+        if(!picked) return;
+        const mismatches = findPartyDataMismatches(
+            { name: party.name, national_id: party.national_id, power_of_attorney: party.power_of_attorney, address: party.address },
+            picked,
+        );
+        if(mismatches.length > 0){ setLinkMismatchState({ partyId: party.id, clientId, mismatches }); return; }
+        linkClientToParty(party.id, clientId);
+    };
+
     // ⚡ NEW (خطة تطوير أطراف الدعوى — مرحلة 4 خطوة 2): بعد ما موديل
     // "إنشاء موكل جديد" الموحّد يحفظ الموكل فعليًا (هدف ربط 'localParty' —
     // مفيش case حقيقي لسه)، بنطبّق بياناته على الطرف محليًا فورًا (بدل ما
@@ -123,12 +139,33 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
     const renderPartyExtra = (party: PartyFieldValue) => {
         if(!party.is_client) return null;
         return React.createElement('div',{className:'space-y-2'},
-            clients.length>0 && React.createElement(Sel,{
+            clients.length>0 && linkMismatchState?.partyId !== party.id && React.createElement(Sel,{
                 label:"ربط بموكل من النظام (اختياري)",
                 value:party.client_id || '',
-                onChange:(e: React.ChangeEvent<HTMLSelectElement>) =>linkClientToParty(party.id,e.target.value),
+                onChange:(e: React.ChangeEvent<HTMLSelectElement>) =>requestLinkClientToParty(party,e.target.value),
                 options:[{value:'',label:'— بدون ربط (بيانات يدوية) —'},...clients.map((c: ClientRow) =>({value:c.id,label:c.full_name}))]
             }),
+            // ⚡ NEW (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 1): تأكيد تعارض.
+            linkMismatchState?.partyId === party.id && React.createElement('div',{className:'bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5 space-y-2', 'data-testid':`new-case-link-mismatch-${party.id}`},
+                React.createElement('p',{className:'text-[9px] text-amber-400 font-black'},'⚠️ القيم دي مختلفة عن ملف الموكل:'),
+                linkMismatchState.mismatches.map((m: FieldMismatch) => React.createElement('p',{key:m.field, className:'text-[9px] text-slate-300'},
+                    `${m.label}: في الطرف "${m.freeTextValue}" ← في ملف الموكل "${m.clientValue}"`
+                )),
+                React.createElement('div',{className:'flex gap-2'},
+                    React.createElement('button',{
+                        type:'button',
+                        onClick:()=>{ linkClientToParty(party.id, linkMismatchState.clientId); setLinkMismatchState(null); },
+                        className:'flex-1 py-2 rounded-lg bg-premium-gold text-premium-bg text-[10px] font-black',
+                        'data-testid':`new-case-link-mismatch-confirm-${party.id}`,
+                    },'استخدم بيانات الموكل'),
+                    React.createElement('button',{
+                        type:'button',
+                        onClick:()=>setLinkMismatchState(null),
+                        className:'flex-1 py-2 rounded-lg bg-white/5 border border-white/10 text-slate-300 text-[10px] font-black',
+                        'data-testid':`new-case-link-mismatch-cancel-${party.id}`,
+                    },'إلغاء')
+                )
+            ),
             !party.client_id && openNewClientModal && React.createElement('button',{
                 type:'button',
                 onClick:()=>openNewClientModal({
@@ -302,14 +339,16 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
                         const finalCourtLevel = form.court_level==='أخرى' ? form.court_level_other : form.court_level;
                         const finalCourt = form.court.trim() || '—';
                         const finalType  = form.type.trim() || 'عام';
-                        // ⚡ NEW (مرحلة 4): الأعمدة القديمة (plaintiff/defendant/...)
-                        // لسه موجودة على cases (قسم 3 من الخطة)، فبنبعت لها نسخة من
-                        // "الطرف الأساسي" في كل جهة — أولوية لمن عليه ⭐ (موكل
-                        // المكتب الفعلي)، وإلا أول طرف في الجهة. حفظ كل الأطراف
-                        // فعليًا في case_parties هيتضاف في مرحلة 4 التالية (ربط
-                        // useCaseActions.ts بالجدول الجديد — مش جزء من الخطوة دي).
+                        // ⚡ CHANGED (خطة تفكيك legacy columns — Phase F.1، 6 أغسطس
+                        // 2026): وقّفنا مزامنة الأعمدة القديمة (plaintiff/defendant/
+                        // *_role/*_national_id/*_power_of_attorney/*_address/
+                        // *_legal_title) من هنا خالص — ده كان مصدر الكتابة الأول من
+                        // الطبقة أ (راجع جدول الحالة، تحديث 10). الأطراف كلها بتتسجل
+                        // فعليًا في case_parties بس (parties array تحت)، وكل شاشات
+                        // العرض بقت بتقرا من هناك (مراحل B.1-B.4). client_id بس لسه
+                        // بيتبعت صراحةً (عمود حقيقي مستقل، مش من أعمدة plaintiff/
+                        // defendant القديمة).
                         const primaryPlaintiff = partyFields.plaintiffs.find((p) =>p.is_client) || partyFields.plaintiffs[0];
-                        const primaryDefendant = partyFields.defendants.find((p) =>p.is_client) || partyFields.defendants[0];
                         const result = await onSave({
                             ...form,
                             number,
@@ -317,22 +356,15 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
                             type: finalType,
                             court_level: finalCourtLevel,
                             client_id: primaryPlaintiff?.client_id || undefined,
-                            plaintiff: primaryPlaintiff?.name || undefined,
-                            plaintiff_role: primaryPlaintiff?.capacity || undefined,
-                            plaintiff_national_id: primaryPlaintiff?.national_id || undefined,
-                            plaintiff_power_of_attorney: primaryPlaintiff?.power_of_attorney || undefined,
-                            plaintiff_address: primaryPlaintiff?.address || undefined,
-                            defendant: primaryDefendant?.name || undefined,
-                            defendant_role: primaryDefendant?.capacity || undefined,
-                            defendant_national_id: primaryDefendant?.national_id || undefined,
-                            // 🆕 (خطة "المسمى القانوني" — مرحلة 3): بتوصل فاضية
-                            // ('') لو الجهة فيها شخص واحد بس — نفس افتراضي
-                            // usePartyFields()/validateParties.
+                            // ⚠️ لسه بتتبعت (مش لكتابتها على cases.plaintiff_legal_title/
+                            // defendant_legal_title بعد دلوقتي — دي كانت الاستخدام
+                            // الوحيد الآمن للحقلين — لكن useCaseActions.ts لسه محتاجهم
+                            // فقط كمدخل لفاليديشن السيرفر validateParties (قاعدة 6:
+                            // إلزامية المسمى القانوني عند ≥٢ أشخاص في نفس الجهة)).
                             plaintiff_legal_title: partyFields.legalTitles.plaintiff || undefined,
                             defendant_legal_title: partyFields.legalTitles.defendant || undefined,
                             // ⚡ NEW (مرحلة 4.2): array الأطراف الكامل — useCaseActions.ts
-                            // بيكتب صف في case_parties لكل طرف فيه (بالإضافة لمزامنة
-                            // الأعمدة القديمة فوق من الطرف الأساسي بس).
+                            // بيكتب صف في case_parties لكل طرف فيه.
                             parties: partyFields.parties,
                         });
                         // 🔒 FIX (قرارات مفتوحة — خطة حفظ المسودات، 3 أغسطس 2026):
