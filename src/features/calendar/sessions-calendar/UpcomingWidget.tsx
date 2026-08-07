@@ -3,6 +3,8 @@ import { db } from '../../../supabaseClient';
 import { I } from '../../../constants';
 import { MONTHS_AR2, DAYS_AR_FULL, toDateStr } from './constants';
 import SessionCard from './SessionCard';
+import { useSessionsPartiesMap, lookupParties } from '@/shared/parties/useSessionsPartiesMap';
+import { derivePartiesLine } from '@/shared/parties/partiesDisplay';
 import type { MappedCase, MappedClient } from '../../../hooks/useAppData';
 import type { SessionCaseEmbed } from '@/shared/hooks/useDashboardFeed';
 import type { CalendarSessionRow } from './CalendarTab';
@@ -33,7 +35,7 @@ function UpcomingWidget({ cases, clients, onOpenCase }: UpcomingWidgetProps) {
 
     useEffect(() => {
         db.from('case_sessions')
-          .select('id,session_date,session_time,session_floor,session_hall,case_id,client_id,description,result,next_action,title,case_number,court,case_type,plaintiff,defendant,cases(id,title,plaintiff,defendant,plaintiff_legal_title,defendant_legal_title,court_name,case_type,case_number_official,client_id)')
+          .select('id,session_date,session_time,session_floor,session_hall,case_id,client_id,description,result,next_action,title,case_number,court,case_type,cases(id,title,court_name,case_type,case_number_official,client_id)')
           .gte('session_date', todayStr)
           .order('session_date', { ascending: true })
           .limit(200)
@@ -54,6 +56,9 @@ function UpcomingWidget({ cases, clients, onOpenCase }: UpcomingWidgetProps) {
             daysUntil: Math.round((d.getTime() - today.getTime()) / (1000*60*60*24))
         };
     };
+
+    // ⚡ NEW (خطة تفكيك الأعمدة القديمة، المرحلة B.1) — راجع نفس التعليق في CalendarTab.tsx.
+    const partiesIndex = useSessionsPartiesMap(sessions);
 
     if (loading) return React.createElement('div', { className: "flex items-center justify-center py-10 gap-2 text-slate-500 text-xs" },
         React.createElement(I.Spin), "جاري التحميل...");
@@ -99,7 +104,12 @@ function UpcomingWidget({ cases, clients, onOpenCase }: UpcomingWidgetProps) {
                     React.createElement('div', { className: "flex-1 p-3 space-y-1" },
                         React.createElement('div', { className: "flex items-start justify-between gap-2" },
                             React.createElement('p', { className: "text-[11px] font-black text-white leading-tight flex-1" },
-                                (linkedCase?.title) || s.title || ((linkedCase?.plaintiff && linkedCase?.defendant) ? linkedCase.plaintiff + ' ضد ' + linkedCase.defendant : null) || s.description || '— جلسة مستقلة —'),
+                                (linkedCase?.title) || s.title
+                                || derivePartiesLine(lookupParties(s, partiesIndex), {
+                                    plaintiff: linkedCase?.plaintiff, defendant: linkedCase?.defendant,
+                                    plaintiffLegalTitle: linkedCase?.plaintiff_legal_title, defendantLegalTitle: linkedCase?.defendant_legal_title,
+                                })
+                                || s.description || '— جلسة مستقلة —'),
                             s.session_time && React.createElement('span', {
                                 className: "text-[8px] px-1.5 py-0.5 rounded-full font-black shrink-0",
                                 style: { background: s.session_time === 'صباحي' ? 'rgba(251,191,36,0.15)' : 'rgba(99,102,241,0.15)', color: s.session_time === 'صباحي' ? '#fbbf24' : '#818cf8' }
