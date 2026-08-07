@@ -130,6 +130,9 @@ describe('usePartyFields', () => {
             initialPlaintiffs: [
                 { id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد', capacity: 'مدعي', national_id: '12345678901234', address: '', power_of_attorney: '', client_id: 'c1' },
             ],
+            initialDefendants: [
+                { id: 'd1', side: 'defendant', is_client: false, name: 'محمود سعيد إبراهيم', capacity: 'مدعى عليه', national_id: '', address: '', power_of_attorney: '', client_id: null },
+            ],
         }));
         expect(result.current.validation.valid).toBe(true);
     });
@@ -151,6 +154,9 @@ describe('usePartyFields', () => {
         const { result } = renderHook(() => usePartyFields({
             initialPlaintiffs: [
                 { id: 'p1', side: 'plaintiff', is_client: true, name: 'أحمد', capacity: 'مدعي', national_id: '12345678901234', address: '', power_of_attorney: '', client_id: 'c1' },
+            ],
+            initialDefendants: [
+                { id: 'd1', side: 'defendant', is_client: false, name: 'محمود سعيد إبراهيم', capacity: 'مدعى عليه', national_id: '', address: '', power_of_attorney: '', client_id: null },
             ],
             domainContext: ctx,
         }));
