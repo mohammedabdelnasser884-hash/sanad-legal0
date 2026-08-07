@@ -15,7 +15,7 @@ import type { TaskFeedItem } from '@/shared/hooks/useDashboardFeed';
 // نفس أعمدة case_sessions اللي CalendarTab.tsx بيجيبها (CalendarSessionRow) —
 // الأعمدة القديمة (plaintiff_national_id/plaintiff_power_of_attorney/
 // defendant_national_id) اتشالت من هنا مع حذفها من القاعدة (F.4، 6 أغسطس 2026).
-export interface MonthSessionRow extends CalendarSessionRow {}
+export type MonthSessionRow = CalendarSessionRow;
 
 interface WeekBound {
     start: number;
