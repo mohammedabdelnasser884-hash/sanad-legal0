@@ -16,6 +16,17 @@ import type {
     SearchDocResult,
     QuickFilter,
 } from './hooks/useUniversalSearch';
+// ⚡ NEW (خطة تفكيك الأعمدة القديمة، المرحلة B.3 — 6 أغسطس 2026): نفس
+// أساس العرض القرائي المستخدم في B.1 (الكالندر) و B.2 (الداشبورد). ملحوظة:
+// تغطية البحث نفسه في case_parties (تطابق اسم أي طرف، مش بس الطرف
+// الأساسي) خلصت فعليًا قبل كده في useUniversalSearch.ts ("مرحلة 9") —
+// الفجوة المتبقية هنا كانت طبقة العرض بس (نتيجة القضية في القائمة كانت
+// بتعرض عمودي plaintiff/defendant القديمين مباشرة بدل تعدد الأطراف
+// الفعلي). useSessionsPartiesMap بيتعامل مع { id, case_id } بشكل عام،
+// فبنمرّرله القضايا المطابقة نفسها (case_id = id بتاع القضية) عشان
+// نستفيد من نفس الـbatching بدون أي تعديل على الملف المشترك.
+import { useSessionsPartiesMap, lookupParties } from '@/shared/parties/useSessionsPartiesMap';
+import { derivePartiesDisplay } from '@/shared/parties/partiesDisplay';
 
 interface UniversalSearchModalProps {
     cases: MappedCase[];
@@ -37,6 +48,10 @@ function UniversalSearchModal({ cases, clients, onClose, onOpenCase, onOpenClien
         show, totalResults, hasResults,
         highlight, fmtNum,
     } = useUniversalSearch();
+
+    // ⚡ B.3: index واحد لصفوف case_parties لكل القضايا المطابقة في نتيجة
+    // البحث الحالية — نداء واحد (case_id = id بتاع كل قضية).
+    const partiesIndex = useSessionsPartiesMap(matchedCases.map((c: SearchCaseResult) => ({ id: c.id, case_id: c.id })));
 
     return React.createElement('div', { 'data-testid': 'universal-search-modal', className: 'fixed inset-0 z-[60] bg-black/90 backdrop-blur-md flex flex-col fade-in' },
         // ⚠️ viewingDoc هنا شكله SearchDocResult (نتيجة بحث جزئية، مش صف case_documents
@@ -121,8 +136,17 @@ function UniversalSearchModal({ cases, clients, onClose, onOpenCase, onOpenClien
                     React.createElement('p', { className: 'text-[10px] font-black text-premium-gold' }, 'القضايا'),
                     React.createElement('span', { className: 'text-[9px] text-slate-500' }, matchedCases.length + ' نتيجة')
                 ),
-                matchedCases.map((c: SearchCaseResult) =>
-                    React.createElement('div', {
+                matchedCases.map((c: SearchCaseResult) => {
+                    // ⚡ B.3: نفس فكرة derivePartiesDisplay في B.1/B.2 — لو
+                    // القضية عندها صفوف case_parties فعلية (تعدد أطراف)،
+                    // نعرضها بدل عمودي plaintiff/defendant القديمين. رجوع
+                    // تلقائي كامل للأعمدة القديمة لو مفيش صفوف خالص — صفر
+                    // فرق ملحوظ لأي قضية لسه معتمدة عليهم.
+                    const { plaintiff: dPlaintiff, defendant: dDefendant } = derivePartiesDisplay(
+                        lookupParties({ id: c.id, case_id: c.id }, partiesIndex),
+                        { plaintiff: null, defendant: null }
+                    );
+                    return React.createElement('div', {
                         key: c.id,
                         'data-testid': 'universal-search-case-result',
                         onClick: () => { onOpenCase(c); onClose(); },
@@ -135,15 +159,15 @@ function UniversalSearchModal({ cases, clients, onClose, onOpenCase, onOpenClien
                                 React.createElement('div', { className: 'flex items-center gap-2 mt-0.5 flex-wrap' },
                                     c.number && c.number !== '—' && React.createElement('span', { className: 'text-[9px] font-mono', style: { color: '#D4AF37' } }, fmtNum(c.number)),
                                     c.court && React.createElement('span', { className: 'text-[9px] text-slate-500' }, c.court),
-                                    (c.plaintiff || c.defendant) && React.createElement('span', { className: 'text-[9px] text-slate-500 truncate' },
-                                        highlight(c.plaintiff || '') + (c.plaintiff && c.defendant ? ' ضد ' : '') + highlight(c.defendant || '')
+                                    (dPlaintiff || dDefendant) && React.createElement('span', { className: 'text-[9px] text-slate-500 truncate' },
+                                        highlight(dPlaintiff || '') + (dPlaintiff && dDefendant ? ' ضد ' : '') + highlight(dDefendant || '')
                                     )
                                 )
                             ),
                             React.createElement('span', { className: 'text-slate-600 text-xs shrink-0' }, '›')
                         )
-                    )
-                )
+                    );
+                })
             ),
 
             // الموكلون
