@@ -12,9 +12,13 @@ import { useSessionLinking } from '../hooks/useSessionLinking';
 // بتاع فتح NewClientModal الموحّد لطرف بعينه — نفس النوع المستخدم في
 // NewStandaloneSessionModal.tsx.
 import type { OpenCreateClientForSessionParty } from '../hooks/useClientLinking';
+// 🆕 (بند 2.3 — "إنشاء موكل جديد" جنب دروب-داون ربط الجلسة المستقلة، 6
+// أغسطس 2026): نفس النمط المستخدم في EditCaseModal.tsx بالحرف — موديل
+// إنشاء الموكل الموحّد + فحص إمكانية الإنشاء لحالة الطرف الحالية.
+import type { ClientModalContext } from '../../clients/hooks/useClientActions';
 // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 6): كشف التعارض بين البيانات
 // الحرة في الجلسة وملف الموكل المختار وقت الربط اليدوي اللاحق.
-import { findClientDataMismatches, syncSessionIdentityToGroupSiblings, type FieldMismatch } from '../hooks/caseSessionLinkingShared';
+import { findClientDataMismatches, findPartyDataMismatches, syncSessionIdentityToGroupSiblings, type FieldMismatch } from '../hooks/caseSessionLinkingShared';
 // ⚡ NEW (خطة تعدد الأطراف، مرحلة 6.4، 23 يوليو 2026): نفس Component/هوك
 // مشترك مرحلة 5.1 (EditCaseModal.tsx) و6.1 (NewStandaloneSessionModal.tsx)
 // بالحرف — بدل حقلي "الموكل"/"الخصم" المفردين هنا كمان. استيراد
@@ -39,6 +43,7 @@ import {
     isOrphanState,
     isOrphanedLink,
     canUnlinkParty,
+    canCreateNewClientFromParty,
     getPartyStateMessage,
     getPartyStateBadge,
     type PartyDomainContext,
@@ -71,6 +76,9 @@ interface CasePartyRow {
     power_of_attorney: string | null;
     client_id: string | null;
     sort_order: number;
+    // 🆕 (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 2، 6 أغسطس 2026): نفس
+    // إضافة CasePartyRow في EditCaseModal.tsx بالحرف.
+    updated_at: string | null;
 }
 
 interface EditStandaloneModalProps {
@@ -92,6 +100,10 @@ interface EditStandaloneModalProps {
     // ⚡ NEW: لازمة عشان نلاقي بيانات أي موكل مربوط بطرف *غير* الأساسي
     // (client_id بتاعه بيتحط وقت إنشاء الجلسة عن طريق الربط لكل طرف على حدة).
     clients?: ClientRow[];
+    // 🆕 (بند 2.3 — 6 أغسطس 2026): زرار "➕ إنشاء موكل جديد من هذه البيانات"
+    // جنب دروب-داون "ربط بموكل من النظام" لطرف غير مربوط — نفس
+    // EditCaseModal.tsx بالحرف. اختيارية عشان أي استدعاء قديم ميتكسرش.
+    openNewClientModal?: (ctx: ClientModalContext) => void;
 }
 
 interface StandaloneEditForm {
@@ -164,7 +176,7 @@ interface EditStandaloneModalFormProps extends EditStandaloneModalProps {
     existingPartyRows: CasePartyRow[];
 }
 
-function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient = null, onOpenClientProfile, existingPartyRows, clients = [] }: EditStandaloneModalFormProps) {
+function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient = null, onOpenClientProfile, existingPartyRows, clients = [], openNewClientModal }: EditStandaloneModalFormProps) {
     // ⚡ NEW: الجلسة مربوطة فعليًا بموكل حي لو linkedClient موصول (مش null).
     const isLinked = !!linkedClient;
     // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 7 — fallback الموكل
@@ -207,6 +219,10 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
                 address: row.address || '',
                 power_of_attorney: row.power_of_attorney || '',
                 client_id: row.client_id || null,
+                // 🆕 (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 2): نفس
+                // EditCaseModal.tsx بالحرف — تستخدمها syncSessionParties تحت
+                // كـknownUpdatedAt.
+                updated_at: row.updated_at || null,
             });
             return {
                 plaintiffs: existingPartyRows.filter((r) => r.side === 'plaintiff').map(toField),
@@ -292,11 +308,99 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
     // مفيش حاجة تستاهل preview لموكل اتمسح بالفعل.
     const [unlinkConfirmPartyId, setUnlinkConfirmPartyId] = useState<string | null>(null);
 
+    // ⚡ NEW (مرحلة 3 — توحيد فورم "تعديل جلسة مستقلة" مع "تعديل قضية"، 6
+    // أغسطس 2026): دروب-داون "ربط بموكل من النظام" لطرف عليه ⭐ لسه مش
+    // مربوط — نفس فكرة linkClientToParty/requestLinkClientToParty في
+    // EditCaseModal.tsx بالحرف (بما فيها فحص findPartyDataMismatches قبل
+    // الاستبدال). قبل كده الملف ده معندوش أي طريقة تربط طرف غير مربوط
+    // غير قفل الفورم وفتح "🔗 ربط" المنفصل (LinkSessionModal).
+    const linkClientToParty = (partyId: string, clientId: string) => {
+        if (!clientId) { partyFields.updateParty(partyId, 'client_id', null); return; }
+        const picked = clients.find((c) => c.id === clientId);
+        if (!picked) return;
+        partyFields.updateParty(partyId, 'client_id', clientId);
+        partyFields.updateParty(partyId, 'name', picked.full_name || '');
+        partyFields.updateParty(partyId, 'national_id', picked.national_id || '');
+        partyFields.updateParty(partyId, 'power_of_attorney', picked.cr_number || '');
+        partyFields.updateParty(partyId, 'address', picked.address || '');
+    };
+    const [linkMismatchState, setLinkMismatchState] = useState<{ partyId: string; clientId: string; mismatches: FieldMismatch[] } | null>(null);
+    const requestLinkClientToParty = (party: PartyFieldValue, clientId: string) => {
+        if (!clientId) return;
+        const picked = clients.find((c) => c.id === clientId);
+        if (!picked) return;
+        const mismatches = findPartyDataMismatches(
+            { name: party.name, national_id: party.national_id, power_of_attorney: party.power_of_attorney, address: party.address },
+            picked,
+        );
+        if (mismatches.length > 0) { setLinkMismatchState({ partyId: party.id, clientId, mismatches }); return; }
+        linkClientToParty(party.id, clientId);
+    };
+
+    // 🆕 (بند 2.3 — 6 أغسطس 2026): بعد حفظ موكل جديد عبر الموديل الموحّد
+    // (هدف 'localParty' — الطرف هنا لسه صف محلي في partyFields)، بنطبّق
+    // بياناته فورًا من onLinked — نفس EditCaseModal.tsx بالحرف.
+    const applyCreatedClientToParty = (partyId: string, clientId: string, form?: { full_name: string; national_id: string; cr_number: string; address: string }) => {
+        partyFields.updateParty(partyId, 'client_id', clientId);
+        if (form) {
+            partyFields.updateParty(partyId, 'name', form.full_name || '');
+            partyFields.updateParty(partyId, 'national_id', form.national_id || '');
+            partyFields.updateParty(partyId, 'power_of_attorney', form.cr_number || '');
+            partyFields.updateParty(partyId, 'address', form.address || '');
+        }
+    };
+
     const renderPartyExtra = (party: PartyFieldValue) => {
-        if (party.id === linkedPartyId || !party.client_id) return null;
+        if (party.id === linkedPartyId || !party.is_client) return null;
         const state = getPartyState(party, domainContext);
         const linkedPartyClient = clients.find((c) => c.id === party.client_id) || null;
         const confirmingUnlink = unlinkConfirmPartyId === party.id;
+        if (!party.client_id) {
+            // طرف غير مربوط أصلًا — الدروب-داون الجديد بس، من غير أي
+            // زرار unlink (مفيش حاجة تتفك أصلًا).
+            return React.createElement('div', { className: 'space-y-2' },
+                clients.length > 0 && linkMismatchState?.partyId !== party.id && React.createElement(Sel, {
+                    label: 'ربط بموكل من النظام (اختياري)',
+                    value: '',
+                    onChange: (e: React.ChangeEvent<HTMLSelectElement>) => requestLinkClientToParty(party, e.target.value),
+                    options: [{ value: '', label: '— بدون ربط (بيانات يدوية) —' }, ...clients.map((c) => ({ value: c.id, label: c.full_name }))],
+                }),
+                linkMismatchState?.partyId === party.id && React.createElement('div', { className: 'bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5 space-y-2', 'data-testid': `edit-standalone-session-link-mismatch-${party.id}` },
+                    React.createElement('p', { className: 'text-[9px] text-amber-400 font-black' }, '⚠️ القيم دي مختلفة عن ملف الموكل:'),
+                    linkMismatchState.mismatches.map((m: FieldMismatch) => React.createElement('p', { key: m.field, className: 'text-[9px] text-slate-300' },
+                        `${m.label}: في الطرف "${m.freeTextValue}" ← في ملف الموكل "${m.clientValue}"`
+                    )),
+                    React.createElement('div', { className: 'flex gap-2' },
+                        React.createElement('button', {
+                            type: 'button',
+                            onClick: () => { linkClientToParty(party.id, linkMismatchState.clientId); setLinkMismatchState(null); },
+                            className: 'flex-1 py-2 rounded-lg bg-premium-gold text-premium-bg text-[10px] font-black',
+                            'data-testid': `edit-standalone-session-link-mismatch-confirm-${party.id}`,
+                        }, 'استخدم بيانات الموكل'),
+                        React.createElement('button', {
+                            type: 'button',
+                            onClick: () => setLinkMismatchState(null),
+                            className: 'flex-1 py-2 rounded-lg bg-white/5 border border-white/10 text-slate-300 text-[10px] font-black',
+                            'data-testid': `edit-standalone-session-link-mismatch-cancel-${party.id}`,
+                        }, 'إلغاء')
+                    )
+                ),
+                // 🆕 (بند 2.3 — 6 أغسطس 2026): نفس شرط EditCaseModal.tsx
+                // بالحرف — بيظهر بس لو حالة الطرف بتسمح بإنشاء موكل جديد
+                // منها (زي: طرف حر بلا موكل مربوط).
+                canCreateNewClientFromParty(state) && openNewClientModal && React.createElement('button', {
+                    type: 'button',
+                    onClick: () => openNewClientModal({
+                        initialData: { full_name: party.name || '', national_id: party.national_id || '', cr_number: party.power_of_attorney || '', address: party.address || '' },
+                        linkTarget: { type: 'localParty' },
+                        contextLabel: 'سيتم ربطه بهذا الطرف تلقائيًا بعد الحفظ',
+                        onLinked: (_target, clientId, form) => applyCreatedClientToParty(party.id, clientId, form),
+                    }),
+                    className: 'text-[10px] font-bold text-emerald-400 mt-1',
+                    'data-testid': 'edit-standalone-session-create-client-' + party.id,
+                }, '➕ إنشاء موكل جديد من هذه البيانات'),
+            );
+        }
         return React.createElement('div', { className: 'space-y-2' },
             isOrphanState(state) && React.createElement('div', { className: 'bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2', 'data-testid': `edit-standalone-session-party-orphaned-warning-${party.id}` },
                 React.createElement('p', { className: 'text-[9px] text-amber-400 font-bold leading-relaxed' }, `⚠️ ${getPartyStateMessage(state)}`)
@@ -384,7 +488,10 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
     // أوفلاين (window.__dbWrite بيتعامل مع الأوفلاين لوحده لكل نداء). صف
     // موجود في existingIds = UPDATE، صف مش موجود فيها (id مؤقت legacy-*/
     // party-*) = INSERT، صف كان موجود واختفى من الفورم دلوقتي = DELETE.
-    type SyncPartiesResult = { ok: true } | { ok: false; reason: 'validation'; message: string } | { ok: false; reason: 'write' };
+    // ⚡ CHANGED (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 4، 6 أغسطس
+    // 2026): نفس تعديل syncCaseParties في useCaseActions.ts بالحرف —
+    // 'conflict' بقت reason مستقلة بتحمل أسماء الأطراف المتعارضة.
+    type SyncPartiesResult = { ok: true } | { ok: false; reason: 'validation'; message: string } | { ok: false; reason: 'write' } | { ok: false; reason: 'conflict'; conflictNames: string[] };
     const syncSessionParties = async (targetSessionId: string): Promise<SyncPartiesResult> => {
         const parties = partyFields.parties;
         // 🆕 (خطة "المسمى القانوني" — مرحلة 3): نفس منطق useCaseActions.ts/
@@ -399,6 +506,7 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
         const existingIds = existingPartyRows.map((r) => r.id);
         const currentIds = new Set(parties.map((p) => p.id));
         let allOk = true;
+        const conflictNames: string[] = [];
         // 1) حذف أي صف كان موجود فعلاً وقت فتح الفورم واتشال منها دلوقتي
         for (const oldId of existingIds) {
             if (!currentIds.has(oldId)) {
@@ -423,11 +531,18 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
                 sort_order: i,
             };
             const result = existingIds.includes(p.id)
-                ? await window.__dbWrite({ type: 'UPDATE', table: 'case_parties', data: rowData, id: p.id })
+                ? await window.__dbWrite({ type: 'UPDATE', table: 'case_parties', data: rowData, id: p.id, knownUpdatedAt: p.updated_at || null })
                 : await window.__dbWrite({ type: 'INSERT', table: 'case_parties', data: rowData });
-            if (result.error) allOk = false;
+            if (result.conflict) {
+                conflictNames.push(p.name?.trim() || `طرف رقم ${i + 1}`);
+                allOk = false;
+            } else if (result.error) {
+                allOk = false;
+            }
         }
-        return allOk ? { ok: true } : { ok: false, reason: 'write' };
+        if (allOk) return { ok: true };
+        if (conflictNames.length > 0) return { ok: false, reason: 'conflict', conflictNames };
+        return { ok: false, reason: 'write' };
     };
 
     const handleSave = async () => {
@@ -447,15 +562,11 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
         setSaving(true);
         const finalCaseType = form.case_type === 'أخرى' ? (form.case_type_custom || 'أخرى') : form.case_type;
         const fullCaseNumber = [form.case_number, form.case_year].filter(Boolean).join('/');
-        // ⚡ NEW (مرحلة 6.4): "الطرف الأساسي" في كل جهة (أولوية لمن عليه ⭐،
-        // وإلا أول طرف) بياخد مكان الحقول المفردة القديمة في مزامنة الأعمدة
-        // القديمة — نفس آلية 4.1/5.1/6.1 بالحرف.
-        const primaryPlaintiff = partyFields.plaintiffs.find((p) => p.is_client) || partyFields.plaintiffs[0];
-        const primaryDefendant = partyFields.defendants.find((p) => p.is_client) || partyFields.defendants[0];
-        // 🆕 (توحيد الأوفلاين لشاشة الجلسة المستقلة — 5 أغسطس 2026): __dbWrite
-        // بدل safeUpdate — بيحافظ على نفس فحص التعارض (knownUpdatedAt) أونلاين،
-        // وكمان بيقيّد التعديل في طابور الأوفلاين لو النت مقطوع بدل ما يفشل
-        // بتوست خطأ عادي (نفس نمط handleUpdateSession في useCaseSessions.ts).
+        // ⚡ CHANGED (خطة تفكيك legacy columns — Phase F.2، 6 أغسطس 2026):
+        // primaryPlaintiff/primaryDefendant كانوا بيتحسبوا هنا عشان يتبعتوا
+        // كنسخة احتياطية على الأعمدة القديمة (تحت + في مزامنة السلاسل) —
+        // اتشالت الكتابتين الاتنين. partyFields.legalTitles لسه لازمة
+        // كمدخل فاليديشن بس في syncSessionParties تحت.
         const { error, offline, queued, conflict } = await window.__dbWrite({
             type: 'UPDATE', table: 'case_sessions', id: session.id,
             data: {
@@ -466,16 +577,6 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
                 circuit_number: form.circuit_number || null,
                 session_date: form.session_date,
                 session_time: form.session_time || null,
-                plaintiff: primaryPlaintiff?.name || null,
-                plaintiff_role: primaryPlaintiff?.capacity || null,
-                plaintiff_national_id: primaryPlaintiff?.national_id || null,
-                plaintiff_power_of_attorney: primaryPlaintiff?.power_of_attorney || null,
-                defendant: primaryDefendant?.name || null,
-                defendant_role: primaryDefendant?.capacity || null,
-                defendant_national_id: primaryDefendant?.national_id || null,
-                // 🆕 (خطة "المسمى القانوني" — مرحلة 3): نفس منطق EditCaseModal.tsx.
-                plaintiff_legal_title: partyFields.legalTitles.plaintiff || null,
-                defendant_legal_title: partyFields.legalTitles.defendant || null,
                 next_action: form.next_action || null,
             },
             knownUpdatedAt: session.updated_at || null,
@@ -509,15 +610,11 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
             case_number: fullCaseNumber || null,
             case_type: finalCaseType || null,
             circuit_number: form.circuit_number || null,
-            plaintiff: primaryPlaintiff?.name || null,
-            plaintiff_role: primaryPlaintiff?.capacity || null,
-            plaintiff_national_id: primaryPlaintiff?.national_id || null,
-            plaintiff_power_of_attorney: primaryPlaintiff?.power_of_attorney || null,
-            defendant: primaryDefendant?.name || null,
-            defendant_role: primaryDefendant?.capacity || null,
-            defendant_national_id: primaryDefendant?.national_id || null,
-            plaintiff_legal_title: partyFields.legalTitles.plaintiff || null,
-            defendant_legal_title: partyFields.legalTitles.defendant || null,
+            // ⚡ CHANGED (Phase F.2، 6 أغسطس 2026): كانت هنا مزامنة نفس
+            // الأعمدة القديمة (plaintiff/defendant/...) لكل جلسات السلسلة
+            // التاريخية — اتشالت (نفس تعديل نداء __dbWrite فوق بالحرف).
+            // أطراف كل جلسة في السلسلة بقت مستقلة في case_parties الخاصة
+            // بيها، مش محتاجة "هوية" مشتركة للأطراف عبر السلسلة أصلًا.
         });
         // ⚡ NEW (مرحلة 6.4): مزامنة أطراف الدعوى الفعلية في case_parties —
         // بعد نجاح تحديث بيانات الجلسة نفسها، بالـ session_id الحقيقي
@@ -529,11 +626,13 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
         }
         if (!partiesResult.ok) {
             // 🔒 نفس مبدأ 4.3/5.2: توست واحد بس، برسالة الفاليديشن المحددة
-            // لو ده السبب، أو رسالة عامة لو فشل الكتابة — من غير ما يمنع
-            // نجاح حفظ الجلسة نفسها.
+            // لو ده السبب، رسالة تعارض تسمي الأطراف بالظبط (مرحلة 4)، أو
+            // رسالة عامة لو فشل الكتابة — من غير ما يمنع نجاح حفظ الجلسة نفسها.
             toast(
                 partiesResult.reason === 'validation'
                     ? partiesResult.message
+                    : partiesResult.reason === 'conflict'
+                    ? `⚠️ تم تعديل الجلسة، لكن الأطراف التالية عدّلها شخص آخر بعد ما فتحت الفورم: ${partiesResult.conflictNames.join('، ')} — راجعها بعد إعادة الفتح`
                     : '⚠️ تم تعديل الجلسة، لكن حصل خطأ في مزامنة بعض أطراف الدعوى — راجعها بعد إعادة الفتح',
                 true
             );
@@ -866,23 +965,36 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
                     ),
                     selectedExistingClient && React.createElement('button', {
                         onClick: () => {
-                            // ⚡ CHANGED (Phase 3 — 4 أغسطس 2026): لو فيه طرف محدد
-                            // (existingClientTargetPartyId) بنتخطى فحص التعارض تمامًا وننده
-                            // confirmLinkToExistingClient على طول — نفس قرار InfoSection.tsx
-                            // (case_parties بيحتفظ ببياناته لكل طرف على حدة، مفيش "بيانات حرة
-                            // واحدة" تتعارض معاها). target=null (المسار القديم) → فحص
-                            // التعارض زي ما هو بالظبط.
-                            if (!existingClientTargetPartyId && !showMismatchConfirm) {
-                                const mismatches = findClientDataMismatches(
-                                    {
-                                        plaintiff: session.plaintiff,
-                                        plaintiff_national_id: session.plaintiff_national_id,
-                                        plaintiff_power_of_attorney: session.plaintiff_power_of_attorney,
-                                        // case_sessions مفيهاش عمود عنوان أصلاً (فاز 3) — undefined
-                                        // يخلي findClientDataMismatches يتجاهل مقارنة العنوان تلقائيًا.
-                                    },
-                                    selectedExistingClient,
-                                );
+                            // ⚡ CHANGED (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 1، فقرة 6 من
+                            // التقرير): كان بيتخطى فحص التعارض تمامًا لو فيه طرف محدد
+                            // (existingClientTargetPartyId) على افتراض إن case_parties بيحتفظ
+                            // ببياناته لكل طرف على حدة — الافتراض ده غير دقيق فعليًا. دلوقتي
+                            // بنفحص تعارض بيانات الطرف المحدد نفسه (لو موجود)، أو بيانات
+                            // الجلسة الحرة زي ما كان (المسار القديم، target=null).
+                            if (!showMismatchConfirm) {
+                                const targetParty = existingClientTargetPartyId
+                                    ? idlePartyList.find((p) => p.id === existingClientTargetPartyId)
+                                    : undefined;
+                                const mismatches = targetParty
+                                    ? findPartyDataMismatches(
+                                        {
+                                            name: targetParty.name,
+                                            national_id: targetParty.national_id,
+                                            power_of_attorney: targetParty.power_of_attorney,
+                                            address: targetParty.address,
+                                        },
+                                        selectedExistingClient,
+                                      )
+                                    : findClientDataMismatches(
+                                        {
+                                            plaintiff: session.plaintiff,
+                                            plaintiff_national_id: session.plaintiff_national_id,
+                                            plaintiff_power_of_attorney: session.plaintiff_power_of_attorney,
+                                            // case_sessions مفيهاش عمود عنوان أصلاً (فاز 3) — undefined
+                                            // يخلي findClientDataMismatches يتجاهل مقارنة العنوان تلقائيًا.
+                                        },
+                                        selectedExistingClient,
+                                      );
                                 if (mismatches.length > 0) { setPendingMismatches(mismatches); setShowMismatchConfirm(true); return; }
                             }
                             confirmLinkToExistingClient();
@@ -1041,9 +1153,12 @@ interface StandaloneSessionDetailModalProps {
     // عشان أي استدعاء قديم للموديل ده من غيرها ميتكسرش (فولباك تلقائي
     // لزرار "إضافة الموكل لقائمة الموكلين فقط" القديم).
     onOpenCreateClientForSessionParty?: OpenCreateClientForSessionParty;
+    // 🆕 (بند 2.3 — 6 أغسطس 2026): بتتوصّل لـ EditStandaloneModal — زرار
+    // "➕ إنشاء موكل جديد من هذه البيانات" جنب دروب-داون ربط طرف غير مربوط.
+    openNewClientModal?: (ctx: ClientModalContext) => void;
 }
 
-function StandaloneSessionDetailModal({ session: partialSession, db, onClose, onDone, onNotify, onClientAdded, clients = [], onOpenClientProfile, onOpenCreateClientForSessionParty }: StandaloneSessionDetailModalProps) {
+function StandaloneSessionDetailModal({ session: partialSession, db, onClose, onDone, onNotify, onClientAdded, clients = [], onOpenClientProfile, onOpenCreateClientForSessionParty, openNewClientModal }: StandaloneSessionDetailModalProps) {
     const [showUpdate, setShowUpdate] = useState(false);
     const [showEdit, setShowEdit] = useState(false);
     const [showLink, setShowLink] = useState(false);
@@ -1429,6 +1544,7 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
             linkedClient,
             clients,
             onOpenClientProfile: onOpenClientProfile ? (c: ClientRow) => { setShowEdit(false); onOpenClientProfile(c); } : undefined,
+            openNewClientModal,
         }),
         showUpdate && React.createElement(SessionUpdateModal, {
             session, caseData, db,
