@@ -8,6 +8,7 @@ import { Sel } from '@/shared/ui/Sel';
 import SessionUpdateModal from './SessionUpdateModal';
 import DeleteConfirmModal from '@/shared/modals/DeleteConfirmModal';
 import { useSessionLinking } from '../hooks/useSessionLinking';
+import type { SessionWithLegacyFields } from '../hooks/useSessionLinking';
 // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): نوع الكول-باك
 // بتاع فتح NewClientModal الموحّد لطرف بعينه — نفس النوع المستخدم في
 // NewStandaloneSessionModal.tsx.
@@ -82,7 +83,7 @@ interface CasePartyRow {
 }
 
 interface EditStandaloneModalProps {
-    session: CaseSessionRow;
+    session: SessionWithLegacyFields;
     db: SupabaseClient<Database>;
     onClose: () => void;
     onSaved: () => void;
@@ -735,7 +736,7 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
 //  ربط بموكل موجود بالفعل من غير إنشاء قضية)
 // ══════════════════════════════════════════
 interface LinkSessionModalProps {
-    session: CaseSessionRow;
+    session: SessionWithLegacyFields;
     db: SupabaseClient<Database>;
     onClose: () => void;
     onDone: () => void;
@@ -1136,7 +1137,7 @@ function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientA
 }
 
 interface StandaloneSessionDetailModalProps {
-    session: CaseSessionRow;
+    session: SessionWithLegacyFields;
     db: SupabaseClient<Database>;
     onClose: () => void;
     onDone: () => void;
@@ -1180,7 +1181,7 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
     // ونستخدمه هو بس في كل حاجة تحت (عرض + تمرير لكل الموديلات
     // الفرعية) — مش الـ prop الناقص. كده أي عمود جديد يتضاف مستقبلاً
     // في case_sessions بيوصل تلقائي من غير ما نلمس أي select() تاني.
-    const [fullSession, setFullSession] = useState<CaseSessionRow>(partialSession);
+    const [fullSession, setFullSession] = useState<SessionWithLegacyFields>(partialSession);
     const [loadingFull, setLoadingFull] = useState(true);
 
     useEffect(() => {
