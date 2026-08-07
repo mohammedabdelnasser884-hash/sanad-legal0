@@ -54,6 +54,13 @@ export function useAIChat({
         } catch(e) {
             const _msg = e instanceof Error ? e.message : String(e);
             const isKeyError = _msg?.includes('401')||_msg?.includes('invalid')||_msg?.includes('key');
+            // 🔒 FIX (خطة 4.1 — فولباك واضح لما quota المنصة يخلص، 6 أغسطس 2026):
+            // كان الرد بيعرض نص السيرفر كما هو ("...تقدر تضيف مفتاح Groq شخصي
+            // من الإعدادات") ويسيب المستخدم يدور على الزرار بنفسه — بعكس حالة
+            // isKeyError تحت اللي بتوجّه فعليًا لزرار موجود. دلوقتي أي رسالة
+            // سقف يومي بتفتح مودال "مفتاح شخصي" فورًا (setShowKeyInput) زي
+            // بالظبط تجربة isKeyError، فمفيش فرق في وضوح الفولباك بين الحالتين.
+            const isQuotaError = _msg?.includes('الحد المجاني اليومي');
             // 🆕 لو السيرفر رجّع رسالة عربية واضحة ومقصودة للمستخدم (زي
             // "وصلت للحد المجاني اليومي..."، "الجلسة منتهية"، "الحساب معطّل")
             // نعرضها زي ما هي بدل استبدالها برسالة عامة مالهاش لازمة —
@@ -62,12 +69,15 @@ export function useAIChat({
             const isUserFacingMessage = /[\u0600-\u06FF]/.test(_msg);
             const msg = isKeyError
                 ? '🔑 API Key غير صحيح. اضغط زر المفتاح لتحديثه.'
-                : isUserFacingMessage
-                    ? _msg
-                    : '⚠️ تعذّر الحصول على رد من المساعد الذكي. حاول تاني بعد قليل. لو المشكلة استمرت، تواصل مع الدعم.';
+                : isQuotaError
+                    ? `${_msg} فتحنا لك نافذة إضافة المفتاح 👇`
+                    : isUserFacingMessage
+                        ? _msg
+                        : '⚠️ تعذّر الحصول على رد من المساعد الذكي. حاول تاني بعد قليل. لو المشكلة استمرت، تواصل مع الدعم.';
             if (!isKeyError && !isUserFacingMessage) {
                 recordError('ai_chat', _msg, {label:'المساعد الذكي', message: msg});
             }
+            if (isQuotaError) setShowKeyInput(true);
             setMessages((p: AIMessage[]) =>[...p,{role:'assistant',text:msg}]);
         }
         setLoading(false);
