@@ -21,8 +21,6 @@ export interface SearchCaseResult {
     status: string;
     date: string;
     client_id: string | null;
-    plaintiff: string | null;
-    defendant: string | null;
     court_floor: string | null;
     court_hall: string | null;
     session_hall: string | null;
@@ -109,8 +107,6 @@ interface RawCaseSearchRow {
     case_number_official: string | null;
     court_name: string | null;
     case_type: string | null;
-    plaintiff: string | null;
-    defendant: string | null;
     status: string | null;
     client_id: string | null;
     next_hearing: string | null;
@@ -187,14 +183,12 @@ export function useUniversalSearch() {
                         .limit(LIMIT),
                     // البحث في كل القضايا بقاعدة البيانات مباشرة (مش مقيد بالـ 20 سجل المحمّلين في الشاشة)
                     db.from('cases')
-                        .select('id,title,case_number_official,court_name,case_type,plaintiff,defendant,status,client_id,next_hearing,court_floor,court_hall,session_hall,secretary_hall,secretary_name,court_level,circuit_number,updated_at')
+                        .select('id,title,case_number_official,court_name,case_type,status,client_id,next_hearing,court_floor,court_hall,session_hall,secretary_hall,secretary_name,court_level,circuit_number,updated_at')
                         .or([
                             ilikeOrClause('title', trimmed),
                             ilikeOrClause('case_number_official', trimmed),
                             ilikeOrClause('court_name', trimmed),
                             ilikeOrClause('case_type', trimmed),
-                            ilikeOrClause('plaintiff', trimmed),
-                            ilikeOrClause('defendant', trimmed),
                         ].join(','))
                         .order('created_at', { ascending: false })
                         .limit(LIMIT),
@@ -232,7 +226,7 @@ export function useUniversalSearch() {
                 let extraCasesRes: RawCaseSearchRow[] = [];
                 if (extraCaseIds.length > 0) {
                     const { data: extraData } = await db.from('cases')
-                        .select('id,title,case_number_official,court_name,case_type,plaintiff,defendant,status,client_id,next_hearing,court_floor,court_hall,session_hall,secretary_hall,secretary_name,court_level,circuit_number,updated_at')
+                        .select('id,title,case_number_official,court_name,case_type,status,client_id,next_hearing,court_floor,court_hall,session_hall,secretary_hall,secretary_name,court_level,circuit_number,updated_at')
                         .in('id', extraCaseIds)
                         .limit(LIMIT);
                     extraCasesRes = extraData || [];
@@ -250,8 +244,6 @@ export function useUniversalSearch() {
                     status: r.status || 'نشطة',
                     date: r.next_hearing || '—',
                     client_id: r.client_id,
-                    plaintiff: r.plaintiff || null,
-                    defendant: r.defendant || null,
                     court_floor: r.court_floor || null,
                     court_hall: r.court_hall || null,
                     session_hall: r.session_hall || null,
