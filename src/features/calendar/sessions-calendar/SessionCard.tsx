@@ -1,6 +1,7 @@
 import React from 'react';
 import { PartiesLine } from '@/shared/ui/PartiesLine';
 import { db } from '../../../supabaseClient';
+import { derivePartiesDisplay, type PartyDisplayRow } from '@/shared/parties/partiesDisplay';
 import type { MappedCase, MappedClient } from '../../../hooks/useAppData';
 import type { CalendarSessionRow } from './CalendarTab';
 import type { SessionCaseEmbed } from '@/shared/hooks/useDashboardFeed';
@@ -17,9 +18,15 @@ interface SessionCardProps {
     onOpenCase?: (c: MappedCase) => void;
     onOpenStandalone?: (s: CalendarSessionRow) => void;
     onGoogleExport?: (s: CalendarSessionRow, e: React.MouseEvent) => void;
+    // ⚡ NEW (خطة تفكيك الأعمدة القديمة، المرحلة B.1 — 6 أغسطس 2026): صفوف
+    // case_parties الفعلية بتاعة الجلسة/القضية دي (لو موجودة) — بتُستخدم
+    // بدل عمودي plaintiff/defendant القديمين لبناء سطر الأطراف. اختياري
+    // بالكامل: مفيش parties (undefined) = نفس السلوك القديم تمامًا
+    // (رجوع تلقائي لـ plaintiff/defendant من derivePartiesDisplay نفسها).
+    parties?: PartyDisplayRow[];
 }
 
-function SessionCard({ s, cases, clients, onOpenCase, onOpenStandalone, onGoogleExport }: SessionCardProps) {
+function SessionCard({ s, cases, clients, onOpenCase, onOpenStandalone, onGoogleExport, parties }: SessionCardProps) {
     // ⚠️ تصحيح جذري: القضية ممكن تكون موجودة فعليًا في قاعدة البيانات ومربوطة
     // صح بـ case_id، لكن غير موجودة في الـ "cases" array المحلي لأن القضايا
     // بتتحمّل بنظام صفحات (PAGE_SIZE = 15 في useAppData.ts) ومفلترة بحالة معينة.
@@ -32,13 +39,17 @@ function SessionCard({ s, cases, clients, onOpenCase, onOpenStandalone, onGoogle
     const caseForNav = cases.find((c: MappedCase) => c.id === s.case_id); // الكائن الكامل، يُستخدم فقط عند الضغط لفتح القضية
     const linkedCase = (joinedCase || caseForNav) as LinkedCaseLike | undefined; // للعرض فقط — الأولوية للـ join المرفق مع الجلسة نفسه
     const isStandalone = !s.case_id;
-    const plaintiff = linkedCase?.plaintiff || s.plaintiff;
-    const defendant = linkedCase?.defendant || s.defendant;
-    // ⚡ NEW (24 يوليو، خطة سد فجوات عرض الأطراف — مرحلة 2): نفس ترتيب
-    // fallback الاسم المفرد بالضبط، بس للمسمى القانوني. فاضي (الحالة الغالبة)
-    // يعني PartiesLine بترجع لعرض الاسم المفرد زي ما هي بدون أي تغيير.
-    const plaintiffLegalTitle = linkedCase?.plaintiff_legal_title || s.plaintiff_legal_title;
-    const defendantLegalTitle = linkedCase?.defendant_legal_title || s.defendant_legal_title;
+    // ⚡ CHANGED (خطة تفكيك الأعمدة القديمة، المرحلة B.1): مصدر الحقيقة
+    // بقى case_parties (parties prop) لو موجود؛ الأعمدة القديمة (plaintiff/
+    // defendant/*_legal_title) بقت fallback جوا derivePartiesDisplay نفسها
+    // بدل ما تُقرأ مباشرة هنا — نفس النتيجة بالظبط لأي جلسة لسه مالهاش
+    // صفوف case_parties (الحالة الأغلب حاليًا لبيانات قديمة).
+    const { plaintiff: displayPlaintiff, defendant: displayDefendant } = derivePartiesDisplay(parties, {
+        plaintiff: linkedCase?.plaintiff || s.plaintiff,
+        defendant: linkedCase?.defendant || s.defendant,
+        plaintiffLegalTitle: linkedCase?.plaintiff_legal_title || s.plaintiff_legal_title,
+        defendantLegalTitle: linkedCase?.defendant_legal_title || s.defendant_legal_title,
+    });
     const caseType  = linkedCase?.type  || linkedCase?.case_type || s.case_type;
     const caseTitle = linkedCase?.title || s.title || s.description;
     const caseNumberRaw = linkedCase?.number || linkedCase?.case_number_official || s.case_number;
@@ -57,9 +68,9 @@ function SessionCard({ s, cases, clients, onOpenCase, onOpenStandalone, onGoogle
     else if (caseNum) numberLine = `رقم الدعوى ${caseNum}`;
     if (caseType) numberLine = numberLine ? `${numberLine} - ${caseType}` : caseType;
 
-    // السطر الثاني: المدعي ضد المدعى عليه (أو نص بديل)
-    const displayPlaintiff = plaintiffLegalTitle || plaintiff;
-    const displayDefendant = defendantLegalTitle || defendant;
+    // السطر الثاني: المدعي ضد المدعى عليه (أو نص بديل) — displayPlaintiff/
+    // displayDefendant جايين جاهزين من derivePartiesDisplay فوق (case_parties
+    // أولاً، وإلا legacy).
     const partiesFallback = !numberLine ? caseTitle : null;
     const partiesText = (displayPlaintiff && displayDefendant)
         ? displayPlaintiff + ' ضد ' + displayDefendant
@@ -125,10 +136,11 @@ function SessionCard({ s, cases, clients, onOpenCase, onOpenStandalone, onGoogle
                 style: { color: '#D4AF37' }
             }, numberLine),
 
-            // سطر الأطراف
+            // سطر الأطراف — plaintiff/defendant هنا بالفعل النص النهائي
+            // الجاهز (case_parties أو legacy)، فمفيش داعي نمرر legal title
+            // منفصل لـ PartiesLine تاني (derivePartiesDisplay دمجها بالفعل).
             React.createElement(PartiesLine, {
-                plaintiff, defendant,
-                plaintiffLegalTitle, defendantLegalTitle,
+                plaintiff: displayPlaintiff, defendant: displayDefendant,
                 fallback: partiesFallback || caseTitle || '— جلسة مستقلة —',
                 className: "text-[13px] font-bold text-white" + (numberLine ? " mt-0.5" : "")
             }),
