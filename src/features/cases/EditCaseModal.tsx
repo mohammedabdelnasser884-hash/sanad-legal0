@@ -19,6 +19,7 @@ import {
     getPartyStateMessage,
     type PartyDomainContext,
 } from '@/shared/parties/partyDomainService';
+import { findPartyDataMismatches, type FieldMismatch } from '../calendar/hooks/caseSessionLinkingShared';
 import { useFormDraft } from '@/shared/hooks/useFormDraft';
 import { useUnsavedChangesGuard } from '@/shared/hooks/useUnsavedChangesGuard';
 import type { MappedCase } from '../../hooks/useAppData';
@@ -90,6 +91,10 @@ interface CasePartyRow {
     power_of_attorney: string | null;
     client_id: string | null;
     sort_order: number;
+    // 🆕 (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 2، 6 أغسطس 2026): نفس
+    // إضافة CasePartyRow في useCaseDetailActions.ts — موجودة فعليًا مع
+    // select('*') تحت، ناقصة من النوع بس.
+    updated_at: string | null;
 }
 
 // خيارات وقت الجلسة — كانت زرارين، دلوقتي select واحد عشان تقدر تقعد جنب
@@ -257,6 +262,11 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
                 address: row.address || '',
                 power_of_attorney: row.power_of_attorney || '',
                 client_id: row.client_id || null,
+                // 🆕 (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 2): بتتقرا من
+                // case_parties.updated_at الحقيقي، وبتنقل مع الطرف طول عمر
+                // الفورم عشان syncCaseParties تستخدمها كـknownUpdatedAt وقت
+                // الحفظ (UPDATE) — راجع useCaseActions.ts.
+                updated_at: row.updated_at || null,
             });
             return {
                 plaintiffs: existingPartyRows.filter((r) => r.side === 'plaintiff').map(toField),
@@ -394,6 +404,25 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
         partyFields.updateParty(partyId,'address',picked.address || '');
     };
 
+    // ⚡ NEW (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 1، فقرة 1 من التقرير):
+    // كان الدروب-داون فوق بيستبدل الاسم/الرقم القومي/التوكيل/العنوان
+    // المكتوبين فورًا من غير أي تحذير لو فيه بيانات حرة مختلفة عن الموكل
+    // المختار. دلوقتي بنفحص التعارض الأول (findPartyDataMismatches)، ولو
+    // فيه فرق حقيقي بنوقف ونعرض تأكيد صغير جوه كارت الطرف (نفس نمط
+    // unlinkConfirmPartyId تحت) بدل الاستبدال الصامت.
+    const [linkMismatchState, setLinkMismatchState] = useState<{ partyId: string; clientId: string; mismatches: FieldMismatch[] } | null>(null);
+    const requestLinkClientToParty = (party: PartyFieldValue, clientId: string) => {
+        if(!clientId){ linkClientToParty(party.id,''); return; }
+        const picked = clients.find((c: ClientRow) => c.id===clientId);
+        if(!picked) return;
+        const mismatches = findPartyDataMismatches(
+            { name: party.name, national_id: party.national_id, power_of_attorney: party.power_of_attorney, address: party.address },
+            picked,
+        );
+        if(mismatches.length > 0){ setLinkMismatchState({ partyId: party.id, clientId, mismatches }); return; }
+        linkClientToParty(party.id, clientId);
+    };
+
     // ⚡ NEW (خطة توحيد قفل الطرف — المرحلة 3، "preview قبل فك الربط"،
     // 6 أغسطس 2026): فك ربط طرف *مربوط فعليًا بموكل حي* (LINKED، مش
     // ORPHAN_PARTY — orphan أصلًا مالوش موكل حي يتفك عنه فعليًا) بقى
@@ -453,7 +482,7 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
             // linkClientToParty فورًا — بنفتح تأكيد صغير جوه الكارت الأول.
             // أي اختيار تاني (ربط بموكل جديد، أو فك ربط طرف orphan أصلًا
             // مالوش موكل حي حاليًا) بينفذ على طول زي ما كان.
-            clients.length>0 && !confirmingUnlink && React.createElement(Sel,{
+            clients.length>0 && !confirmingUnlink && linkMismatchState?.partyId !== party.id && React.createElement(Sel,{
                 label:"ربط بموكل من النظام (اختياري)",
                 // ⚡ FIX (باگ 5.1): قيمة orphan (client_id مش موجود في clients)
                 // كانت بتتعرض كأنها اختيار حقيقي في الدروب-داون (قيمة بلا
@@ -462,10 +491,33 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
                 onChange:(e: React.ChangeEvent<HTMLSelectElement>) => {
                     const newVal = e.target.value;
                     if(!newVal && isLinkedState(state) && linkedPartyClient){ setUnlinkConfirmPartyId(party.id); return; }
-                    linkClientToParty(party.id,newVal);
+                    requestLinkClientToParty(party, newVal);
                 },
                 options:[{value:'',label:'— بدون ربط (بيانات يدوية) —'},...clients.map((c: ClientRow) =>({value:c.id,label:c.full_name}))]
             }),
+            // ⚡ NEW (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 1): تأكيد
+            // تعارض بيانات — بيظهر بس لو requestLinkClientToParty لقت فرق
+            // حقيقي بين بيانات الطرف الحرة وملف الموكل المختار.
+            linkMismatchState?.partyId === party.id && React.createElement('div',{className:'bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5 space-y-2', 'data-testid':`edit-case-link-mismatch-${party.id}`},
+                React.createElement('p',{className:'text-[9px] text-amber-400 font-black'},'⚠️ القيم دي مختلفة عن ملف الموكل:'),
+                linkMismatchState.mismatches.map((m: FieldMismatch) => React.createElement('p',{key:m.field, className:'text-[9px] text-slate-300'},
+                    `${m.label}: في الطرف "${m.freeTextValue}" ← في ملف الموكل "${m.clientValue}"`
+                )),
+                React.createElement('div',{className:'flex gap-2'},
+                    React.createElement('button',{
+                        type:'button',
+                        onClick:()=>{ linkClientToParty(party.id, linkMismatchState.clientId); setLinkMismatchState(null); },
+                        className:'flex-1 py-2 rounded-lg bg-premium-gold text-premium-bg text-[10px] font-black',
+                        'data-testid':`edit-case-link-mismatch-confirm-${party.id}`,
+                    },'استخدم بيانات الموكل'),
+                    React.createElement('button',{
+                        type:'button',
+                        onClick:()=>setLinkMismatchState(null),
+                        className:'flex-1 py-2 rounded-lg bg-white/5 border border-white/10 text-slate-300 text-[10px] font-black',
+                        'data-testid':`edit-case-link-mismatch-cancel-${party.id}`,
+                    },'إلغاء')
+                )
+            ),
             confirmingUnlink && React.createElement('div',{className:'bg-rose-500/10 border border-rose-500/20 rounded-xl p-2.5 space-y-2', 'data-testid':`edit-case-unlink-preview-${party.id}`},
                 React.createElement('p',{className:'text-[9px] text-rose-300 font-bold leading-relaxed'},
                     `⚠️ هيتم فك ربط "${party.name || 'هذا الطرف'}" عن الموكل "${linkedPartyClient?.full_name}". بيانات الطرف (الاسم/الرقم القومي/العنوان/التوكيل) هتفضل زي ما هي دلوقتي كنسخة يدوية قابلة للتعديل الحر، ومش هتتحدّث تلقائيًا من ملف الموكل تاني.`
@@ -706,32 +758,18 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
                     const finalCourtLevel = form.court_level==='أخرى' ? form.court_level_other : form.court_level;
                     const finalCourt = form.court.trim() || '—';
                     const finalType  = form.type.trim() || 'عام';
-                    // ⚡ NEW (مرحلة 5.1): نفس منطق NewCaseModal.tsx — الأعمدة
-                    // القديمة (plaintiff/defendant/...) بتاخد نسخة من "الطرف
-                    // الأساسي" في كل جهة (أولوية لمن عليه ⭐، وإلا أول طرف).
-                    // الكتابة الفعلية لكل الأطراف في case_parties (upsert
-                    // بالـ id الحقيقي لو موجود، insert لو جديد، delete لو
-                    // اتشال) هتتضاف في مرحلة 5.2 التالية — form.parties
-                    // بيتبعت من دلوقتي بس useCaseActions.ts (handleUpdateCase)
-                    // لسه مش بيستخدمه.
-                    const primaryPlaintiff = partyFields.plaintiffs.find((p) =>p.is_client) || partyFields.plaintiffs[0];
-                    const primaryDefendant = partyFields.defendants.find((p) =>p.is_client) || partyFields.defendants[0];
+                    // ⚡ CHANGED (خطة تفكيك legacy columns — Phase F.1، 6 أغسطس
+                    // 2026): نفس تعديل NewCaseModal.tsx بالحرف — وقّفنا إرسال
+                    // نسخة "الطرف الأساسي" للأعمدة القديمة خالص. useCaseActions.ts
+                    // (handleUpdateCase) بقى بيوقّف كتابتها على cases، وكل شاشات
+                    // العرض بتقرا من case_parties (مراحل B.1-B.4). legalTitles لسه
+                    // بتتبعت كمدخل فاليديشن بس (validateParties في syncCaseParties).
                     const saveData: CaseFormSubmitData = {
                         ...form,
                         number,
                         court: finalCourt,
                         type: finalType,
                         court_level: finalCourtLevel,
-                        plaintiff: primaryPlaintiff?.name || undefined,
-                        plaintiff_role: primaryPlaintiff?.capacity || undefined,
-                        plaintiff_national_id: primaryPlaintiff?.national_id || undefined,
-                        plaintiff_power_of_attorney: primaryPlaintiff?.power_of_attorney || undefined,
-                        plaintiff_address: primaryPlaintiff?.address || undefined,
-                        defendant: primaryDefendant?.name || undefined,
-                        defendant_role: primaryDefendant?.capacity || undefined,
-                        defendant_national_id: primaryDefendant?.national_id || undefined,
-                        // 🆕 (خطة "المسمى القانوني" — مرحلة 3): نفس منطق
-                        // NewCaseModal.tsx.
                         plaintiff_legal_title: partyFields.legalTitles.plaintiff || undefined,
                         defendant_legal_title: partyFields.legalTitles.defendant || undefined,
                         parties: partyFields.parties,
