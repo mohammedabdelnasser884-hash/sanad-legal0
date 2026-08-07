@@ -4,7 +4,7 @@ import type { CaseSessionRow, CaseNoteRow } from '../../../types';
 import type { CaseDocWithUrl, CasePartyRow } from '../hooks/useCaseDetailActions';
 // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 6): كشف التعارض بين البيانات
 // الحرة المكتوبة في القضية وملف الموكل المختار وقت الربط اللاحق.
-import { findClientDataMismatches, type FieldMismatch } from '../../calendar/hooks/caseSessionLinkingShared';
+import { findClientDataMismatches, findPartyDataMismatches, type FieldMismatch } from '../../calendar/hooks/caseSessionLinkingShared';
 // 🆕 (خطة "المسمى القانوني" — مرحلة 5): منطق موحّد لعرض المسمى القانوني
 // عند تعدد الأشخاص تحت طرف واحد — نفس الدالة مستخدمة في هيدر CaseDetailView.tsx.
 import { summarizePartySide } from '../../../shared/parties/partyDisplay';
@@ -32,7 +32,7 @@ interface InfoSectionProps {
   // لـ onLinkClient فوق، بس بيربط طرف بعينه من caseParties (case_parties.client_id
   // + cases.client_id لو الطرف أساسي) بدل ما يربط القضية كلها — شوف
   // useCaseActions.ts (handleLinkClientForParty).
-  onLinkClientForParty?: (partyId: string, clientId: string, isPrimaryParty: boolean) => void | Promise<void>;
+  onLinkClientForParty?: (partyId: string, clientId: string, isPrimaryParty: boolean, knownUpdatedAt: string | null) => void | Promise<void>;
   // ⚡ CHANGED (خطة توحيد إنشاء الموكل، Phase 1): بقت مجرد فتح لـ
   // NewClientModal الكامل (مليان ببيانات المدعي) — مش عملية حفظ. الحفظ
   // والربط وفحص التكرار كلهم بقوا مسؤولية useClientActions.handleSaveClient.
@@ -48,7 +48,7 @@ interface InfoSectionProps {
   // cases.client_id لو الطرف أساسي)، من غير ما يلمس بيانات القضية التانية.
   // نفس نمط onLinkClientForParty بالظبط — شوف useCaseActions.ts
   // (handleUnlinkClientForParty).
-  onUnlinkClientForParty?: (partyId: string, isPrimaryParty: boolean) => void | Promise<void>;
+  onUnlinkClientForParty?: (partyId: string, isPrimaryParty: boolean, knownUpdatedAt: string | null) => void | Promise<void>;
   // ⚡ NEW (خطة تعدد الأطراف، مرحلة 13.1 — 23 يوليو 2026): زرار "إنشاء
   // موكل" لطرف بعينه من caseParties — بديل onCreateAndLinkClient لما فيه
   // أكتر من طرف عليه ⭐ (شوف قسم 9 في الخطة). caseData/CaseDetailView هي
@@ -193,7 +193,7 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                                         disabled: unlinkingClient,
                                         'data-testid': `info-unlink-party-confirm-${p.id}`,
                                         onClick: async () => {
-                                            await onUnlinkClientForParty(p.id, p.id === primaryPartyId);
+                                            await onUnlinkClientForParty(p.id, p.id === primaryPartyId, p.updated_at ?? null);
                                             setUnlinkPartyConfirmId(null);
                                         },
                                         className: "bg-rose-500 text-white rounded-lg px-2 py-1 text-[9px] font-black disabled:opacity-60"
@@ -407,13 +407,29 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                                 React.createElement('button', {
                                     disabled: !pickedClientId || linkingClient,
                                     onClick: async () => {
-                                        // ⚡ NEW (Phase 3 — 4 أغسطس 2026): existingClientTargetParty
-                                        // متحدد → ربط الطرف ده بس عبر onLinkClientForParty (case_parties.client_id
-                                        // + cases.client_id لو الطرف أساسي)، من غير فحص تعارض — case_parties
-                                        // بيحتفظ ببياناته الخاصة (اسم/رقم قومي/توكيل) لكل طرف على حدة، مفيش
-                                        // "بيانات قضية حرة" واحدة تتعارض معاها زي المسار القديم تحت.
+                                        // ⚡ CHANGED (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 1، فقرة 6 من
+                                        // التقرير): كان بيتخطى فحص التعارض تمامًا هنا على افتراض إن
+                                        // case_parties بيحتفظ ببياناته لكل طرف على حدة — الافتراض ده غير
+                                        // دقيق فعليًا (الطرف نفسه ممكن يكون فيه بيانات حرة قديمة/مختلفة عن
+                                        // ملف الموكل). دلوقتي بنعمل نفس فحص findPartyDataMismatches اللي
+                                        // بيحصل للقضية كلها تحت، بس على بيانات الطرف المحدد.
                                         if (existingClientTargetParty) {
-                                            await onLinkClientForParty!(existingClientTargetParty.id, pickedClientId, existingClientTargetParty.id === primaryPartyId);
+                                            const pickedClientForParty = clients.find((c) => c.id === pickedClientId);
+                                            const partyMismatches = pickedClientForParty ? findPartyDataMismatches(
+                                                {
+                                                    name: existingClientTargetParty.name,
+                                                    national_id: existingClientTargetParty.national_id,
+                                                    power_of_attorney: existingClientTargetParty.power_of_attorney,
+                                                    address: existingClientTargetParty.address,
+                                                },
+                                                pickedClientForParty,
+                                            ) : [];
+                                            if (partyMismatches.length > 0) {
+                                                setPendingMismatches(partyMismatches);
+                                                setLinkStep('confirmMismatch');
+                                                return;
+                                            }
+                                            await onLinkClientForParty!(existingClientTargetParty.id, pickedClientId, existingClientTargetParty.id === primaryPartyId, existingClientTargetParty.updated_at ?? null);
                                             setLinkStep('closed'); setPickedClientId(''); setExistingClientTargetParty(null);
                                             return;
                                         }
@@ -465,7 +481,17 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                                 React.createElement('button', {
                                     disabled: linkingClient,
                                     'data-testid': 'info-link-client-confirm-mismatch',
-                                    onClick: async () => { await onLinkClient!(pickedClientId); setLinkStep('closed'); setPickedClientId(''); setPendingMismatches([]); },
+                                    onClick: async () => {
+                                        // ⚡ NEW (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 1): existingClientTargetParty
+                                        // متحدد → نفس مسار ربط الطرف زي فوق، بس بعد تأكيد المستخدم على
+                                        // استبدال البيانات. من غيره (المسار القديم — القضية كلها) زي ما هو.
+                                        if (existingClientTargetParty) {
+                                            await onLinkClientForParty!(existingClientTargetParty.id, pickedClientId, existingClientTargetParty.id === primaryPartyId, existingClientTargetParty.updated_at ?? null);
+                                        } else {
+                                            await onLinkClient!(pickedClientId);
+                                        }
+                                        setLinkStep('closed'); setPickedClientId(''); setPendingMismatches([]); setExistingClientTargetParty(null);
+                                    },
                                     className: "flex-1 bg-premium-gold text-premium-bg rounded-xl py-2.5 text-[11px] font-black disabled:opacity-40"
                                 }, linkingClient ? '... جارٍ الربط' : 'نعم، استخدم بيانات الموكل'),
                                 React.createElement('button', {
