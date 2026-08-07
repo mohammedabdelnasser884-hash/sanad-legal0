@@ -673,11 +673,11 @@ describe('useCaseActions', () => {
       const { handleLinkClientForParty } = useCaseActions(params);
       const onAfterLink = vi.fn();
 
-      await handleLinkClientForParty('case-link-1', 'party-1', 'client-1', true, onAfterLink);
+      await handleLinkClientForParty('case-link-1', 'party-1', 'client-1', true, null, onAfterLink);
 
       const calls = dbWriteMock().mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>);
       expect(calls).toContainEqual(expect.objectContaining({
-        type: 'UPDATE', table: 'case_parties', id: 'party-1', data: { client_id: 'client-1' },
+        type: 'UPDATE', table: 'case_parties', id: 'party-1', data: { client_id: 'client-1', name: 'أحمد محمد', national_id: '', power_of_attorney: '', address: '' },
       }));
       expect(calls).toContainEqual(expect.objectContaining({
         type: 'UPDATE', table: 'cases', id: 'case-link-1', data: expect.objectContaining({ client_id: 'client-1' }),
@@ -697,11 +697,11 @@ describe('useCaseActions', () => {
       const { handleLinkClientForParty } = useCaseActions(params);
       const onAfterLink = vi.fn();
 
-      await handleLinkClientForParty('case-link-2', 'party-2', 'client-1', false, onAfterLink);
+      await handleLinkClientForParty('case-link-2', 'party-2', 'client-1', false, null, onAfterLink);
 
       const calls = dbWriteMock().mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>);
       expect(calls).toEqual([expect.objectContaining({
-        type: 'UPDATE', table: 'case_parties', id: 'party-2', data: { client_id: 'client-1' },
+        type: 'UPDATE', table: 'case_parties', id: 'party-2', data: { client_id: 'client-1', name: 'أحمد محمد', national_id: '', power_of_attorney: '', address: '' },
       })]);
       expect(params.fetchCases).not.toHaveBeenCalled();
       expect(onAfterLink).toHaveBeenCalled();
@@ -714,7 +714,7 @@ describe('useCaseActions', () => {
       const { handleLinkClientForParty } = useCaseActions(params);
       const onAfterLink = vi.fn();
 
-      await handleLinkClientForParty('case-link-3', 'party-1', 'client-1', true, onAfterLink);
+      await handleLinkClientForParty('case-link-3', 'party-1', 'client-1', true, null, onAfterLink);
 
       expect(toast).toHaveBeenCalledWith('❌ تعذّر ربط الموكل بهذا الطرف. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', true);
       expect(logActivity).not.toHaveBeenCalled();
@@ -728,7 +728,7 @@ describe('useCaseActions', () => {
       const params = makeParams({ cases: [targetCase] });
       const { handleLinkClientForParty } = useCaseActions(params);
 
-      await handleLinkClientForParty('case-link-4', 'party-1', 'client-unknown', false, vi.fn());
+      await handleLinkClientForParty('case-link-4', 'party-1', 'client-unknown', false, null, vi.fn());
 
       expect(toast).toHaveBeenCalledWith('✅ تم ربط الطرف بالموكل');
     });
@@ -746,7 +746,7 @@ describe('useCaseActions', () => {
       const { handleUnlinkClientForParty } = useCaseActions(params);
       const onAfterLink = vi.fn();
 
-      await handleUnlinkClientForParty('case-unlink-1', 'party-1', true, onAfterLink);
+      await handleUnlinkClientForParty('case-unlink-1', 'party-1', true, null, onAfterLink);
 
       const calls = dbWriteMock().mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>);
       expect(calls).toContainEqual(expect.objectContaining({
@@ -770,7 +770,7 @@ describe('useCaseActions', () => {
       const { handleUnlinkClientForParty } = useCaseActions(params);
       const onAfterLink = vi.fn();
 
-      await handleUnlinkClientForParty('case-unlink-2', 'party-2', false, onAfterLink);
+      await handleUnlinkClientForParty('case-unlink-2', 'party-2', false, null, onAfterLink);
 
       const calls = dbWriteMock().mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>);
       expect(calls).toEqual([expect.objectContaining({
@@ -787,7 +787,7 @@ describe('useCaseActions', () => {
       const { handleUnlinkClientForParty } = useCaseActions(params);
       const onAfterLink = vi.fn();
 
-      await handleUnlinkClientForParty('case-unlink-3', 'party-1', true, onAfterLink);
+      await handleUnlinkClientForParty('case-unlink-3', 'party-1', true, null, onAfterLink);
 
       expect(toast).toHaveBeenCalledWith('❌ تعذّر فك ربط الطرف عن الموكل. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', true);
       expect(logActivity).not.toHaveBeenCalled();
