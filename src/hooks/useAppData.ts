@@ -211,10 +211,17 @@ export function useAppData(profile: ProfileRow | null) {
             status:         r.status || 'نشطة',
             date:           sessionsMap[r.id] || r.next_hearing || '—',
             client_id:      r.client_id,
-            plaintiff:      r.plaintiff || null,
-            plaintiff_role: r.plaintiff_role || null,
-            defendant:      r.defendant || null,
-            defendant_role: r.defendant_role || null,
+            // ⚡ FIX (F.4، 6 أغسطس 2026): كل حقول الأطراف القديمة دي (plaintiff/
+            // plaintiff_role/defendant/defendant_role/*_national_id/
+            // *_power_of_attorney/plaintiff_address/*_legal_title) اتشالت فعليًا
+            // من جدول cases مع الهجرة، فمعادش موجودة في CaseRow خالص. سايبين
+            // الحقول null هنا (بدل ما نمسحها من MappedCase) عشان أي مستهلك قديم
+            // لسه بيقراها يفضل شغال بدون كراش — مصدر العرض الحقيقي بقى
+            // partiesMap[r.id] (case_parties) عن طريق derivePartiesDisplay.
+            plaintiff:      null,
+            plaintiff_role: null,
+            defendant:      null,
+            defendant_role: null,
             year:           r.created_at ? new Date(r.created_at).getFullYear() : new Date().getFullYear(),
             updated_at:     r.updated_at || null,  // BUG-19: محتاجينه لـ knownUpdatedAt في handleUpdateCase
             court_floor:    r.court_floor || null,
@@ -224,12 +231,12 @@ export function useAppData(profile: ProfileRow | null) {
             secretary_name: r.secretary_name || null,
             secretary_mobile: r.secretary_mobile || null,
             session_time:   r.session_time || null,
-            plaintiff_national_id: r.plaintiff_national_id || null,
-            plaintiff_power_of_attorney: r.plaintiff_power_of_attorney || null,
-            defendant_national_id: r.defendant_national_id || null,
-            plaintiff_address: r.plaintiff_address || null,
-            plaintiff_legal_title: r.plaintiff_legal_title || null,
-            defendant_legal_title: r.defendant_legal_title || null,
+            plaintiff_national_id: null,
+            plaintiff_power_of_attorney: null,
+            defendant_national_id: null,
+            plaintiff_address: null,
+            plaintiff_legal_title: null,
+            defendant_legal_title: null,
             parties:        partiesMap[r.id] || [],
         }));
 
@@ -299,10 +306,12 @@ export function useAppData(profile: ProfileRow | null) {
             status:         r.status || 'نشطة',
             date:           sessionsMap[r.id] || r.next_hearing || '—',
             client_id:      r.client_id,
-            plaintiff:      r.plaintiff || null,
-            plaintiff_role: r.plaintiff_role || null,
-            defendant:      r.defendant || null,
-            defendant_role: r.defendant_role || null,
+            // ⚡ FIX (F.4، 6 أغسطس 2026): نفس تعليق fetchCases فوق بالظبط —
+            // الأعمدة دي اتشالت من قاعدة البيانات، فبتفضل null هنا.
+            plaintiff:      null,
+            plaintiff_role: null,
+            defendant:      null,
+            defendant_role: null,
             year:           r.created_at ? new Date(r.created_at).getFullYear() : new Date().getFullYear(),
             updated_at:     r.updated_at || null,
             court_floor:    r.court_floor || null,
@@ -312,12 +321,12 @@ export function useAppData(profile: ProfileRow | null) {
             secretary_name: r.secretary_name || null,
             secretary_mobile: r.secretary_mobile || null,
             session_time:   r.session_time || null,
-            plaintiff_national_id: r.plaintiff_national_id || null,
-            plaintiff_power_of_attorney: r.plaintiff_power_of_attorney || null,
-            defendant_national_id: r.defendant_national_id || null,
-            plaintiff_address: r.plaintiff_address || null,
-            plaintiff_legal_title: r.plaintiff_legal_title || null,
-            defendant_legal_title: r.defendant_legal_title || null,
+            plaintiff_national_id: null,
+            plaintiff_power_of_attorney: null,
+            defendant_national_id: null,
+            plaintiff_address: null,
+            plaintiff_legal_title: null,
+            defendant_legal_title: null,
             parties:        partiesMap[r.id] || [],
         }));
 
