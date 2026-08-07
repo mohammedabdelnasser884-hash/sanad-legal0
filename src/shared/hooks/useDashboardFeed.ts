@@ -7,12 +7,6 @@ import type { ProfileRow, ReminderRow } from '../../types';
 export interface SessionCaseEmbed {
     id: string;
     title: string | null;
-    plaintiff: string | null;
-    defendant: string | null;
-    // ⚡ NEW (24 يوليو، خطة سد فجوات عرض الأطراف — مرحلة 2): موجودان بالفعل
-    // على جدول cases من تقرير المسمى القانوني، لكن لم يكونا مطلوبين هنا.
-    plaintiff_legal_title: string | null;
-    defendant_legal_title: string | null;
     court_name: string | null;
     case_type: string | null;
     case_number_official: string | null;
@@ -41,14 +35,6 @@ export interface SessionFeedItem {
     court: string | null;
     case_type: string | null;
     circuit_number: string | null;
-    plaintiff: string | null;
-    plaintiff_role: string | null;
-    defendant: string | null;
-    defendant_role: string | null;
-    // ⚡ NEW (24 يوليو، خطة سد فجوات عرض الأطراف — مرحلة 2): موجودان بالفعل
-    // على جدول case_sessions من تقرير المسمى القانوني (للجلسات المستقلة).
-    plaintiff_legal_title: string | null;
-    defendant_legal_title: string | null;
     cases: SessionCaseEmbed | SessionCaseEmbed[] | null;
 }
 
@@ -90,7 +76,7 @@ export function useDashboardFeed(profile: ProfileRow | null) {
         setLoadingUrgent(true);
         const todayStr = fmtDate(new Date());
         const { data, error } = await db.from('case_sessions')
-            .select('id, session_date, session_time, session_floor, session_hall, description, case_id, client_id, result, next_action, title, case_number, court, case_type, circuit_number, plaintiff, plaintiff_role, defendant, defendant_role, plaintiff_legal_title, defendant_legal_title, cases(id,title,plaintiff,defendant,plaintiff_legal_title,defendant_legal_title,court_name,case_type,case_number_official,client_id)')
+            .select('id, session_date, session_time, session_floor, session_hall, description, case_id, client_id, result, next_action, title, case_number, court, case_type, circuit_number, cases(id,title,court_name,case_type,case_number_official,client_id)')
             .eq('session_date', todayStr)
             .order('session_date', { ascending: true });
         // 🔒 FIX (تشخيص لوجز E2E — 30 يوليو 2026): كان بيتجاهل error تمامًا —
@@ -108,7 +94,7 @@ export function useDashboardFeed(profile: ProfileRow | null) {
         const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
         const endDay   = new Date(today); endDay.setDate(today.getDate() + 7);
         const { data, error } = await db.from('case_sessions')
-            .select('id, session_date, session_time, session_floor, session_hall, description, case_id, client_id, result, next_action, title, case_number, court, case_type, circuit_number, plaintiff, plaintiff_role, defendant, defendant_role, plaintiff_legal_title, defendant_legal_title, cases(id,title,plaintiff,defendant,plaintiff_legal_title,defendant_legal_title,court_name,case_type,case_number_official,client_id)')
+            .select('id, session_date, session_time, session_floor, session_hall, description, case_id, client_id, result, next_action, title, case_number, court, case_type, circuit_number, cases(id,title,court_name,case_type,case_number_official,client_id)')
             .gte('session_date', fmtDate(tomorrow))
             .lte('session_date', fmtDate(endDay))
             .order('session_date', { ascending: true });
@@ -135,7 +121,7 @@ export function useDashboardFeed(profile: ProfileRow | null) {
         // بالـ select بتاع جلسات اليوم/الأسبوع فوق، مع إن SessionFeedItem بيطلبهم
         // إجباريًا — ده كان بيكسر النوع وقت التخزين في setMissedSessions.
         const { data: pastData } = await db.from('case_sessions')
-            .select('id, session_date, session_time, session_floor, session_hall, description, case_id, client_id, result, next_action, title, case_number, court, case_type, circuit_number, plaintiff, plaintiff_role, defendant, defendant_role, plaintiff_legal_title, defendant_legal_title, cases(id,title,plaintiff,defendant,plaintiff_legal_title,defendant_legal_title,court_name,case_type,case_number_official,client_id)')
+            .select('id, session_date, session_time, session_floor, session_hall, description, case_id, client_id, result, next_action, title, case_number, court, case_type, circuit_number, cases(id,title,court_name,case_type,case_number_official,client_id)')
             .lt('session_date', todayStr)
             .order('session_date', { ascending: false });
 
