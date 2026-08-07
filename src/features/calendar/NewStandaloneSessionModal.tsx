@@ -356,20 +356,19 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                     court: form.court || null,
                     case_type: finalCaseType || null,
                     circuit_number: form.circuit_number || null,
-                    plaintiff: primaryPlaintiff?.name || null,
-                    plaintiff_role: primaryPlaintiff?.capacity || null,
-                    plaintiff_national_id: primaryPlaintiff?.national_id || null,
-                    plaintiff_power_of_attorney: primaryPlaintiff?.power_of_attorney || null,
-                    defendant: primaryDefendant?.name || null,
-                    defendant_role: primaryDefendant?.capacity || null,
-                    defendant_national_id: primaryDefendant?.national_id || null,
-                    // 🆕 (خطة "المسمى القانوني" — مرحلة 3): زي primaryPlaintiff/
-                    // primaryDefendant فوق، بتتبعت بس في وضع standalone —
-                    // partyFields.legalTitles تفضل فاضية ('') في وضع
-                    // "existing" (أطراف القضية المختارة أصلاً، مش أطراف
-                    // خاصة بالجلسة نفسها).
-                    plaintiff_legal_title: linkMode === 'standalone' ? (partyFields.legalTitles.plaintiff || null) : null,
-                    defendant_legal_title: linkMode === 'standalone' ? (partyFields.legalTitles.defendant || null) : null,
+                    // ⚡ CHANGED (خطة تفكيك legacy columns — Phase F.2، 6 أغسطس
+                    // 2026): كانت هنا مزامنة plaintiff/plaintiff_role/
+                    // plaintiff_national_id/plaintiff_power_of_attorney/
+                    // defendant/defendant_role/defendant_national_id/
+                    // plaintiff_legal_title/defendant_legal_title من "الطرف
+                    // الأساسي" — نفس فكرة NewCaseModal.tsx (Phase F.1، اتشالت
+                    // هناك). كل أطراف الجلسة بتتسجل فعليًا في case_parties بس
+                    // (insertSessionParties تحت، مرحلة 6.2) — primaryPlaintiff/
+                    // primaryDefendant لسه محسوبين فوق ومستخدمين في رسالة
+                    // تيليجرام + formForLinking (لسه لازمين لمسار التحويل/الربط
+                    // في caseSessionLinkingShared.ts/useClientLinking.ts —
+                    // هيتشالوا في Phase F.3 لما المسارات دي توقف الكتابة هي
+                    // كمان)، بس مش بيتكتبوا على case_sessions هنا تاني.
                     description: form.description || null,
                     result: form.result || null,
                     next_action: form.next_action || null,
@@ -781,10 +780,18 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                         placeholder: 'مثال: 1234'
                     }),
                     React.createElement(Inp, {
+                        // ⚡ NEW (مرحلة 4 — توحيد قيد حقل "السنة"، 6 أغسطس 2026): كان
+                        // بلا أي قيد خالص (طول أو نوع)، بعكس نفس الحقل في
+                        // NewCaseModal.tsx/EditCaseModal.tsx (maxLength=4). بنطابقه
+                        // بالظبط هنا — maxLength=4 بس، من غير onlyDigits، لأن الفورمين
+                        // المرجعيين نفسهم من غير onlyDigits (موثّق في تقرير المراجعة
+                        // الشامل، فقرة 1) — "زي فورم القضية بالظبط" يعني القيد الفعلي
+                        // الموجود هناك، مش قيد أشد منه.
                         label: 'السنة',
                         value: form.case_year,
                         onChange: set('case_year'),
-                        placeholder: 'مثال: 2024'
+                        placeholder: 'مثال: 2024',
+                        maxLength: 4,
                     })
                 ),
 
