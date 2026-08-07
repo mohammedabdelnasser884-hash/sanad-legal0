@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { login, openAdminSection, createTestUser, expectToast } from './utils';
+import { login, openAdminSection, createTestUser, deleteTestUser, expectToast } from './utils';
 
 // المرحلة 6 (الأدمن) — دفعة 2: المستخدمون.
 // كل تست بينشئ مستخدم تجريبي (disposable) خاص بيه عبر createTestUser
@@ -9,13 +9,24 @@ import { login, openAdminSection, createTestUser, expectToast } from './utils';
 //
 // ⚠️ شرط أساسي: حساب E2E_TEST_EMAIL لازم يكون Admin/Owner (نفس ملحوظة
 //    admin-archive-lifecycle.spec.ts وباقي تستات الأدمن).
-// ⚠️ التست ده بينشئ حسابات Auth حقيقية عبر create_lawyer Edge Function
-//    وميحذفهاش من auth.users (handleDeleteUser بيحذف صف profiles بس —
-//    نفس السلوك الحالي في الكود، مش حاجة التستات دي بتغيّرها). لو
-//    بيئة التست حساسة لعدد حسابات Auth المتراكمة، يفضّل تنضيف دوري يدوي.
+// 🆕 (بند 1.5 — تنظيف تلقائي، 6 أغسطس 2026): قبل كده كانت الملحوظة هنا
+// بتقول "لو بيئة التست حساسة لعدد حسابات Auth المتراكمة، يفضّل تنضيف
+// دوري يدوي" — دلوقتي كل تست بيسجّل اسم المستخدم اللي عمله في
+// cleanupName، وtest.afterEach تحت بتحذفه نهائيًا (نفس مسار "حذف نهائي"
+// الحقيقي في الواجهة) تلقائيًا آخر كل تست، سواء التست نجح أو فشل. تست
+// "حذف نهائي" نفسه بيصفّر cleanupName بعد ما يتأكد من الحذف، فـafterEach
+// بتاعه بيبقى no-op (deleteTestUser أصلًا آمنة الاستدعاء المكرر).
+let cleanupName: string | null = null;
+
+test.beforeEach(() => { cleanupName = null; });
+
+test.afterEach(async ({ page }) => {
+  if (cleanupName) await deleteTestUser(page, cleanupName);
+});
 
 test('إضافة مستخدم جديد وظهوره في قائمة المستخدمين', async ({ page }) => {
   const fullName = `اختبار E2E مستخدم - ${Date.now()}`;
+  cleanupName = fullName;
 
   await login(page);
   const { email } = await createTestUser(page, fullName, { role: 'lawyer' });
@@ -30,6 +41,7 @@ test('إضافة مستخدم جديد وظهوره في قائمة المستخ
 test('تعديل مستخدم: تغيير الاسم والدور والصلاحيات عبر مودال التعديل', async ({ page }) => {
   const fullName = `اختبار E2E تعديل - ${Date.now()}`;
   const editedName = `${fullName} (معدّل)`;
+  cleanupName = fullName;
 
   await login(page);
   await createTestUser(page, fullName, { role: 'viewer' });
@@ -53,10 +65,14 @@ test('تعديل مستخدم: تغيير الاسم والدور والصلاح
   const updatedCard = page.getByTestId('admin-user-card').filter({ hasText: editedName });
   await expect(updatedCard).toHaveCount(1, { timeout: 10_000 });
   await expect(updatedCard.first()).toContainText('محامي');
+  // ⚡ الاسم اتغيّر فعليًا بعد الحفظ — afterEach لازم يدور على الاسم
+  // الجديد مش القديم (اللي مبقاش موجود في أي كارت أصلًا).
+  cleanupName = editedName;
 });
 
 test('تعطيل وتفعيل مستخدم من القائمة (زر التبديل السريع)', async ({ page }) => {
   const fullName = `اختبار E2E تعطيل - ${Date.now()}`;
+  cleanupName = fullName;
 
   await login(page);
   await createTestUser(page, fullName, { role: 'lawyer' });
@@ -78,6 +94,7 @@ test('تعطيل وتفعيل مستخدم من القائمة (زر التبد�
 
 test('تغيير كلمة مرور مستخدم عبر مودال الأمان', async ({ page }) => {
   const fullName = `اختبار E2E كلمة مرور - ${Date.now()}`;
+  cleanupName = fullName;
 
   await login(page);
   await createTestUser(page, fullName, { role: 'lawyer' });
@@ -97,6 +114,7 @@ test('تغيير كلمة مرور مستخدم عبر مودال الأمان',
 
 test('حذف مستخدم نهائيًا: يختفي من قائمة المستخدمين', async ({ page }) => {
   const fullName = `اختبار E2E حذف - ${Date.now()}`;
+  cleanupName = fullName;
 
   await login(page);
   await createTestUser(page, fullName, { role: 'lawyer' });
@@ -111,4 +129,7 @@ test('حذف مستخدم نهائيًا: يختفي من قائمة المست�
 
   await expectToast(page, '✅ تم حذف المستخدم');
   await expect(page.getByTestId('admin-user-card').filter({ hasText: fullName })).toHaveCount(0, { timeout: 10_000 });
+  // ⚡ اتحذف بالفعل هنا — نصفّر cleanupName عشان afterEach يبقى no-op
+  // بدل ما يحاول يفتح قسم المستخدمين تاني من غير داعي.
+  cleanupName = null;
 });
