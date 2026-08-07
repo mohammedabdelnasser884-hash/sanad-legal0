@@ -1,6 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { I } from '../../constants';
 import type { MappedCase } from '../../hooks/useAppData';
+// 🆕 (بند 1.2 — بادج CasesTab.tsx، خطة توحيد قفل الطرف مرحلة 3، 6 أغسطس
+// 2026): نفس نظام الشارات الموحّد (getPartyStateBadge) المستخدم بالفعل
+// في StandaloneSessionDetailModal.tsx/EditCaseModal.tsx — هنا بنعرضها
+// على مستوى كارت القضية في القائمة نفسها (بيانات الموكل الأساسي بس،
+// c.client_id + clients، بلا أي استعلام إضافي). نطاق ضيّق عمدًا: بادج
+// "🟠 موكل محذوف" بس لما الموكل الأساسي orphan — ده الجزء اللي كان
+// مفقود تمامًا قبل كده (CasesTab ما كانش بيعرض أي مؤشر خالص لموكل
+// اتحذف)، مش عرض "🟢 موكل المكتب" لكل قضية (ده مش هيضيف قيمة فعلية في
+// قائمة طويلة وهيبقى ضوضاء بصرية). البادجات التانية (🔵🟣 لأطراف
+// ثانوية) تحتاج case_parties لكل قضية — ده جزء غير منفّذ عمدًا (خارج
+// نطاق هذا البند، هيحتاج استعلام إضافي لكل صف في القائمة).
+import { isOrphanedLink, getPartyStateBadge } from '@/shared/parties/partyDomainService';
+import type { ClientRow } from '../../types';
 
 const PAGE_SIZE = 15;
 
@@ -62,9 +75,13 @@ interface CasesTabProps {
     setSelectedCase: (c: MappedCase) => void;
     loadingCases: boolean;
     dbError: string | null;
+    // 🆕 (بند 1.2 — 6 أغسطس 2026): لازمة لحساب حالة الموكل الأساسي
+    // (orphan ولا لأ) بلا استعلام إضافي — نفس القائمة الحية المستخدمة
+    // في باقي الشاشات.
+    clients?: ClientRow[];
 }
 
-function CasesTab({ cases, casesFilter, setCasesFilter, casesPage, setCasesPage, casesTotal, casesLoading, fetchCases, searchCases, casesSearch, setCasesSearch, setShowCaseModal, setSelectedCase, loadingCases, dbError }: CasesTabProps) {
+function CasesTab({ cases, casesFilter, setCasesFilter, casesPage, setCasesPage, casesTotal, casesLoading, fetchCases, searchCases, casesSearch, setCasesSearch, setShowCaseModal, setSelectedCase, loadingCases, dbError, clients = [] }: CasesTabProps) {
     const activeSection = caseSections.find((s: CaseSection) => s.key === casesFilter) || caseSections[0];
 
     // ── local search input state ──
@@ -108,6 +125,10 @@ function CasesTab({ cases, casesFilter, setCasesFilter, casesPage, setCasesPage,
     const isSearching = localSearch.trim().length > 0;
 
     const renderCaseCard = (c: MappedCase) => {
+        // 🆕 (بند 1.2 — 6 أغسطس 2026): orphan بس لو client_id موجود
+        // والموكل مش لاقيه في القائمة الحية (اتحذف/soft-deleted).
+        const linkedClient = c.client_id ? clients.find((cl) => cl.id === c.client_id) : null;
+        const orphanBadge = isOrphanedLink(c.client_id, linkedClient) ? getPartyStateBadge('ORPHAN') : null;
         return React.createElement('div', {
             key: c.id,
             onClick: () => setSelectedCase(c),
@@ -144,7 +165,11 @@ function CasesTab({ cases, casesFilter, setCasesFilter, casesPage, setCasesPage,
                         c.type && React.createElement('span', {
                             className: "text-[8px] font-bold px-1.5 py-0.5 rounded-full shrink-0",
                             style: { background: 'rgba(212,175,55,0.1)', color: '#D4AF37' }
-                        }, c.type)
+                        }, c.type),
+                        orphanBadge && React.createElement('span', {
+                            className: `text-[8px] font-bold px-1.5 py-0.5 rounded-full border shrink-0 ${orphanBadge.className}`,
+                            'data-testid': 'case-card-orphan-badge',
+                        }, `${orphanBadge.emoji} ${orphanBadge.label}`)
                     )
                 ),
                 React.createElement('svg', { className: "w-3.5 h-3.5 text-slate-600 shrink-0", fill: "none", viewBox: "0 0 24 24", strokeWidth: "2.5", stroke: "currentColor" },
