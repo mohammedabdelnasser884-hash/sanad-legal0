@@ -11,6 +11,9 @@ import type { NavigationState } from '../../../useNavigation';
 // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): نوع الكول-باك
 // بتاع فتح NewClientModal الموحّد لطرف بعينه من جلسة مستقلة.
 import type { OpenCreateClientForSessionParty } from '../hooks/useClientLinking';
+// 🆕 (بند 2.3 — 6 أغسطس 2026): زرار "➕ إنشاء موكل جديد" جوه دروب-داون
+// ربط الجلسة المستقلة.
+import type { ClientModalContext } from '../../clients/hooks/useClientActions';
 
 interface SessionsCalendarProps {
     cases: MappedCase[];
@@ -31,6 +34,8 @@ interface SessionsCalendarProps {
     // StandaloneSessionDetailModal تحت — نفس handleOpenCreateClientForSessionPartyOnly
     // في App.tsx المستخدمة أصلاً في NewStandaloneSessionModal.tsx.
     onOpenCreateClientForSessionParty?: OpenCreateClientForSessionParty;
+    // 🆕 (بند 2.3 — 6 أغسطس 2026): بتتوصّل لـ StandaloneSessionDetailModal.
+    openNewClientModal?: (ctx: ClientModalContext) => void;
 }
 
 // شكل صف case_sessions اللي بيترجع من استعلامي fetchMissedCount هنا
@@ -45,7 +50,7 @@ interface OverdueReminderRow {
     done: boolean;
 }
 
-function SessionsCalendar({ cases, clients, onOpenCase, onOpenReminders, onClientAdded, initialTab, nav, onOpenClientProfile, onOpenCreateClientForSessionParty, externalRefreshSignal }: SessionsCalendarProps & { externalRefreshSignal?: number }) {
+function SessionsCalendar({ cases, clients, onOpenCase, onOpenReminders, onClientAdded, initialTab, nav, onOpenClientProfile, onOpenCreateClientForSessionParty, openNewClientModal, externalRefreshSignal }: SessionsCalendarProps & { externalRefreshSignal?: number }) {
     const [activeTab, setActiveTab] = useState<'month'|'calendar'|'missed'>(initialTab || 'calendar');
     const [missedCount, setMissedCount] = useState(0);
     // النوع الأعم (CalendarSessionRow) بيغطي كل الاستخدامات التلاتة (Calendar/Missed/Month)
@@ -126,6 +131,7 @@ function SessionsCalendar({ cases, clients, onOpenCase, onOpenReminders, onClien
             clients,
             onOpenClientProfile,
             onOpenCreateClientForSessionParty,
+            openNewClientModal,
         }),
         React.createElement('div', { className: "space-y-2 fade-in" },
 
