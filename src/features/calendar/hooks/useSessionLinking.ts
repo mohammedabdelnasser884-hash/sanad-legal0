@@ -23,7 +23,7 @@ import type { OpenCreateClientForSessionParty } from './useClientLinking';
 // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 6): أضيف cr_number (رقم
 // التوكيل) — لازم لكشف التعارض قبل الربط في confirmLinkToExistingClient.
 // case_sessions مفيهاش عمود عنوان أصلاً (فاز 3)، فمفيش داعي لـ address هنا.
-export type ClientSearchResult = { id: string; full_name: string | null; client_name: string | null; national_id: string | null; cr_number: string | null };
+export type ClientSearchResult = { id: string; full_name: string | null; client_name: string | null; national_id: string | null; cr_number: string | null; address: string | null };
 
 /**
  * منطق ربط جلسة مستقلة *محفوظة بالفعل* (session already في الـ DB، مش
@@ -375,8 +375,10 @@ export function useSessionLinking(
         const isTempCaseId = isOfflineTempId(createdCaseId);
         const caseTitle = isTempCaseId ? (session.title || session.case_number || 'قضية من جلسة مستقلة') : undefined;
         const isPrimary = partyIndex === 0;
-        const result = await linkClientToParty(currentParty.id, foundClient.id, isPrimary, createdCaseId, caseTitle);
-        if (!result.ok) {
+        const result = await linkClientToParty(currentParty.id, foundClient.id, isPrimary, createdCaseId, caseTitle, undefined, undefined, currentParty.updated_at ?? null);
+        if (result.conflict) {
+          toast(`⚠️ "${currentParty.name}" عدّله شخص آخر قبل ما توصل هنا — أعد المحاولة`, true);
+        } else if (!result.ok) {
           showErrorToast('party_client_link', new Error('link failed'), `تعذّر ربط "${currentParty.name}" بالموكل. حاول مرة أخرى.`, 'ربط طرف بموكل');
         } else {
           toast(`✅ تم ربط "${currentParty.name}" بـ"${foundClient.full_name}"`);
@@ -464,8 +466,12 @@ export function useSessionLinking(
         const result = await linkClientToParty(
           currentParty.id, realOrTempClientId, isPrimary, createdCaseId, caseTitle,
           { isTempClientId, tempClientId: clientTempId, fallbackNameValue: name },
+          undefined,
+          currentParty.updated_at ?? null,
         );
-        if (!result.ok) {
+        if (result.conflict) {
+          toast(`⚠️ تمت إضافة الموكل، لكن "${currentParty.name}" عدّله شخص آخر قبل الربط — افتح القضية واربطه يدويًا`, true);
+        } else if (!result.ok) {
           showErrorToast('party_client_link', new Error('link failed'), `تمت إضافة الموكل لكن تعذّر ربطه بـ"${currentParty.name}".`, 'ربط طرف بموكل');
         } else {
           toast(`✅ تمت إضافة "${name}" وربطه بـ"${currentParty.name}"`);
@@ -649,7 +655,7 @@ export function useSessionLinking(
     setSearching(true);
     try {
       const { data, error } = await db.from('clients')
-        .select('id,full_name,client_name,national_id,cr_number')
+        .select('id,full_name,client_name,national_id,cr_number,address')
         .is('deleted_at', null)
         .or([ilikeOrClause('client_name', q), ilikeOrClause('full_name', q), ilikeOrClause('national_id', q), ilikeOrClause('phone', q)].join(','))
         .limit(15);
@@ -679,7 +685,34 @@ export function useSessionLinking(
         : undefined;
       if (targetParty) {
         const isPrimary = idlePartyList[0]?.id === targetParty.id;
-        const result = await linkClientToSessionParty(targetParty.id, selectedExistingClient.id, isPrimary, session.id);
+        // ⚡ CHANGED (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 1، فقرة 6):
+        // بنزامن بيانات الطرف مع client_id في نفس العملية (نفس فلسفة
+        // useCaseActions.handleLinkClientForParty بالظبط) — الواجهة
+        // (StandaloneSessionDetailModal) هي اللي بتعرض تأكيد التعارض قبل
+        // الوصول هنا لو فيه قيم حرة مختلفة عن الموكل المختار.
+        const syncFields = {
+          name: selectedExistingClient.full_name || selectedExistingClient.client_name || '',
+          national_id: selectedExistingClient.national_id || '',
+          power_of_attorney: selectedExistingClient.cr_number || '',
+          address: selectedExistingClient.address || '',
+        };
+        // ⚡ NEW (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 3، 6 أغسطس 2026):
+        // session.updated_at (الجلسة already محفوظة ومفتوحة من قبل — عكس
+        // مسار createdCaseId في handleLinkExistingClient/handleAddAndLinkClient
+        // فوق، اللي القضية فيه اتعملت لتوها في نفس الجلسة الحية فمفيش خطر
+        // تعارض حقيقي) بيتبعت كـknownSessionUpdatedAt عشان يفعّل القفل
+        // التفاؤلي على case_sessions.client_id (فرع isPrimary بس) — نفس
+        // الفجوة الموثّقة في تقرير المرحلة 2 (قسم 3/6)، هنا لمستوى الجلسة
+        // بدل القضية.
+        const result = await linkClientToSessionParty(targetParty.id, selectedExistingClient.id, isPrimary, session.id, undefined, syncFields, targetParty.updated_at ?? null, session.updated_at ?? null);
+        if (result.conflict) {
+          if (result.conflictScope === 'session') {
+            toast(`⚠️ الطرف اترّبط، لكن الجلسة نفسها عدّلها شخص آخر — أعد فتحها لمراجعة بيانات الموكل الأساسي`, true);
+          } else {
+            toast(`⚠️ "${targetParty.name}" عدّله شخص آخر — أعد فتح الجلسة وحاول الربط تاني`, true);
+          }
+          return;
+        }
         if (!result.ok) {
           showErrorToast('session_client_link', new Error('link party to existing client failed'), `تعذّر ربط "${targetParty.name}" بالموكل. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.`, 'ربط طرف بموكل');
           return;
@@ -704,17 +737,22 @@ export function useSessionLinking(
       // قديمة/مختلفة عن ملف الموكل). الواجهة (StandaloneSessionDetailModal)
       // هي اللي بتعرض تنبيه التعارض قبل ما تنده الدالة دي لو فيه قيم
       // حرة مختلفة عن الموكل المختار.
+      // ⚡ CHANGED (خطة تفكيك legacy columns — Phase F.3، 6 أغسطس 2026):
+      // وقّفنا كتابة plaintiff/plaintiff_national_id/
+      // plaintiff_power_of_attorney هنا خالص — نفس فيكس F.1
+      // (useCaseActions.handleLinkClient لجدول cases) بس هنا لجدول
+      // case_sessions (آخر مصدر كتابة قديم لباقي case_sessions.plaintiff_*
+      // اتفحص في الملف ده). client_id بس هو المطلوب فعليًا؛ بيانات الطرف
+      // الحرة (لو فيه case_parties حقيقية) بتتزامن من مسار الطرف المستقل
+      // فوق (linkClientToSessionParty + syncFields)، مش من هنا.
       // 🔒 FIX (نفس فئة باج "orphaned historical session" — 5 أغسطس 2026):
       // كان هنا تحديث صف session.id بس — لو الجلسة دي عضو في سلسلة
       // session_group_id، باقي أعضاء السلسلة كانوا يفضلوا من غير الموكل
-      // ولا بيانات المدعي المحدّثة. updateCaseSessionsForGroup بتطبّق نفس
-      // الـ data على كل صفوف السلسلة (وبترجع [session.id] لوحدها لو مفيش
-      // session_group_id أصلاً — صفر تغيير سلوك للحالة العادية).
+      // المحدّث. updateCaseSessionsForGroup بتطبّق نفس الـ data على كل
+      // صفوف السلسلة (وبترجع [session.id] لوحدها لو مفيش session_group_id
+      // أصلاً — صفر تغيير سلوك للحالة العادية).
       const { ok: groupOk, failedIds, offline, queued } = await updateCaseSessionsForGroup(db, session, {
         client_id: selectedExistingClient.id,
-        plaintiff: selectedExistingClient.full_name || selectedExistingClient.client_name || null,
-        plaintiff_national_id: selectedExistingClient.national_id || null,
-        plaintiff_power_of_attorney: selectedExistingClient.cr_number || null,
       });
       if (!groupOk && failedIds.includes(session.id)) {
         showErrorToast('session_client_link', new Error('group client link failed'), 'تعذّر ربط الموكل بالجلسة. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'ربط الموكل بالجلسة');
