@@ -90,13 +90,13 @@ interface AppModalsProps {
     // لـ handleLinkClient فوق، بس بيربط طرف بعينه من case_parties (بدل
     // القضية كلها) — شوف useCaseActions.ts (handleLinkClientForParty)
     // وInfoSection.tsx.
-    handleLinkClientForParty: (caseId: string, partyId: string, clientId: string, isPrimaryParty: boolean, onAfterLink: () => void) => void | Promise<void>;
+    handleLinkClientForParty: (caseId: string, partyId: string, clientId: string, isPrimaryParty: boolean, knownUpdatedAt: string | null, onAfterLink: () => void) => void | Promise<void>;
     // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 4): عكس handleLinkClient.
     handleUnlinkClient: (caseId: string) => void | Promise<void>;
     // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، "إصلاح 5" — 5 أغسطس 2026): مرآة
     // لـ handleUnlinkClient فوق بس لطرف بعينه — شوف useCaseActions.ts
     // (handleUnlinkClientForParty) وInfoSection.tsx (زرار فك الربط لكل طرف).
-    handleUnlinkClientForParty: (caseId: string, partyId: string, isPrimaryParty: boolean, onAfterLink: () => void) => void | Promise<void>;
+    handleUnlinkClientForParty: (caseId: string, partyId: string, isPrimaryParty: boolean, knownUpdatedAt: string | null, onAfterLink: () => void) => void | Promise<void>;
     // ⚡ CHANGED (خطة توحيد إنشاء الموكل، Phase 1): بقت مجرد فتح لموديل
     // "إنشاء موكل جديد" الموحّد — شوف App.tsx (handleOpenCreateClientForCase).
     handleCreateAndLinkClient: (caseId: string, plaintiffName: string, plaintiffNationalId?: string | null, plaintiffPoa?: string | null, plaintiffAddress?: string | null) => void;
