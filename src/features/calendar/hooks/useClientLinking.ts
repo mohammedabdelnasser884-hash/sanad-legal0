@@ -329,8 +329,10 @@ export function useClientLinking(
           ? (savedFormData.form.title || savedFormData.fullCaseNumber || 'قضية من جلسة مستقلة')
           : undefined;
         const isPrimary = partyIndex === 0;
-        const result = await linkClientToParty(currentParty.id, foundClient.id, isPrimary, createdCaseId, caseTitle);
-        if (!result.ok) {
+        const result = await linkClientToParty(currentParty.id, foundClient.id, isPrimary, createdCaseId, caseTitle, undefined, undefined, currentParty.updated_at ?? null);
+        if (result.conflict) {
+          toast(`⚠️ "${currentParty.name}" عدّله شخص آخر قبل ما توصل هنا — أعد المحاولة`, true);
+        } else if (!result.ok) {
           showErrorToast('party_client_link', new Error('link failed'), `تعذّر ربط "${currentParty.name}" بالموكل. حاول مرة أخرى.`, 'ربط طرف بموكل');
         } else {
           toast(`✅ تم ربط "${currentParty.name}" بـ"${foundClient.full_name}"`);
