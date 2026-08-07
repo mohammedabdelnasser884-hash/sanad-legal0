@@ -3,6 +3,14 @@ import { db } from '../supabaseClient';
 import { recordError, recordSuccess } from '../systemHealth';
 import { ilikeOrClause } from '../shared/lib/sanitize';
 import type { CaseRow, ClientRow, ProfileRow } from '../types';
+// ⚡ NEW (خطة تفكيك الأعمدة القديمة، المرحلة B.4 — 6 أغسطس 2026): نفس
+// شكل صف الطرف المستخدم في B.1/B.2/B.3 (`PartyDisplayRow`) — بيتاح دلوقتي
+// كحقل جاهز على MappedCase نفسها (`parties`) عشان أي مستهلك مستقبلي
+// لـ useAppData (شاشات تانية غير الكالندر/الداشبورد/البحث اللي اتغطوا
+// فعليًا) يقدر يستخدم derivePartiesDisplay/derivePartiesLine مباشرة من
+// غير ما يحتاج نداء useSessionsPartiesMap منفصل بتاعه — حقل إضافي بحت،
+// صفر تغيير على أي حقل موجود.
+import type { PartyDisplayRow } from '@/shared/parties/partiesDisplay';
 
 // شكل عنصر القضية بعد التطبيع (mapping) في fetchCases/searchCases —
 // نفس الحقول اللي كانت بترجع فعليًا من الـ `.map(...)` تحت، من غير أي تغيير.
@@ -59,6 +67,14 @@ export interface MappedCase {
     // مخزّن على مستوى القضية نفسها، مش جوه صف طرف بعينه.
     plaintiff_legal_title: string | null;
     defendant_legal_title: string | null;
+    // ⚡ NEW (المرحلة B.4 — 6 أغسطس 2026): صفوف case_parties الفعلية
+    // للقضية دي (لو موجودة — مصفوفة فاضية لو لسه معتمدة على plaintiff/
+    // defendant القدامى بس). بتتجاب دفعة واحدة لكل صفحة/نتيجة بحث (نفس
+    // نمط useSessionsPartiesMap في B.1) مش نداء لكل قضية. الاستخدام
+    // المقصود: derivePartiesDisplay(c.parties, {plaintiff: c.plaintiff, ...})
+    // بدل قراءة c.plaintiff/c.defendant مباشرة في أي شاشة جديدة أو لسه
+    // متلمسّة.
+    parties?: PartyDisplayRow[];
 }
 
 // شكل عنصر الموكل بعد التطبيع في fetchClients — كل حقول ClientRow
@@ -95,6 +111,29 @@ function buildNearestSessionMap(sessionsData: { case_id: string | null; session_
 
     const merged: { [k: string]: string } = { ...latestPast, ...upcoming }; // القادمة لها أولوية لو موجودة
     return merged;
+}
+
+// ── B.4: جلب صفوف case_parties دفعة واحدة لمجموعة case_ids ──
+// نفس نمط useSessionsPartiesMap (B.1) بس هنا بشكل دالة عادية (مش hook)
+// لأنها بتتنادى جوه useCallback موجودة أصلًا (fetchCases/searchCases)،
+// مش من جوه component body.
+async function fetchPartiesMapByCaseIds(caseIds: string[]): Promise<{ [k: string]: PartyDisplayRow[] }> {
+    if (caseIds.length === 0) return {};
+    const { data, error } = await db
+        .from('case_parties')
+        .select('case_id,side,name,capacity,client_id')
+        .in('case_id', caseIds)
+        .order('sort_order', { ascending: true });
+    if (error) {
+        recordError('db_case_parties', error.message);
+        return {};
+    }
+    const map: { [k: string]: PartyDisplayRow[] } = {};
+    (data || []).forEach((p: { case_id: string | null } & PartyDisplayRow) => {
+        if (!p.case_id) return;
+        (map[p.case_id] ||= []).push(p);
+    });
+    return map;
 }
 
 export function useAppData(profile: ProfileRow | null) {
@@ -157,6 +196,9 @@ export function useAppData(profile: ProfileRow | null) {
                 recordSuccess('db_sessions');
             }
         }
+        // ⚡ B.4: نفس فكرة sessionsMap فوق بالظبط بس لصفوف case_parties —
+        // نداء واحد لكل القضايا المحملة في الصفحة دي، مش نداء لكل قضية.
+        const partiesMap = await fetchPartiesMapByCaseIds(caseIds);
 
         const mapped: MappedCase[] = (data || []).map((r: CaseRow) => ({
             id:             r.id,
@@ -188,6 +230,7 @@ export function useAppData(profile: ProfileRow | null) {
             plaintiff_address: r.plaintiff_address || null,
             plaintiff_legal_title: r.plaintiff_legal_title || null,
             defendant_legal_title: r.defendant_legal_title || null,
+            parties:        partiesMap[r.id] || [],
         }));
 
         if (page === 0) setCases(mapped);
@@ -221,8 +264,6 @@ export function useAppData(profile: ProfileRow | null) {
             .or([
                 ilikeOrClause('title', q),
                 ilikeOrClause('case_number_official', q),
-                ilikeOrClause('plaintiff', q),
-                ilikeOrClause('defendant', q),
             ].join(','))
             .order('created_at', { ascending: false })
             .limit(50);
@@ -244,6 +285,8 @@ export function useAppData(profile: ProfileRow | null) {
                 .in('case_id', caseIds);
             sessionsMap = buildNearestSessionMap(sessionsData || []);
         }
+        // ⚡ B.4: نفس المنطق اللي في fetchCases فوق.
+        const partiesMap = await fetchPartiesMapByCaseIds(caseIds);
 
         const mapped: MappedCase[] = (data || []).map((r: CaseRow) => ({
             id:             r.id,
@@ -275,6 +318,7 @@ export function useAppData(profile: ProfileRow | null) {
             plaintiff_address: r.plaintiff_address || null,
             plaintiff_legal_title: r.plaintiff_legal_title || null,
             defendant_legal_title: r.defendant_legal_title || null,
+            parties:        partiesMap[r.id] || [],
         }));
 
         setCases(mapped);
