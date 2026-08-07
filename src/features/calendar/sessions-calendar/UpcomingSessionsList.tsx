@@ -118,6 +118,11 @@ function UpcomingSessionsList({db, cases, clients, onOpenCase}: UpcomingSessions
     // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(()=>{ fetchSessions(); },[]);
 
+    // ⚡ NEW (خطة تفكيك الأعمدة القديمة، المرحلة B.1) — راجع نفس التعليق في CalendarTab.tsx.
+    // اتنقل لفوق الـ early return بتاع loading عشان الـ Hook يتنادى بنفس الترتيب في كل render
+    // (كان بيتنادى شرطيًا وده مخالف لـ rules-of-hooks).
+    const partiesIndex = useSessionsPartiesMap(sessions);
+
     if(loading) return React.createElement('div',{className:"flex items-center justify-center py-8 gap-2 text-slate-500 text-xs"},React.createElement(I.Spin),"جاري التحميل...");
 
     const sessionsByDate: Record<string, UpcomingSessionRow[]> = {};
@@ -126,9 +131,6 @@ function UpcomingSessionsList({db, cases, clients, onOpenCase}: UpcomingSessions
         if(!sessionsByDate[key]) sessionsByDate[key]=[];
         sessionsByDate[key].push(s);
     });
-
-    // ⚡ NEW (خطة تفكيك الأعمدة القديمة، المرحلة B.1) — راجع نفس التعليق في CalendarTab.tsx.
-    const partiesIndex = useSessionsPartiesMap(sessions);
 
     const urgencyStyle = (dateStr: string, count: number) => {
         const isToday = dateStr===todayStr;
