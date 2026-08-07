@@ -36,6 +36,11 @@ export interface CasePartyRow {
     power_of_attorney: string | null;
     client_id: string | null;
     sort_order: number;
+    // 🆕 (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 2، 6 أغسطس 2026): موجودة
+    // فعليًا في case_parties (عمود updated_at NOT NULL DEFAULT now())،
+    // وبتيجي أصلاً مع select('*') تحت — بس كانت ناقصة من النوع ده، فمكانتش
+    // بتوصل لـknownUpdatedAt وقت أي ربط/فك ربط لاحق (فجوة القفل التفاؤلي).
+    updated_at: string | null;
 }
 
 export function useCaseDetailActions(
