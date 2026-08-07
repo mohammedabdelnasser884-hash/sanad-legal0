@@ -7,18 +7,15 @@ import { MONTHS_AR2, toDateStr } from './constants';
 import DayCard from './DayCard';
 import { getDayName } from './dateHelpers';
 import MonthWeekView from './MonthWeekView';
+import { useSessionsPartiesMap } from '@/shared/parties/useSessionsPartiesMap';
 import type { MappedCase, MappedClient } from '../../../hooks/useAppData';
 import type { CalendarSessionRow } from './CalendarTab';
 import type { TaskFeedItem } from '@/shared/hooks/useDashboardFeed';
 
-// نفس أعمدة case_sessions اللي CalendarTab.tsx بيجيبها (CalendarSessionRow)،
-// بالإضافة لثلاث أعمدة إضافية حقيقية مطلوبة فعليًا في select الملف ده بس
-// (plaintiff_national_id, plaintiff_power_of_attorney, defendant_national_id).
-export interface MonthSessionRow extends CalendarSessionRow {
-    plaintiff_national_id: string | null;
-    plaintiff_power_of_attorney: string | null;
-    defendant_national_id: string | null;
-}
+// نفس أعمدة case_sessions اللي CalendarTab.tsx بيجيبها (CalendarSessionRow) —
+// الأعمدة القديمة (plaintiff_national_id/plaintiff_power_of_attorney/
+// defendant_national_id) اتشالت من هنا مع حذفها من القاعدة (F.4، 6 أغسطس 2026).
+export interface MonthSessionRow extends CalendarSessionRow {}
 
 interface WeekBound {
     start: number;
@@ -61,7 +58,7 @@ function MonthListTab({ cases, clients, onOpenCase, onOpenReminders, onOpenStand
         const startStr = `${viewYear}-${mm}-01`;
         const endStr   = `${viewYear}-${mm}-${String(last).padStart(2,'0')}`;
         db.from('case_sessions')
-          .select('id,session_date,case_id,client_id,description,result,next_action,session_time,session_floor,session_hall,title,case_number,court,case_type,plaintiff,plaintiff_national_id,plaintiff_power_of_attorney,defendant,defendant_national_id,circuit_number,plaintiff_role,defendant_role,plaintiff_legal_title,defendant_legal_title,cases(id,title,plaintiff,defendant,plaintiff_legal_title,defendant_legal_title,court_name,case_type,case_number_official,client_id)')
+          .select('id,session_date,case_id,client_id,description,result,next_action,session_time,session_floor,session_hall,title,case_number,court,case_type,circuit_number,cases(id,title,court_name,case_type,case_number_official,client_id)')
           .gte('session_date', startStr)
           .lte('session_date', endStr)
           .order('session_date', { ascending: true })
@@ -85,6 +82,9 @@ function MonthListTab({ cases, clients, onOpenCase, onOpenReminders, onOpenStand
         if (!tasksMap[key]) tasksMap[key] = [];
         tasksMap[key].push(r);
     });
+
+    // ⚡ NEW (خطة تفكيك الأعمدة القديمة، المرحلة B.1) — راجع نفس التعليق في CalendarTab.tsx.
+    const partiesIndex = useSessionsPartiesMap(sessions);
 
     const handleGoogleExport = (s: MonthSessionRow, e: React.MouseEvent) => {
         e.stopPropagation();
@@ -148,7 +148,7 @@ function MonthListTab({ cases, clients, onOpenCase, onOpenReminders, onOpenStand
             : React.createElement(MonthWeekView, {
                 weeks, sessionsMap, tasksMap, cases, clients,
                 onOpenCase, onOpenReminders, onOpenStandalone, todayStr, handleGoogleExport,
-                prevMonth, nextMonth
+                prevMonth, nextMonth, partiesIndex
             })
     );
 }
