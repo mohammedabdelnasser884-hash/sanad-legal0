@@ -5,6 +5,7 @@ import { exportSessionToGoogleCalendar } from '@/shared/ui/calendarExport';
 import { MONTHS_AR2, DAYS_FULL, toDateStr } from './constants';
 import SessionCard from './SessionCard';
 import UpcomingWidget from './UpcomingWidget';
+import { useSessionsPartiesMap, lookupParties } from '@/shared/parties/useSessionsPartiesMap';
 import type { MappedCase, MappedClient } from '../../../hooks/useAppData';
 import type { SessionCaseEmbed } from '@/shared/hooks/useDashboardFeed';
 
@@ -28,15 +29,7 @@ export interface CalendarSessionRow {
     case_number: string | null;
     court: string | null;
     case_type: string | null;
-    plaintiff: string | null;
-    defendant: string | null;
     circuit_number: string | null;
-    plaintiff_role: string | null;
-    defendant_role: string | null;
-    // ⚡ NEW (24 يوليو، خطة سد فجوات عرض الأطراف — مرحلة 2): موجودان بالفعل
-    // على case_sessions من تقرير المسمى القانوني (للجلسات المستقلة).
-    plaintiff_legal_title: string | null;
-    defendant_legal_title: string | null;
     cases: SessionCaseEmbed | SessionCaseEmbed[] | null;
 }
 
@@ -84,7 +77,7 @@ function CalendarTab({ cases, clients, onOpenCase, onOpenStandalone, refreshKey 
         const mm   = String(viewMonth+1).padStart(2,'0');
         const last = new Date(viewYear, viewMonth+1, 0).getDate();
         db.from('case_sessions')
-          .select('id,session_date,case_id,client_id,description,result,next_action,session_time,session_floor,session_hall,title,case_number,court,case_type,plaintiff,defendant,circuit_number,plaintiff_role,defendant_role,plaintiff_legal_title,defendant_legal_title,cases(id,title,plaintiff,defendant,plaintiff_legal_title,defendant_legal_title,court_name,case_type,case_number_official,client_id)')
+          .select('id,session_date,case_id,client_id,description,result,next_action,session_time,session_floor,session_hall,title,case_number,court,case_type,circuit_number,cases(id,title,court_name,case_type,case_number_official,client_id)')
           .gte('session_date', `${viewYear}-${mm}-01`)
           .lte('session_date', `${viewYear}-${mm}-${String(last).padStart(2,'0')}`)
           .then(({ data }) => {
@@ -115,6 +108,11 @@ function CalendarTab({ cases, clients, onOpenCase, onOpenStandalone, refreshKey 
         ? `${viewYear}-${String(viewMonth+1).padStart(2,'0')}-${String(selectedDay).padStart(2,'0')}`
         : null;
     const daysSessions = selectedDateStr ? (sessionsMap[selectedDateStr]||[]) : [];
+
+    // ⚡ NEW (خطة تفكيك الأعمدة القديمة، المرحلة B.1): جلب صفوف case_parties
+    // الفعلية لكل الجلسات المحمّلة دفعة واحدة، عشان SessionCard يعرض كل
+    // أطراف الدعوى (مش الطرف الأساسي بس) — راجع partiesDisplay.ts.
+    const partiesIndex = useSessionsPartiesMap(allSessions);
 
     const handleExportToGoogle = (s: CalendarSessionRow, e: React.MouseEvent) => {
         e.stopPropagation();
@@ -147,7 +145,7 @@ function CalendarTab({ cases, clients, onOpenCase, onOpenStandalone, refreshKey 
             // أيقونة الربط بتقويم الهاتف
             React.createElement('button', {
                 onClick: () => {
-                    db.from('case_sessions').select('id,session_date,case_id,client_id,description,result,next_action,title,case_number,court,case_type,plaintiff,defendant,cases(id,title,plaintiff,defendant,plaintiff_legal_title,defendant_legal_title,court_name,case_type,case_number_official,client_id)')
+                    db.from('case_sessions').select('id,session_date,case_id,client_id,description,result,next_action,title,case_number,court,case_type,cases(id,title,court_name,case_type,case_number_official,client_id)')
                       .then(({ data }) => {
                           const sessions = (data || []) as unknown as CalendarSessionRow[];
                           if (!sessions.length) { toast('لا توجد جلسات', true); return; }
@@ -211,7 +209,7 @@ function CalendarTab({ cases, clients, onOpenCase, onOpenStandalone, refreshKey 
             daysSessions.length === 0
                 ? React.createElement('div', { className: "bg-premium-card border border-white/5 rounded-xl p-4 text-center text-slate-500 text-xs" }, "لا توجد جلسات في هذا اليوم")
                 : daysSessions.map((s: CalendarSessionRow) =>
-                    React.createElement(SessionCard, { key: s.id, s, cases, clients, onOpenCase, onOpenStandalone, onGoogleExport: handleExportToGoogle })
+                    React.createElement(SessionCard, { key: s.id, s, cases, clients, onOpenCase, onOpenStandalone, onGoogleExport: handleExportToGoogle, parties: lookupParties(s, partiesIndex) })
                 )
         )
     );
