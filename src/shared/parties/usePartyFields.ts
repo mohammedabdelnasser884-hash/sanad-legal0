@@ -134,7 +134,6 @@ export function usePartyFields(options: UsePartyFieldsOptions = {}): UsePartyFie
             if (isPartyOrphaned(p, ctx)) ids.add(p.id);
         }
         return ids;
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [parties, options.domainContext]);
 
     const validation = useMemo(
