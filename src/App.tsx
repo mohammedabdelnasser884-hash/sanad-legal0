@@ -358,12 +358,17 @@ function App() {
         // لـ StandaloneSessionDetailModal (زرار "🔗 ربط") عبر DashboardTab —
         // نفس الدالة المستخدمة أصلاً في NewStandaloneSessionModal.tsx.
         onOpenCreateClientForSessionParty: handleOpenCreateClientForSessionPartyOnly,
+        // 🆕 (بند 2.3 — 6 أغسطس 2026): زرار "➕ إنشاء موكل جديد" جوه دروب-داون
+        // ربط الجلسة المستقلة (StandaloneSessionDetailModal عبر DashboardTab).
+        openNewClientModal,
     });
     const CasesTabContent   = React.createElement(CasesTab, {
         cases, casesFilter, setCasesFilter, casesPage, setCasesPage,
         casesTotal, casesLoading, fetchCases, searchCases, casesSearch, setCasesSearch,
         setShowCaseModal, setSelectedCase,
         loadingCases: casesLoading, dbError,
+        // 🆕 (بند 1.2 — 6 أغسطس 2026): بادج "موكل محذوف" على كارت القضية.
+        clients,
     });
     const TeamTabContent    = React.createElement(TeamTab,    { lawyers, setShowLawyerModal });
     const ClientsTabContent = React.createElement(ClientsTab, {
@@ -414,6 +419,8 @@ function App() {
                     // لـ StandaloneSessionDetailModal (زرار "🔗 ربط") عبر تاب الجلسات —
                     // نفس الدالة المستخدمة أصلاً في NewStandaloneSessionModal.tsx.
                     onOpenCreateClientForSessionParty: handleOpenCreateClientForSessionPartyOnly,
+                    // 🆕 (بند 2.3 — 6 أغسطس 2026): نفس الشرح فوق (Dashboard).
+                    openNewClientModal,
                 })
             ),
             tab === 'fees' && React.createElement(FeesTab, { cases, clients, showSummaryModal: showFeesSummary, setShowSummaryModal: setShowFeesSummary, country, profile, nav }),
