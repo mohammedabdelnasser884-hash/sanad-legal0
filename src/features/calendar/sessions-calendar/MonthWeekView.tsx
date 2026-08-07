@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import SessionCard from './SessionCard';
 import TaskCard from './TaskCard';
 import { getDayName } from './dateHelpers';
+import { lookupParties, type SessionsPartiesIndex } from '@/shared/parties/useSessionsPartiesMap';
 import type { MappedCase, MappedClient } from '../../../hooks/useAppData';
 import type { WeekInfo, MonthSessionRow } from './MonthListTab';
 import type { CalendarSessionRow } from './CalendarTab';
@@ -20,9 +21,11 @@ interface MonthWeekViewProps {
     handleGoogleExport: (s: MonthSessionRow, e: React.MouseEvent) => void;
     prevMonth: () => void;
     nextMonth: () => void;
+    // ⚡ NEW (خطة تفكيك الأعمدة القديمة، المرحلة B.1)
+    partiesIndex: SessionsPartiesIndex;
 }
 
-function MonthWeekView({ weeks, sessionsMap, tasksMap, cases, clients, onOpenCase, onOpenReminders, onOpenStandalone, todayStr, handleGoogleExport, prevMonth, nextMonth }: MonthWeekViewProps) {
+function MonthWeekView({ weeks, sessionsMap, tasksMap, cases, clients, onOpenCase, onOpenReminders, onOpenStandalone, todayStr, handleGoogleExport, prevMonth, nextMonth, partiesIndex }: MonthWeekViewProps) {
     const currentWeekIdx = weeks.findIndex((w: WeekInfo) => w.days.includes(todayStr));
     const [selectedWeek, setSelectedWeek] = useState(currentWeekIdx >= 0 ? currentWeekIdx : 0);
 
@@ -132,7 +135,8 @@ function MonthWeekView({ weeks, sessionsMap, tasksMap, cases, clients, onOpenCas
                             React.createElement(SessionCard, {
                                 key: s.id, s, cases, clients, onOpenCase,
                                 onOpenStandalone: onOpenStandalone as unknown as (s: CalendarSessionRow) => void,
-                                onGoogleExport: handleGoogleExport as unknown as (s: CalendarSessionRow, e: React.MouseEvent) => void
+                                onGoogleExport: handleGoogleExport as unknown as (s: CalendarSessionRow, e: React.MouseEvent) => void,
+                                parties: lookupParties(s, partiesIndex)
                             })
                         )
                     )
