@@ -12,6 +12,17 @@ import type { TabName } from '../../useNavigation';
 // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): نوع الكول-باك
 // بتاع فتح NewClientModal الموحّد لطرف بعينه من جلسة مستقلة.
 import type { OpenCreateClientForSessionParty } from '@/features/calendar/hooks/useClientLinking';
+// 🆕 (بند 2.3 — 6 أغسطس 2026): زرار "➕ إنشاء موكل جديد" جوه دروب-داون
+// ربط الجلسة المستقلة.
+import type { ClientModalContext } from '@/features/clients/hooks/useClientActions';
+// ⚡ NEW (خطة تفكيك الأعمدة القديمة، المرحلة B.2 — 6 أغسطس 2026): نفس
+// أساس العرض القرائي المستخدم فعليًا في الكالندر (B.1) — بيجيب صفوف
+// case_parties دفعة واحدة لكل جلسات الداشبورد (اليوم/القادم/الفائتة)
+// ويبني منها نص "فلان ضد علان"، مع رجوع تلقائي كامل لعمودي
+// plaintiff/defendant (والمسمى القانوني) القديمين لو مفيش صفوف
+// case_parties خالص — صفر تغيير سلوك لأي بيانات قديمة لسه معتمدة عليهم.
+import { useSessionsPartiesMap, lookupParties } from '@/shared/parties/useSessionsPartiesMap';
+import { derivePartiesDisplay } from '@/shared/parties/partiesDisplay';
 
 // linkedCase بييجي من مصدرين مختلفين فعليًا في الكود تحت: إما `cases.find(...)` (شكله MappedCase)
 // أو الكائن المدمج `s.cases` جوه استعلام الجلسة (شكله SessionCaseEmbed) — الكود بيتعامل مع
@@ -58,6 +69,8 @@ interface DashboardTabProps {
   // StandaloneSessionDetailModal تحت — نفس handleOpenCreateClientForSessionPartyOnly
   // في App.tsx المستخدمة أصلاً في NewStandaloneSessionModal.tsx.
   onOpenCreateClientForSessionParty?: OpenCreateClientForSessionParty;
+  // 🆕 (بند 2.3 — 6 أغسطس 2026): بتتوصّل لـ StandaloneSessionDetailModal.
+  openNewClientModal?: (ctx: ClientModalContext) => void;
 }
 
 function DashboardTab({
@@ -71,11 +84,17 @@ function DashboardTab({
   setTab, setRemindersInitialFilter, setSessionsInitialTab,
   dbOnline, healthErrors, setHealthErrors,
   fetchTodaySessions, fetchUpcomingSessions, fetchMissedSessions,
-  onOpenClientProfile, onOpenCreateClientForSessionParty,
+  onOpenClientProfile, onOpenCreateClientForSessionParty, openNewClientModal,
 }: DashboardTabProps) {
 
     // ── جلسة مستقلة مفتوحة حالياً (لعرض المودال) ──
     const [standaloneTarget, setStandaloneTarget] = useState<SessionFeedItem | null>(null);
+
+    // ⚡ NEW (المرحلة B.2 — 6 أغسطس 2026): index واحد لصفوف case_parties
+    // لكل جلسات الداشبورد التلاتة (اليوم/القادم/الفائتة) مجمّعة — نداءين
+    // بالكتير مش نداء لكل جلسة (نفس نمط CalendarTab.tsx في B.1).
+    const dashboardSessions = [...todaySessions, ...upcomingSessions, ...missedSessions];
+    const partiesIndex = useSessionsPartiesMap(dashboardSessions);
 
     // بعد أي تعديل/تحديث/حذف على جلسة مستقلة، نعيد تحميل القوائم الثلاثة
     // لأننا ما بنعرفش مسبقاً الجلسة كانت في أي قائمة (اليوم/القادم/الفائتة)
@@ -117,13 +136,14 @@ function DashboardTab({
         const isStandalone = !s.case_id;
         const handleClick = onClickOverride || (linkedCase ? ()=>{ setSelectedCase(linkedCase as MappedCase, 'timeline'); } : (isStandalone ? ()=>{ setStandaloneTarget(s); } : null));
 
-        const displayPlaintiff = linkedCase?.plaintiff || (Array.isArray(s.cases) ? s.cases[0]?.plaintiff : s.cases?.plaintiff) || (isStandalone ? s.plaintiff : null);
-        const displayDefendant = linkedCase?.defendant || (Array.isArray(s.cases) ? s.cases[0]?.defendant : s.cases?.defendant) || (isStandalone ? s.defendant : null);
-        // ⚡ NEW (24 يوليو، خطة سد فجوات عرض الأطراف — مرحلة 2): نفس ترتيب
-        // fallback بيانات الأطراف بالضبط بس للمسمى القانوني. فاضي (الحالة
-        // الغالبة) = PartiesLine بترجع لعرض الاسم المفرد زي ما هي.
-        const displayPlaintiffLegalTitle = linkedCase?.plaintiff_legal_title || (Array.isArray(s.cases) ? s.cases[0]?.plaintiff_legal_title : s.cases?.plaintiff_legal_title) || (isStandalone ? s.plaintiff_legal_title : null);
-        const displayDefendantLegalTitle = linkedCase?.defendant_legal_title || (Array.isArray(s.cases) ? s.cases[0]?.defendant_legal_title : s.cases?.defendant_legal_title) || (isStandalone ? s.defendant_legal_title : null);
+        // ⚡ الأعمدة القديمة (plaintiff/defendant وما شابه) اتحذفت فعليًا من
+        // القاعدة في F.4 (6 أغسطس 2026) — case_parties بقى المصدر الوحيد.
+        // بيانات القضايا/الجلسات القديمة اللي مكنش عندها صفوف case_parties
+        // هتظهر فاضية هنا، وده أثر متوقع ومقصود من قرار الحذف نفسه.
+        const { plaintiff: displayPlaintiff, defendant: displayDefendant } = derivePartiesDisplay(
+            lookupParties(s, partiesIndex),
+            { plaintiff: null, defendant: null }
+        );
         const displayTitle     = linkedCase?.title || (Array.isArray(s.cases) ? s.cases[0]?.title : s.cases?.title) || (isStandalone ? (s.title || s.case_number || null) : null);
         const displayCourt     = linkedCase?.court_name || linkedCase?.court || (Array.isArray(s.cases) ? s.cases[0]?.court_name : s.cases?.court_name) || (isStandalone ? s.court : null);
         const fallbackLabel    = displayTitle || linkedCase?.title || (isStandalone ? '🗓 جلسة مستقلة' : linkedCase?.number || '— جلسة —');
@@ -158,8 +178,10 @@ function DashboardTab({
                     },displayTitle),
                     React.createElement('div',{className:'flex items-center justify-between gap-1'},
                         React.createElement(PartiesLine,{
+                            // ⚡ B.2: displayPlaintiff/displayDefendant جايين من derivePartiesDisplay
+                            // فوق، اللي بالفعل بيحسم المسمى القانوني/تعدد الأطراف/legacy —
+                            // مفيش داعي لتمرير legalTitle هنا تاني (كان بيتكرر الحساب قبل كده).
                             plaintiff: displayPlaintiff, defendant: displayDefendant,
-                            plaintiffLegalTitle: displayPlaintiffLegalTitle, defendantLegalTitle: displayDefendantLegalTitle,
                             fallback: fallbackLabel,
                             className: 'text-[11px] font-black text-white leading-tight flex-1 truncate'
                         }),
@@ -538,6 +560,7 @@ function DashboardTab({
             clients,
             onOpenClientProfile,
             onOpenCreateClientForSessionParty,
+            openNewClientModal,
         }),
         Dashboard
   );
