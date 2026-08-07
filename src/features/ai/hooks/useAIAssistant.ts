@@ -10,6 +10,7 @@ import { useAILegalEngine } from './useAILegalEngine';
 import { useAITopics } from './useAITopics';
 import { useAIChat } from './useAIChat';
 import { useAIDocumentGenerator } from './useAIDocumentGenerator';
+import { formatArDate } from '../../../shared/ui/arabicLocale';
 
 export function useAIAssistant(cases: MappedCase[], clients: ClientRow[], profile: ProfileRow | null, country: string) {
     const [mode, setMode] = useState('menu');
@@ -25,7 +26,14 @@ export function useAIAssistant(cases: MappedCase[], clients: ClientRow[], profil
     const [selectedCase, setSelectedCase] = useState<MappedCase | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
-    const today = new Date().toLocaleDateString('ar-SA-u-nu-latn', {year:'numeric',month:'long',day:'numeric'});
+    // 🔒 FIX (خطة 5.3 — توحيد ar-SA/ar-EG، 6 أغسطس 2026): كان 'ar-SA-u-nu-latn'
+    // بدون calendar:'gregory' صريح — نفس خطر التقويم الهجري اللي arabicLocale.ts
+    // اتعمل أصلاً عشانه، والاستثناء القديم ("مش عرض للمستخدم") غلط: today هنا
+    // بيتحط فعليًا في مستند مُولّد (تاريخ الجلسة + الفوتر في useAIDocumentGenerator.ts)
+    // بيُطبع/يُعرض للمستخدم، وكمان بيتغذى بيه الـAI كسياق تاريخ حقيقي — لازم
+    // ميلادي مضمون زي باقي التطبيق. استخدمنا numberingSystem:'latn' للحفاظ على
+    // نفس شكل الأرقام القديم (لاتينية) بدل الأرقام العربية الافتراضية لـ ar-EG.
+    const today = formatArDate(new Date(), {year:'numeric',month:'long',day:'numeric',numberingSystem:'latn'});
 
     const activeCfg = COUNTRY_CONFIGS[country||'SA'];
 
