@@ -159,6 +159,23 @@ export async function createTestUser(
   return { email, password };
 }
 
+// 🆕 (بند 1.5 — تنظيف تلقائي بعد كل تست، 6 أغسطس 2026): بتحذف المستخدم
+// التجريبي اللي عملته createTestUser فوق نهائيًا، عبر نفس مسار "حذف
+// نهائي" الحقيقي في الواجهة (admin-user-delete → تأكيد بكتابة الاسم).
+// بتتنادى من test.afterEach في admin-users.spec.ts، فبتفترض إن الـpage
+// لسه مسجّل دخول. آمنة الاستدعاء حتى لو المستخدم اتحذف بالفعل جوه
+// التست نفسه (تست "حذف نهائي") — بترجع فورًا من غير أي فعل لو الكارت
+// مش موجود أصلًا.
+export async function deleteTestUser(page: Page, fullName: string): Promise<void> {
+  await openAdminSection(page, 'users');
+  const card = page.getByTestId('admin-user-card').filter({ hasText: fullName });
+  if (await card.count() === 0) return;
+  await card.first().getByTestId('admin-user-delete').click();
+  await page.getByTestId('admin-user-delete-input').fill(fullName);
+  await page.getByTestId('admin-user-delete-confirm').click();
+  await expect(page.getByTestId('admin-user-card').filter({ hasText: fullName })).toHaveCount(0, { timeout: 10_000 });
+}
+
 // المرحلة 1 (خطة تنفيذ اختبارات E2E المقسمة) — هيلبر إنشاء موكل، بنفس نمط
 // createCase فوق. بيرجّع الرقم القومي المستخدم فعليًا (مهم لتستات التكرار
 // اللي محتاجة تعرف نفس الرقم بالظبط عشان تحاول تكرره في موكل تاني).
