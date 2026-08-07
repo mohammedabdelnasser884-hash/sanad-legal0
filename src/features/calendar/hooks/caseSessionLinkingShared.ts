@@ -128,6 +128,19 @@ export interface CaseInsertSourceFields {
  *   تكون اتربطت بموكل قبل التحويل (session.client_id) — لو undefined،
  *   عمود client_id مش بيتبعت خالص في الـ INSERT (زي مسار الفورم اللي
  *   لسه ما اتحفظش، مفيش فيه مفهوم "موكل مربوط قبل كده" أصلاً). */
+// ⚡ CHANGED (خطة تفكيك legacy columns — Phase F.3، 6 أغسطس 2026): وقّفنا
+// كتابة plaintiff/plaintiff_role/plaintiff_national_id/
+// plaintiff_power_of_attorney/plaintiff_address/defendant/defendant_role/
+// defendant_national_id/plaintiff_legal_title/defendant_legal_title هنا
+// خالص — نفس قرار F.1 بالحرف (useCaseActions.ts، مسار إنشاء قضية عادية)
+// لكن هنا لمسار "تحويل جلسة مستقلة لقضية" (buildCaseInsertData مستخدمة في
+// useClientLinking.ts وuseSessionLinking.ts معًا). أطراف الدعوى الحقيقيين
+// بينتقلوا فعليًا لـcase_parties عبر movePartiesFromSessionToCase/
+// linkSessionGroupToCase (بينادوا بعد نجاح الـ INSERT ده مباشرة في كل
+// caller) — كل شاشات العرض بقت بتقرا من هناك بس (مراحل B.1-B.4). الحقول
+// المقابلة في CaseInsertSourceFields فوق فضلت زي ما هي (مش شالين الـ
+// interface) — الـ callers لسه بيبعتوها من غير أي تعديل، بس بقت بتتجاهل
+// هنا بدل ما تتكتب على عمود.
 export function buildCaseInsertData(
   fields: CaseInsertSourceFields,
   caseTitle: string,
@@ -141,19 +154,6 @@ export function buildCaseInsertData(
     case_number: fields.caseNumber || null,
     court: fields.court || null,
     case_type: fields.caseType || null,
-    plaintiff: fields.plaintiff || null,
-    plaintiff_role: fields.plaintiffRole || null,
-    plaintiff_national_id: fields.plaintiffNationalId || null,
-    plaintiff_power_of_attorney: fields.plaintiffPoa || null,
-    plaintiff_address: fields.plaintiffAddress || null,
-    defendant: fields.defendant || null,
-    defendant_role: fields.defendantRole || null,
-    defendant_national_id: fields.defendantNationalId || null,
-    // 🆕 (خطة "المسمى القانوني" — بند مؤجل من التقرير): إضافي بالكامل —
-    // القضايا اللي مالهاش مسمى قانوني أصلاً (الحالة الغالبة، طرف واحد)
-    // بتفضل زي ما هي بالظبط (null)، صفر تغيير سلوك.
-    plaintiff_legal_title: fields.plaintiffLegalTitle || null,
-    defendant_legal_title: fields.defendantLegalTitle || null,
     circuit_number: fields.circuitNumber || null,
     session_hall: fields.sessionHall || null,
     session_time: fields.sessionTime || null,
@@ -553,6 +553,12 @@ export interface SessionClientParty {
   // useClientLinking.ts اللي بيضمن إن كل الأطراف الراجعة مش مربوطة لأن
   // الجلسة هناك لسه جديدة تمامًا).
   client_id?: string | null;
+  // 🆕 (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 2، 6 أغسطس 2026): نفس
+  // فكرة PartyFieldValue.updated_at بالحرف — قيمة case_parties.updated_at
+  // وقت الجلب، مستخدمة كـknownUpdatedAt للقفل التفاؤلي وقت الربط/فك الربط
+  // اللاحق (linkClientToParty/linkClientToSessionParty/unlinkClientFromParty
+  // تحت). الاستهلاك القديم اللي مش عارف بيها بيتجاهلها زي أي حقل اختياري.
+  updated_at?: string | null;
 }
 
 /**
@@ -570,7 +576,7 @@ export async function fetchSessionClientParties(
   // ⚠️ case_parties بقت مضافة في database.types.ts (خطة تعدد الأطراف،
   // مرحلة 1) — مفيش داعي لكاست 'as cases' تاني هنا.
   const { data, error } = await db.from('case_parties')
-    .select('id,side,name,national_id,power_of_attorney,address,sort_order,client_id')
+    .select('id,side,name,national_id,power_of_attorney,address,sort_order,client_id,updated_at')
     .eq('session_id', sessionId)
     .eq('is_client', true)
     .order('sort_order', { ascending: true });
@@ -622,6 +628,26 @@ export async function matchClientsForParties(
  * لموكلين مطابقين من findMatchingClientByName اللي id بتاعهم حقيقي دايمًا).
  * لو الباراميتر مش متبعت (زي كل الاستدعاءات القديمة)، السلوك زي ما هو
  * بالظبط — نفس شكل الناتج القديم حرفيًا.
+ *
+ * ⚡ NEW (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 1، فقرة 6 من التقرير):
+ * باراميتر سابع اختياري `syncFields` — لو اتبعت، بيتضاف اسم/رقم قومي/
+ * توكيل/عنوان الطرف لنفس عملية الـ UPDATE اللي بتحدّث client_id، عشان
+ * السطرين (الربط + مزامنة البيانات) يحصلوا مع بعض دايمًا ومفيش فرصة
+ * يفترقوا زي ما كان بيحصل قبل كده (فجوة: مسار "تاب البيانات" كان بيربط
+ * client_id بس من غير مزامنة، فتفضل بيانات الطرف قديمة للأبد). الاستدعاء
+ * القديم (من غير الباراميتر ده) سلوكه زي ما هو بالظبط — client_id بس.
+ *
+ * ⚡ NEW (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 2، 6 أغسطس 2026):
+ * باراميتر تامن اختياري `knownUpdatedAt` — قيمة case_parties.updated_at
+ * اللي الكولر شايفها وقت فتح الفورم/الويدجت، بتتبعت لـwindow.__dbWrite
+ * كـknownUpdatedAt عشان تفعّل القفل التفاؤلي (نفس آلية cases/case_sessions/
+ * reminders/case_notes الموجودة بالفعل — راجع safeUpdate في dataAccess.ts
+ * وnotes عليها في offlineQueue.ts) على case_parties كمان، اللي كانت لسه
+ * مكشوفة بالكامل لـ"آخر تعديل بيكسب" بين محاميين. الناتج بقى فيه `conflict`
+ * (بدل `ok:false` عام) عشان الكولر يقدر يعرض رسالة "حد تاني عدّل الطرف ده"
+ * بدل رسالة خطأ عامة — نفس تفرقة handleLinkClient/handleUnlinkClient في
+ * useCaseActions.ts. الاستدعاء القديم (من غير الباراميتر ده، knownUpdatedAt
+ * = undefined) سلوكه زي ما هو بالظبط — مفيش فحص تعارض خالص.
  */
 export async function linkClientToParty(
   partyId: string,
@@ -630,19 +656,38 @@ export async function linkClientToParty(
   caseId: string,
   caseTitle: string | undefined,
   clientOfflineInfo?: { isTempClientId: boolean; tempClientId: string; fallbackNameValue: string | null },
-): Promise<{ ok: boolean }> {
+  syncFields?: { name: string; national_id: string; power_of_attorney: string; address: string },
+  knownUpdatedAt?: string | null,
+  // ⚡ NEW (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 3، 6 أغسطس 2026):
+  // باراميتر تاسع اختياري knownCaseUpdatedAt — cases.updated_at اللي
+  // الكولر شايفها وقت فتح القضية، بتتبعت لـwindow.__dbWrite وقت تحديث
+  // cases.client_id (فرع isPrimaryParty بس). كانت الفجوة الموثّقة في
+  // تقرير المرحلة 2 (قسم 3/6): تحديث cases.client_id هنا كان بيحصل من
+  // غير أي قفل تفاؤلي خالص، بعكس case_parties.client_id جنبه في نفس
+  // الدالة. تعارض على مستوى القضية بيترجع منفصل عن تعارض الطرف عبر
+  // conflictScope: 'case' (بدل 'party') عشان الكولر يعرض رسالة مختلفة —
+  // الطرف نفسه يبقى اتربط بنجاح فعلاً هنا (partyResult نجح قبل ما نوصل
+  // لتحديث cases)، فمفيش rollback تلقائي. الاستدعاء القديم (من غير
+  // الباراميتر ده) سلوكه زي ما هو بالظبط — مفيش فحص تعارض على cases.
+  knownCaseUpdatedAt?: string | null,
+): Promise<{ ok: boolean; conflict?: boolean; conflictScope?: 'party' | 'case' }> {
+  const baseData: Record<string, unknown> = syncFields
+    ? { client_id: clientId, ...syncFields }
+    : { client_id: clientId };
   const partyUpdateData = clientOfflineInfo
     ? withFkOfflineSentinel(
         clientOfflineInfo.isTempClientId, true, 'client_id', clientOfflineInfo.tempClientId, 'clients',
-        clientOfflineInfo.fallbackNameValue, { client_id: clientId },
+        clientOfflineInfo.fallbackNameValue, baseData,
       )
-    : { client_id: clientId };
+    : baseData;
   const partyResult = await window.__dbWrite({
     type: 'UPDATE',
     table: 'case_parties',
     id: partyId,
     data: partyUpdateData,
+    knownUpdatedAt: knownUpdatedAt ?? null,
   });
+  if (partyResult.conflict) return { ok: false, conflict: true, conflictScope: 'party' };
   let caseOk = true;
   if (isPrimaryParty) {
     const caseResult = await window.__dbWrite({
@@ -650,7 +695,9 @@ export async function linkClientToParty(
       table: 'cases',
       id: caseId,
       data: withCaseSelfOfflineSentinel(caseId, { client_id: clientId }, caseTitle),
+      knownUpdatedAt: knownCaseUpdatedAt ?? null,
     });
+    if (caseResult.conflict) return { ok: false, conflict: true, conflictScope: 'case' };
     caseOk = !caseResult.error;
   }
   return { ok: !partyResult.error && caseOk };
@@ -663,17 +710,27 @@ export async function linkClientToParty(
 // بيانات حرة قابلة للتعديل بدل ما تتقرا من ملف الموكل، نفس فلسفة
 // handleUnlinkClient لمستوى القضية كلها). مفيش داعي لـclientOfflineInfo
 // هنا (فك ربط، مش إنشاء رابط جديد لموكل أوفلاين مؤقت).
+// ⚡ NEW (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 2، 6 أغسطس 2026):
+// باراميتر رابع اختياري `knownUpdatedAt` — نفس فلسفة linkClientToParty
+// فوق بالحرف. `conflict` بيترجع منفصل عن `ok:false` العام لنفس السبب.
+// ⚡ NEW (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 3، 6 أغسطس 2026):
+// باراميتر خامس اختياري knownCaseUpdatedAt — نفس فلسفة linkClientToParty
+// فوق بالحرف، لتحديث cases.client_id لـnull (فرع isPrimaryParty بس).
 export async function unlinkClientFromParty(
   partyId: string,
   isPrimaryParty: boolean,
   caseId: string,
-): Promise<{ ok: boolean }> {
+  knownUpdatedAt?: string | null,
+  knownCaseUpdatedAt?: string | null,
+): Promise<{ ok: boolean; conflict?: boolean; conflictScope?: 'party' | 'case' }> {
   const partyResult = await window.__dbWrite({
     type: 'UPDATE',
     table: 'case_parties',
     id: partyId,
     data: { client_id: null },
+    knownUpdatedAt: knownUpdatedAt ?? null,
   });
+  if (partyResult.conflict) return { ok: false, conflict: true, conflictScope: 'party' };
   let caseOk = true;
   if (isPrimaryParty) {
     const caseResult = await window.__dbWrite({
@@ -681,7 +738,9 @@ export async function unlinkClientFromParty(
       table: 'cases',
       id: caseId,
       data: { client_id: null },
+      knownUpdatedAt: knownCaseUpdatedAt ?? null,
     });
+    if (caseResult.conflict) return { ok: false, conflict: true, conflictScope: 'case' };
     caseOk = !caseResult.error;
   }
   return { ok: !partyResult.error && caseOk };
@@ -700,25 +759,46 @@ export async function unlinkClientFromParty(
 //  القديم في useClientActions.ts)، صفر تغيير في العمود المستهدف نفسه.
 // ══════════════════════════════════════════════════════════════
 
+// ⚡ NEW (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 1، فقرة 6 من التقرير):
+// نفس فكرة syncFields في linkClientToParty فوق بالظبط — باراميتر سادس
+// اختياري، لو اتبعت بيتزامن اسم/رقم قومي/توكيل/عنوان الطرف مع client_id
+// في نفس الـ UPDATE. الاستدعاء القديم من غيره سلوكه زي ما هو بالظبط.
+// ⚡ NEW (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 2، 6 أغسطس 2026):
+// باراميتر سابع اختياري `knownUpdatedAt` — نفس فلسفة linkClientToParty
+// بالحرف. `conflict` بيترجع منفصل عن `ok:false` العام.
+// ⚡ NEW (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 3، 6 أغسطس 2026):
+// باراميتر تامن اختياري knownSessionUpdatedAt — case_sessions.updated_at
+// اللي الكولر شايفها وقت فتح الجلسة، بتتبعت لـwindow.__dbWrite وقت
+// تحديث case_sessions.client_id (فرع isPrimaryParty بس). نفس فلسفة
+// knownCaseUpdatedAt في linkClientToParty فوق بالحرف — conflictScope:
+// 'session' بدل 'case' عشان الكولر يفرّق الرسالة.
 export async function linkClientToSessionParty(
   partyId: string,
   clientId: string,
   isPrimaryParty: boolean,
   sessionId: string,
   clientOfflineInfo?: { isTempClientId: boolean; tempClientId: string; fallbackNameValue: string | null },
-): Promise<{ ok: boolean }> {
+  syncFields?: { name: string; national_id: string; power_of_attorney: string; address: string },
+  knownUpdatedAt?: string | null,
+  knownSessionUpdatedAt?: string | null,
+): Promise<{ ok: boolean; conflict?: boolean; conflictScope?: 'party' | 'session' }> {
+  const baseData: Record<string, unknown> = syncFields
+    ? { client_id: clientId, ...syncFields }
+    : { client_id: clientId };
   const partyUpdateData = clientOfflineInfo
     ? withFkOfflineSentinel(
         clientOfflineInfo.isTempClientId, true, 'client_id', clientOfflineInfo.tempClientId, 'clients',
-        clientOfflineInfo.fallbackNameValue, { client_id: clientId },
+        clientOfflineInfo.fallbackNameValue, baseData,
       )
-    : { client_id: clientId };
+    : baseData;
   const partyResult = await window.__dbWrite({
     type: 'UPDATE',
     table: 'case_parties',
     id: partyId,
     data: partyUpdateData,
+    knownUpdatedAt: knownUpdatedAt ?? null,
   });
+  if (partyResult.conflict) return { ok: false, conflict: true, conflictScope: 'party' };
   let sessionOk = true;
   if (isPrimaryParty) {
     // ⚠️ مفيش withCaseSelfOfflineSentinel هنا عمدًا — sessionId هنا لازم
@@ -731,7 +811,9 @@ export async function linkClientToSessionParty(
       table: 'case_sessions',
       id: sessionId,
       data: { client_id: clientId },
+      knownUpdatedAt: knownSessionUpdatedAt ?? null,
     });
+    if (sessionResult.conflict) return { ok: false, conflict: true, conflictScope: 'session' };
     sessionOk = !sessionResult.error;
   }
   return { ok: !partyResult.error && sessionOk };
@@ -803,4 +885,36 @@ export function findClientDataMismatches(
     }
   }
   return mismatches;
+}
+
+/** حقول طرف واحد في case_parties (أو PartyFieldValue قبل الحفظ) — نفس
+ * أسماء الحقول الحقيقية في الجدول (مش بادئة plaintiff_* بتاعة الموكل
+ * الأساسي القديم فوق). */
+export interface FreeTextSinglePartyFields {
+  name?: string | null;
+  national_id?: string | null;
+  power_of_attorney?: string | null;
+  address?: string | null;
+}
+
+/**
+ * نفس فكرة findClientDataMismatches بالظبط، بس لطرف واحد في case_parties
+ * (أي طرف عليه ⭐، مش بس "الموكل الأساسي" التاريخي بحقول plaintiff_*).
+ * ⚡ NEW (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 1): مستخدمة في كل مكان
+ * فيه دروب-داون/بحث "ربط بموكل من النظام" على مستوى الطرف، عشان تحل
+ * فجوة 1 (استبدال صامت) وفجوة 6 (تفرّق الربط عن مزامنة البيانات) مع بعض.
+ */
+export function findPartyDataMismatches(
+  freeText: FreeTextSinglePartyFields,
+  client: ClientPartyFields,
+): FieldMismatch[] {
+  return findClientDataMismatches(
+    {
+      plaintiff: freeText.name,
+      plaintiff_national_id: freeText.national_id,
+      plaintiff_power_of_attorney: freeText.power_of_attorney,
+      plaintiff_address: freeText.address,
+    },
+    client,
+  );
 }
