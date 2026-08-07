@@ -270,8 +270,14 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
             });
             if(error){ toast('❌ فشل حفظ الأتعاب الجديدة — تحقق من الاتصال وأعد المحاولة', true); setSaving(false); return; }
             toast('✅ تم إضافة الأتعاب');
+            // ⚡ FIX: Functions في database.types.ts معرّفة بشكل عام (permissive
+            // index signature — Returns: unknown) لأنه مفيش استعلام حقيقي على
+            // pg_proc اتعمل لدالة create_fee_with_advance بعينها، فـ supabase-js
+            // بيرجع inserted كـ `{}` بدل الصف الحقيقي. بنعمل cast هنا للشكل
+            // المعروف فعليًا (RPC بترجع صف واحد فيه id).
+            const insertedRow = inserted as { id?: string } | null;
             logActivity(db, 'إضافة أتعاب', {
-                entity_type: 'fee', entity_id: inserted?.id, details: clientName || form.case_id,
+                entity_type: 'fee', entity_id: insertedRow?.id, details: clientName || form.case_id,
                 client_name: clientName || null,
                 case_name: cases.find((c) => c.id === form.case_id)?.title || null,
                 case_type: cases.find((c) => c.id === form.case_id)?.type || null,
