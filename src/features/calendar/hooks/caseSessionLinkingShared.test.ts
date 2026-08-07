@@ -425,7 +425,7 @@ describe('linkClientToParty', () => {
     window.__dbWrite = fn as unknown as typeof window.__dbWrite;
     const result = await linkClientToParty('party-2', 'client-1', false, 'case-1', undefined);
     expect(result).toEqual({ ok: true });
-    expect(calls).toEqual([{ type: 'UPDATE', table: 'case_parties', id: 'party-2', data: { client_id: 'client-1' } }]);
+    expect(calls).toEqual([{ type: 'UPDATE', table: 'case_parties', id: 'party-2', data: { client_id: 'client-1' }, knownUpdatedAt: null }]);
   });
 
   it('الطرف الأساسي (isPrimaryParty=true) → UPDATE على case_parties وUPDATE على cases.client_id مع بعض', async () => {
@@ -434,8 +434,8 @@ describe('linkClientToParty', () => {
     const result = await linkClientToParty('party-1', 'client-1', true, 'case-1', 'عنوان القضية');
     expect(result).toEqual({ ok: true });
     expect(calls).toEqual([
-      { type: 'UPDATE', table: 'case_parties', id: 'party-1', data: { client_id: 'client-1' } },
-      { type: 'UPDATE', table: 'cases', id: 'case-1', data: { client_id: 'client-1' } },
+      { type: 'UPDATE', table: 'case_parties', id: 'party-1', data: { client_id: 'client-1' }, knownUpdatedAt: null },
+      { type: 'UPDATE', table: 'cases', id: 'case-1', data: { client_id: 'client-1' }, knownUpdatedAt: null },
     ]);
   });
 
@@ -487,7 +487,7 @@ describe('unlinkClientFromParty', () => {
     window.__dbWrite = fn as unknown as typeof window.__dbWrite;
     const result = await unlinkClientFromParty('party-2', false, 'case-1');
     expect(result).toEqual({ ok: true });
-    expect(calls).toEqual([{ type: 'UPDATE', table: 'case_parties', id: 'party-2', data: { client_id: null } }]);
+    expect(calls).toEqual([{ type: 'UPDATE', table: 'case_parties', id: 'party-2', data: { client_id: null }, knownUpdatedAt: null }]);
   });
 
   it('الطرف الأساسي (isPrimaryParty=true) → UPDATE على case_parties وUPDATE على cases.client_id=null مع بعض', async () => {
@@ -496,8 +496,8 @@ describe('unlinkClientFromParty', () => {
     const result = await unlinkClientFromParty('party-1', true, 'case-1');
     expect(result).toEqual({ ok: true });
     expect(calls).toEqual([
-      { type: 'UPDATE', table: 'case_parties', id: 'party-1', data: { client_id: null } },
-      { type: 'UPDATE', table: 'cases', id: 'case-1', data: { client_id: null } },
+      { type: 'UPDATE', table: 'case_parties', id: 'party-1', data: { client_id: null }, knownUpdatedAt: null },
+      { type: 'UPDATE', table: 'cases', id: 'case-1', data: { client_id: null }, knownUpdatedAt: null },
     ]);
   });
 
