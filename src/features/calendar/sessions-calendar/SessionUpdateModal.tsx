@@ -22,6 +22,10 @@ interface SessionUpdateModalProps {
     // بالجلسة المستقلة (session.client_id) — لو موجود، بيتاخد منه
     // الاسم/الرقم القومي/رقم التوكيل عند بناء الجلسة القادمة، بدل نسخ
     // نسخة الجلسة الحالية اللي ممكن تكون قديمة لو الموكل تعدّل بعدها.
+    // ⚠️ (Phase F.2، 6 أغسطس 2026): بقى مش مُستخدم جوه الملف ده — كان
+    // بيتاخد منه اسم/رقم قومي/رقم توكيل الموكل لمزامنة الأعمدة القديمة
+    // (اتشالت فوق). سايبينه في التوقيع عشان أي Caller بيبعته حاليًا يفضل
+    // شغّال من غير تعديل — noUnusedParameters=false في tsconfig فمفيش خطأ.
     linkedClient?: ClientRow | null;
 }
 
@@ -86,27 +90,16 @@ function SessionUpdateModal({ session, caseData, db, onClose, onDone, onNotify, 
                 court: session.court || null,
                 case_type: session.case_type || null,
                 circuit_number: session.circuit_number || null,
-                // ⚡ FIX (خطة توحيد مصدر بيانات الموكل، مرحلة 5): لو الجلسة
-                // مربوطة بموكل حي، الاسم/الرقم القومي/التوكيل بيتاخدوا من
-                // ملف الموكل نفسه وقت إنشاء الجلسة القادمة — مش من نسخة
-                // الجلسة الحالية اللي ممكن تكون بقت قديمة. plaintiff_role
-                // فضل من الجلسة عمدًا (خاصية الجلسة مش الموكل).
-                plaintiff: (linkedClient ? linkedClient.full_name : session.plaintiff) || null,
-                plaintiff_role: session.plaintiff_role || null,
-                plaintiff_national_id: (linkedClient ? linkedClient.national_id : session.plaintiff_national_id) || null,
-                plaintiff_power_of_attorney: (linkedClient ? linkedClient.cr_number : session.plaintiff_power_of_attorney) || null,
-                defendant: session.defendant || null,
-                defendant_role: session.defendant_role || null,
-                defendant_national_id: session.defendant_national_id || null,
-                // 🆕 (خطة "المسمى القانوني" — بند مؤجل ثانٍ، 24 يوليو 2026):
-                // كانا مفقودين هنا قبل كده — الجلسة القادمة كانت بترجع
-                // بلا 🔖 المسمى الجامع حتى لو الجلسة الحالية فيها ورثة/شركاء
-                // وعليها مسمى مكتوب.
-                plaintiff_legal_title: session.plaintiff_legal_title || null,
-                defendant_legal_title: session.defendant_legal_title || null,
-                // ⚡ FIX: كان client_id مش بيتبعت خالص هنا — الجلسة القادمة
-                // كانت بتتولد "مش مربوطة" بالموكل حتى لو الجلسة الحالية
-                // كانت مربوطة، وده باج فقدان ربط كامل مش بس بيانات قديمة.
+                // ⚡ CHANGED (خطة تفكيك legacy columns — Phase F.2، 6 أغسطس
+                // 2026): كانت هنا مزامنة plaintiff/plaintiff_role/
+                // plaintiff_national_id/plaintiff_power_of_attorney/
+                // defendant/defendant_role/defendant_national_id/
+                // plaintiff_legal_title/defendant_legal_title من الجلسة
+                // الحالية (أو ملف الموكل الحي لو مربوطة) — ده كان مصدر
+                // الكتابة الرابع المكتشف في تحديث 6 (تصحيح "SessionUpdateModal
+                // من طبقة الكتابة مش العرض"). كل أطراف الجلسة الحقيقيين
+                // بيتنسخوا فعليًا لـcase_parties الجلسة الجديدة تحت عبر
+                // copySessionPartiesToNewSession — مفيش داعي لأي مزامنة هنا.
                 client_id: session.client_id || null,
                 // 🆕 (خطة تسلسل الجلسة المستقلة، 3 أغسطس 2026): راجع تعليق
                 // groupId فوق — نفس المعرّف بالحرف على الجلسة الجديدة.
