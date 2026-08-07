@@ -44,11 +44,15 @@ function SessionCard({ s, cases, clients, onOpenCase, onOpenStandalone, onGoogle
     // defendant/*_legal_title) بقت fallback جوا derivePartiesDisplay نفسها
     // بدل ما تُقرأ مباشرة هنا — نفس النتيجة بالظبط لأي جلسة لسه مالهاش
     // صفوف case_parties (الحالة الأغلب حاليًا لبيانات قديمة).
+    // ⚡ FIX (F.4، 6 أغسطس 2026): plaintiff/defendant/*_legal_title اتشالوا
+    // من case_sessions تمامًا (مكانوش موجودين في CalendarSessionRow من الأصل)،
+    // ومن cases في MappedCase بقوا null دايمًا (شوف useAppData.ts). الفولباك
+    // الوحيد الفعّال دلوقتي هو parties (case_parties) نفسها.
     const { plaintiff: displayPlaintiff, defendant: displayDefendant } = derivePartiesDisplay(parties, {
-        plaintiff: linkedCase?.plaintiff || s.plaintiff,
-        defendant: linkedCase?.defendant || s.defendant,
-        plaintiffLegalTitle: linkedCase?.plaintiff_legal_title || s.plaintiff_legal_title,
-        defendantLegalTitle: linkedCase?.defendant_legal_title || s.defendant_legal_title,
+        plaintiff: linkedCase?.plaintiff,
+        defendant: linkedCase?.defendant,
+        plaintiffLegalTitle: linkedCase?.plaintiff_legal_title,
+        defendantLegalTitle: linkedCase?.defendant_legal_title,
     });
     const caseType  = linkedCase?.type  || linkedCase?.case_type || s.case_type;
     const caseTitle = linkedCase?.title || s.title || s.description;
@@ -117,8 +121,11 @@ function SessionCard({ s, cases, clients, onOpenCase, onOpenStandalone, onGoogle
                         // هنا، يعني الكود كان فعليًا بيعتمد على next_hearing بس.
                         date:           r.next_hearing || '—',
                         client_id:      r.client_id,
-                        plaintiff:      r.plaintiff || null,
-                        defendant:      r.defendant || null,
+                        // ⚡ FIX (F.4، 6 أغسطس 2026): plaintiff/defendant اتشالوا من
+                        // جدول cases فعليًا — مصدر العرض بقى case_parties (partiesIndex)
+                        // مش هنا. سيبناهم null عشان الشكل يفضل متوافق مع MappedCase.
+                        plaintiff:      null,
+                        defendant:      null,
                         year:           r.created_at ? new Date(r.created_at).getFullYear() : new Date().getFullYear(),
                         updated_at:     r.updated_at || null,
                     } as unknown as MappedCase;
