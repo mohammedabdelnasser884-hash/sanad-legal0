@@ -404,18 +404,9 @@ export interface Database {
           case_number: string | null
           court: string | null
           case_type: string | null
-          plaintiff: string | null
-          plaintiff_national_id: string | null
-          plaintiff_power_of_attorney: string | null
-          defendant: string | null
-          defendant_national_id: string | null
           updated_at: string | null
           client_id: string | null
           circuit_number: string | null
-          plaintiff_role: string | null
-          defendant_role: string | null
-          plaintiff_legal_title: string | null
-          defendant_legal_title: string | null
           court_level: string | null
           secretary_hall: string | null
           secretary_name: string | null
@@ -438,18 +429,9 @@ export interface Database {
           case_number?: string | null
           court?: string | null
           case_type?: string | null
-          plaintiff?: string | null
-          plaintiff_national_id?: string | null
-          plaintiff_power_of_attorney?: string | null
-          defendant?: string | null
-          defendant_national_id?: string | null
           updated_at?: string | null
           client_id?: string | null
           circuit_number?: string | null
-          plaintiff_role?: string | null
-          defendant_role?: string | null
-          plaintiff_legal_title?: string | null
-          defendant_legal_title?: string | null
           court_level?: string | null
           secretary_hall?: string | null
           secretary_name?: string | null
@@ -472,18 +454,9 @@ export interface Database {
           case_number?: string | null
           court?: string | null
           case_type?: string | null
-          plaintiff?: string | null
-          plaintiff_national_id?: string | null
-          plaintiff_power_of_attorney?: string | null
-          defendant?: string | null
-          defendant_national_id?: string | null
           updated_at?: string | null
           client_id?: string | null
           circuit_number?: string | null
-          plaintiff_role?: string | null
-          defendant_role?: string | null
-          plaintiff_legal_title?: string | null
-          defendant_legal_title?: string | null
           court_level?: string | null
           secretary_hall?: string | null
           secretary_name?: string | null
@@ -519,12 +492,6 @@ export interface Database {
           ai_summary: string | null
           last_sync_at: string | null
           created_at: string | null
-          plaintiff: string | null
-          plaintiff_role: string | null
-          defendant: string | null
-          defendant_role: string | null
-          plaintiff_legal_title: string | null
-          defendant_legal_title: string | null
           next_hearing: string | null
           court_floor: string | null
           court_hall: string | null
@@ -538,10 +505,6 @@ export interface Database {
           secretary_mobile: string | null
           case_number: string | null
           court: string | null
-          plaintiff_national_id: string | null
-          plaintiff_power_of_attorney: string | null
-          defendant_national_id: string | null
-          plaintiff_address: string | null
           deleted_at: string | null
         }
         Insert: {
@@ -557,12 +520,6 @@ export interface Database {
           ai_summary?: string | null
           last_sync_at?: string | null
           created_at?: string | null
-          plaintiff?: string | null
-          plaintiff_role?: string | null
-          defendant?: string | null
-          defendant_role?: string | null
-          plaintiff_legal_title?: string | null
-          defendant_legal_title?: string | null
           next_hearing?: string | null
           court_floor?: string | null
           court_hall?: string | null
@@ -576,10 +533,6 @@ export interface Database {
           secretary_mobile?: string | null
           case_number?: string | null
           court?: string | null
-          plaintiff_national_id?: string | null
-          plaintiff_power_of_attorney?: string | null
-          defendant_national_id?: string | null
-          plaintiff_address?: string | null
           deleted_at?: string | null
         }
         Update: {
@@ -595,12 +548,6 @@ export interface Database {
           ai_summary?: string | null
           last_sync_at?: string | null
           created_at?: string | null
-          plaintiff?: string | null
-          plaintiff_role?: string | null
-          defendant?: string | null
-          defendant_role?: string | null
-          plaintiff_legal_title?: string | null
-          defendant_legal_title?: string | null
           next_hearing?: string | null
           court_floor?: string | null
           court_hall?: string | null
@@ -614,10 +561,6 @@ export interface Database {
           secretary_mobile?: string | null
           case_number?: string | null
           court?: string | null
-          plaintiff_national_id?: string | null
-          plaintiff_power_of_attorney?: string | null
-          defendant_national_id?: string | null
-          plaintiff_address?: string | null
           deleted_at?: string | null
         }
         // ⚠️ مطلوبة بنيويًا من supabase-js (بيتحقق منها داخليًا وقت استنتاج
