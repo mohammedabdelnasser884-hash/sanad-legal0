@@ -168,11 +168,14 @@ describe('useClientLinking', () => {
       expect(dbWrite.callsFor('INSERT:cases')[0]).toEqual(expect.objectContaining({
         type: 'INSERT', table: 'cases',
         data: expect.objectContaining({
-          case_number_official: '10 لسنة 2026', case_type: 'مدني', plaintiff: 'أحمد محمد', status: 'نشطة',
+          case_number_official: '10 لسنة 2026', case_type: 'مدني', status: 'نشطة',
           _offlineTempId: expect.stringMatching(/^tmp-/),
         }),
         returning: true,
       }));
+      // F.3 (6 أغسطس 2026): buildCaseInsertData (المستخدمة هنا جوه handleLinkCase)
+      // بقت مابتكتبش عمود plaintiff (ولا أي عمود legacy تاني) خالص
+      expect(dbWrite.callsFor('INSERT:cases')[0].data).not.toHaveProperty('plaintiff');
       expect(toast).toHaveBeenCalledWith('✅ تم إنشاء ملف القضية');
       expect(onSaved).toHaveBeenCalled();
       expect(result.current.createdCaseId).toBe('new-case-1');
