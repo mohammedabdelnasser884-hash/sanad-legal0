@@ -78,7 +78,7 @@ const sendTgChunked = async (token: string, chat: string, header: string, items:
   }
 };
 
-const SESSION_COLS = "session_date, description, result, title, case_number, court, plaintiff, defendant, plaintiff_role, defendant_role, case_id, tenant_id";
+const SESSION_COLS = "id, session_date, description, result, title, case_number, court, case_id, tenant_id";
 
 // ⚡ NEW (مرحلة 8 من خطة تطوير أطراف الدعوى — 24 يوليو 2026): شكل بيانات
 // شخص واحد داخل جهة (مدعي/مدعى عليه)، بما فيها صفته الفعلية الفردية —
@@ -120,6 +120,32 @@ const fetchPartiesByCaseId = async (
   return result;
 };
 
+// ⚡ NEW (خطة تفكيك الأعمدة القديمة، المرحلة D — 6 أغسطس 2026): نفس فكرة
+// fetchPartiesByCaseId فوق بالظبط، بس على مستوى الجلسة (session_id) —
+// عشان الجلسات المستقلة (case_id = null) اللي أطرافها متسجلة على مستوى
+// الجلسة نفسها مش على مستوى قضية. نفس التوسيع ده اتعمل فعليًا على مستوى
+// الواجهة (frontend) في المرحلة B.1 (`useSessionsPartiesMap.ts`، دالة
+// bySessionId) — هنا نفس المنطق بالحرف لكن جوه الـEdge Function.
+const fetchPartiesBySessionId = async (
+  sessionIds: any[]
+): Promise<Record<string, { plaintiffs: PartyLabel[]; defendants: PartyLabel[] }>> => {
+  const result: Record<string, { plaintiffs: PartyLabel[]; defendants: PartyLabel[] }> = {};
+  if (sessionIds.length === 0) return result;
+  const { data: parties } = await supabase
+    .from("case_parties")
+    .select("session_id, side, name, capacity, is_client")
+    .in("session_id", sessionIds)
+    .order("sort_order", { ascending: true });
+  (parties || []).forEach((p: any) => {
+    if (!p.session_id || !p.name) return;
+    if (!result[p.session_id]) result[p.session_id] = { plaintiffs: [], defendants: [] };
+    const entry: PartyLabel = { name: p.name, capacity: (p.capacity || "").trim(), isClient: !!p.is_client };
+    if (p.side === "plaintiff") result[p.session_id].plaintiffs.push(entry);
+    else if (p.side === "defendant") result[p.session_id].defendants.push(entry);
+  });
+  return result;
+};
+
 // ⚡ NEW (مرحلة 8 من خطة تطوير أطراف الدعوى): بناء عنوان الجهة (بدل "المدعي"/
 // "المدعى عليه" الثابتين) من الصفات الفعلية المسجّلة لأشخاص هذه الجهة:
 //   - لو كل الأشخاص المسمّاة صفتهم متطابقة (الحالة الغالبة)، بتُستخدم هي
@@ -153,9 +179,17 @@ const buildPartyLines = (
   fallbackPlaintiff: string | null | undefined,
   fallbackDefendant: string | null | undefined,
   fallbackPlaintiffRole: string | null | undefined,
-  fallbackDefendantRole: string | null | undefined
+  fallbackDefendantRole: string | null | undefined,
+  // ⚡ NEW (المرحلة D — 6 أغسطس 2026): اختياريان بالكامل — لو مش ممرّرين
+  // (كل نداءات buildPartyLines القديمة قبل D) السلوك زي ما هو بالظبط.
+  // لو ممرّرين وفيه صفوف case_parties مسجّلة بـsession_id (جلسة مستقلة)،
+  // بتُستخدم بنفس أولوية partiesByCaseId (قضية بتاخد أولوية لو الاتنين
+  // موجودين نظريًا، وده مش متوقع عمليًا — جلسة مستقلة مالهاش case_id أصلًا).
+  sessionId?: string | null,
+  partiesBySessionId?: Record<string, { plaintiffs: PartyLabel[]; defendants: PartyLabel[] }>
 ): string => {
-  const parties = caseId ? partiesByCaseId[caseId] : undefined;
+  const parties = (caseId ? partiesByCaseId[caseId] : undefined)
+    || (sessionId && partiesBySessionId ? partiesBySessionId[sessionId] : undefined);
   let out = "";
   if (parties && (parties.plaintiffs.length > 0 || parties.defendants.length > 0)) {
     const buildSide = (persons: PartyLabel[], defaultLabel: string): string => {
@@ -198,7 +232,7 @@ const sendSessionAlert = async (token: string, chat: string, sessions: any[], la
   if (missingCaseIds.length > 0) {
     const { data: fallbackCases } = await supabase
       .from("cases")
-      .select("id, title, case_number_official, court_name, plaintiff, defendant, plaintiff_role, defendant_role")
+      .select("id, title, case_number_official, court_name")
       .in("id", missingCaseIds);
     (fallbackCases || []).forEach((c: any) => { fallbackById[c.id] = c; });
   }
@@ -206,22 +240,30 @@ const sendSessionAlert = async (token: string, chat: string, sessions: any[], la
   // ⚡ NEW (مرحلة 11): جلب كل أطراف الدعوى دفعة واحدة لكل القضايا في الدفعة دي
   const sessionCaseIds = [...new Set(sessions.filter((s: any) => s.case_id).map((s: any) => s.case_id))];
   const partiesByCaseId = await fetchPartiesByCaseId(sessionCaseIds);
+  // ⚡ NEW (المرحلة D — 6 أغسطس 2026): نفس الفكرة للجلسات المستقلة
+  // (case_id فاضي) — بأطرافها المسجّلة على مستوى الجلسة نفسها.
+  const standaloneSessionIds = [...new Set(sessions.filter((s: any) => !s.case_id).map((s: any) => s.id))];
+  const partiesBySessionId = await fetchPartiesBySessionId(standaloneSessionIds);
 
   const items = sessions.map((s: any, i: number) => {
     const fb = fallbackById[s.case_id] || {};
     const title      = s.title || fb.title;
     const caseNumber = s.case_number || fb.case_number_official;
     const court      = s.court || fb.court_name;
-    const plaintiff  = s.plaintiff || fb.plaintiff;
-    const defendant  = s.defendant || fb.defendant;
-    const plaintiffRole = s.plaintiff_role || fb.plaintiff_role;
-    const defendantRole = s.defendant_role || fb.defendant_role;
+    // ⚡ الأعمدة القديمة (plaintiff/defendant/plaintiff_role/defendant_role)
+    // اتحذفت من القاعدة فعليًا في F.4 (6 أغسطس 2026) — case_parties/
+    // session_parties (partiesByCaseId/partiesBySessionId فوق) بقوا
+    // المصدر الوحيد. جلسات قديمة من غير صفوف parties هتفضل بدون سطر أطراف.
+    const plaintiff  = undefined;
+    const defendant  = undefined;
+    const plaintiffRole = undefined;
+    const defendantRole = undefined;
 
     let item = `${i + 1}. ⚖️ <b>${title || "—"}</b>\n`;
     item += `   📋 رقم القيد: ${caseNumber || "—"}\n`;
     item += `   🏛 المحكمة: ${court || "—"}\n`;
     item += `   📆 تاريخ الجلسة: ${s.session_date}\n`;
-    item += buildPartyLines(s.case_id, partiesByCaseId, plaintiff, defendant, plaintiffRole, defendantRole);
+    item += buildPartyLines(s.case_id, partiesByCaseId, plaintiff, defendant, plaintiffRole, defendantRole, s.id, partiesBySessionId);
     if (s.description)  item += `   📝 ${s.description}\n`;
     item += "\n";
     return item;
@@ -419,7 +461,7 @@ const runForTenant = async (office: any, type: string) => {
     if (missingCaseIds.length > 0) {
       const { data: fallbackCases } = await supabase
         .from("cases")
-        .select("id, title, case_number_official, court_name, plaintiff, defendant, plaintiff_role, defendant_role")
+        .select("id, title, case_number_official, court_name")
         .in("id", missingCaseIds);
       (fallbackCases || []).forEach((c: any) => { fallbackById[c.id] = c; });
     }
@@ -428,6 +470,9 @@ const runForTenant = async (office: any, type: string) => {
     // لقضايا الجلسات الفائتة قبل بناء عناصر الرسالة.
     const overdueCaseIds = [...new Set(overdueSessions.filter((s: any) => s.case_id).map((s: any) => s.case_id))];
     const overduePartiesByCaseId = await fetchPartiesByCaseId(overdueCaseIds);
+    // ⚡ NEW (المرحلة D — 6 أغسطس 2026): نفس التوسيع للجلسات المستقلة الفائتة.
+    const overdueStandaloneIds = [...new Set(overdueSessions.filter((s: any) => !s.case_id).map((s: any) => s.id))];
+    const overduePartiesBySessionId = await fetchPartiesBySessionId(overdueStandaloneIds);
 
     if (overdueSessions.length > 0) {
       const items = overdueSessions.map((s: any, i: number) => {
@@ -435,15 +480,16 @@ const runForTenant = async (office: any, type: string) => {
         const title       = s.title || fb.title;
         const caseNumber  = s.case_number || fb.case_number_official;
         const court       = s.court || fb.court_name;
-        const plaintiff   = s.plaintiff || fb.plaintiff;
-        const defendant   = s.defendant || fb.defendant;
-        const plaintiffRole = s.plaintiff_role || fb.plaintiff_role;
-        const defendantRole = s.defendant_role || fb.defendant_role;
+        // ⚡ الأعمدة القديمة اتحذفت من القاعدة فعليًا في F.4 (6 أغسطس 2026)
+        const plaintiff   = undefined;
+        const defendant   = undefined;
+        const plaintiffRole = undefined;
+        const defendantRole = undefined;
 
         let item = `${i + 1}. ⚖️ <b>${title || "—"}</b>\n`;
         item += `   📋 رقم القيد: ${caseNumber || "—"}\n`;
         item += `   🏛 المحكمة: ${court || "—"}\n`;
-        item += buildPartyLines(s.case_id, overduePartiesByCaseId, plaintiff, defendant, plaintiffRole, defendantRole);
+        item += buildPartyLines(s.case_id, overduePartiesByCaseId, plaintiff, defendant, plaintiffRole, defendantRole, s.id, overduePartiesBySessionId);
         if (s.description)  item += `   📝 ${s.description}\n`;
         item += `   📆 تاريخ الجلسة: ${s.session_date}\n\n`;
         return item;
