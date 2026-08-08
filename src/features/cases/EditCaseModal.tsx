@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { I } from '../../constants';
 import { Inp } from '@/shared/ui/Inp';
 import { Sel } from '@/shared/ui/Sel';
+import { ClientSearchSelect, type ClientSearchResult } from '@/shared/ui/ClientSearchSelect';
 import { toast } from '../../shared/lib/notifications';
 import DatePicker from '@/shared/ui/DatePicker';
 import { db } from '../../supabaseClient';
@@ -393,11 +394,13 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
     // *غير* الموكل الأصلي المقفول (اللي عليه readOnly بالفعل من فوق). بتملى
     // الاسم/الرقم القومي/التوكيل/العنوان من بيانات موكل حقيقي مختار من
     // القائمة.
-    const linkClientToParty = (partyId: string, clientId: string) => {
-        if(!clientId){ partyFields.updateParty(partyId,'client_id',null); return; }
-        const picked = clients.find((c: ClientRow) => c.id===clientId);
-        if(!picked) return;
-        partyFields.updateParty(partyId,'client_id',clientId);
+    // ⚡ CHANGED (8 أغسطس 2026 — البند 6، الجزء الثاني): بياخد الصف الكامل
+    // (ClientSearchResult | null) اللي ClientSearchSelect.onSelect بيرجّعه
+    // مباشرة، بدل clientId + `clients.find()` محلي على قايمة `clients`
+    // (أول 15 موكل محمّلين بس) — راجع تقرير حالة التنفيذ 8-8-v3.
+    const linkClientToParty = (partyId: string, picked: ClientSearchResult | null) => {
+        if(!picked){ partyFields.updateParty(partyId,'client_id',null); return; }
+        partyFields.updateParty(partyId,'client_id',picked.id);
         partyFields.updateParty(partyId,'name',picked.full_name || '');
         partyFields.updateParty(partyId,'national_id',picked.national_id || '');
         partyFields.updateParty(partyId,'power_of_attorney',picked.cr_number || '');
@@ -410,17 +413,15 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
     // المختار. دلوقتي بنفحص التعارض الأول (findPartyDataMismatches)، ولو
     // فيه فرق حقيقي بنوقف ونعرض تأكيد صغير جوه كارت الطرف (نفس نمط
     // unlinkConfirmPartyId تحت) بدل الاستبدال الصامت.
-    const [linkMismatchState, setLinkMismatchState] = useState<{ partyId: string; clientId: string; mismatches: FieldMismatch[] } | null>(null);
-    const requestLinkClientToParty = (party: PartyFieldValue, clientId: string) => {
-        if(!clientId){ linkClientToParty(party.id,''); return; }
-        const picked = clients.find((c: ClientRow) => c.id===clientId);
-        if(!picked) return;
+    const [linkMismatchState, setLinkMismatchState] = useState<{ partyId: string; picked: ClientSearchResult; mismatches: FieldMismatch[] } | null>(null);
+    const requestLinkClientToParty = (party: PartyFieldValue, picked: ClientSearchResult | null) => {
+        if(!picked){ linkClientToParty(party.id,null); return; }
         const mismatches = findPartyDataMismatches(
             { name: party.name, national_id: party.national_id, power_of_attorney: party.power_of_attorney, address: party.address },
             picked,
         );
-        if(mismatches.length > 0){ setLinkMismatchState({ partyId: party.id, clientId, mismatches }); return; }
-        linkClientToParty(party.id, clientId);
+        if(mismatches.length > 0){ setLinkMismatchState({ partyId: party.id, picked, mismatches }); return; }
+        linkClientToParty(party.id, picked);
     };
 
     // ⚡ NEW (خطة توحيد قفل الطرف — المرحلة 3، "preview قبل فك الربط"،
@@ -482,18 +483,23 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
             // linkClientToParty فورًا — بنفتح تأكيد صغير جوه الكارت الأول.
             // أي اختيار تاني (ربط بموكل جديد، أو فك ربط طرف orphan أصلًا
             // مالوش موكل حي حاليًا) بينفذ على طول زي ما كان.
-            clients.length>0 && !confirmingUnlink && linkMismatchState?.partyId !== party.id && React.createElement(Sel,{
+            // ⚡ CHANGED (8 أغسطس 2026 — البند 6، الجزء الثاني): `Sel` القديم
+            // (مبني على قايمة `clients` أول 15 محمّلين) اتحول لـ
+            // `ClientSearchSelect` (بحث حقيقي في الداتابيز). "— بدون ربط —"
+            // بقى `manualOption` بدل `<option value=''>` — نفس فرع فك
+            // الربط اللي بيفتح تأكيد (unlinkConfirmPartyId) لطرف LINKED
+            // فعليًا محفوظ زي ما هو بالظبط.
+            !confirmingUnlink && linkMismatchState?.partyId !== party.id && React.createElement(ClientSearchSelect,{
                 label:"ربط بموكل من النظام (اختياري)",
-                // ⚡ FIX (باگ 5.1): قيمة orphan (client_id مش موجود في clients)
-                // كانت بتتعرض كأنها اختيار حقيقي في الدروب-داون (قيمة بلا
-                // خيار مطابق) — دلوقتي بترجع لـ"— بدون ربط —" بوضوح.
-                value: linkedPartyClient ? party.client_id! : '',
-                onChange:(e: React.ChangeEvent<HTMLSelectElement>) => {
-                    const newVal = e.target.value;
-                    if(!newVal && isLinkedState(state) && linkedPartyClient){ setUnlinkConfirmPartyId(party.id); return; }
-                    requestLinkClientToParty(party, newVal);
+                selectedLabel: linkedPartyClient ? (linkedPartyClient.full_name || '') : '',
+                isManualSelected: !linkedPartyClient,
+                manualOption: { label: '— بدون ربط (بيانات يدوية) —' },
+                onManualSelect: () => {
+                    if(isLinkedState(state) && linkedPartyClient){ setUnlinkConfirmPartyId(party.id); return; }
+                    requestLinkClientToParty(party, null);
                 },
-                options:[{value:'',label:'— بدون ربط (بيانات يدوية) —'},...clients.map((c: ClientRow) =>({value:c.id,label:c.full_name}))]
+                onSelect: (picked: ClientSearchResult) => requestLinkClientToParty(party, picked),
+                testId: `edit-case-party-client-search-${party.id}`,
             }),
             // ⚡ NEW (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 1): تأكيد
             // تعارض بيانات — بيظهر بس لو requestLinkClientToParty لقت فرق
@@ -506,7 +512,7 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
                 React.createElement('div',{className:'flex gap-2'},
                     React.createElement('button',{
                         type:'button',
-                        onClick:()=>{ linkClientToParty(party.id, linkMismatchState.clientId); setLinkMismatchState(null); },
+                        onClick:()=>{ linkClientToParty(party.id, linkMismatchState.picked); setLinkMismatchState(null); },
                         className:'flex-1 py-2 rounded-lg bg-premium-gold text-premium-bg text-[10px] font-black',
                         'data-testid':`edit-case-link-mismatch-confirm-${party.id}`,
                     },'استخدم بيانات الموكل'),
@@ -525,7 +531,7 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
                 React.createElement('div',{className:'flex gap-2'},
                     React.createElement('button',{
                         type:'button',
-                        onClick:()=>{ linkClientToParty(party.id,''); setUnlinkConfirmPartyId(null); },
+                        onClick:()=>{ linkClientToParty(party.id,null); setUnlinkConfirmPartyId(null); },
                         className:'flex-1 py-2 rounded-lg bg-rose-500 text-white text-[10px] font-black',
                         'data-testid':`edit-case-unlink-confirm-${party.id}`,
                     },'فك الربط'),
