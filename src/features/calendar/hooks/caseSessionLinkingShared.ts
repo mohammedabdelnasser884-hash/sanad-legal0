@@ -842,6 +842,49 @@ export async function linkClientToSessionParty(
   return { ok: !partyResult.error && sessionOk };
 }
 
+// عكس linkClientToSessionParty فوق بالظبط — نظير unlinkClientFromParty
+// (بتاعة القضية) بس لجلسة مستقلة. بتصفّر case_parties.client_id للطرف ده
+// بس، وcase_sessions.client_id كمان لو الطرف أساسي (isPrimaryParty)، من
+// غير ما تلمس أي حقل تاني في الطرف (اسم/رقم قومي/توكيل/عنوان بتفضل زي
+// ما هي — بيانات حرة قابلة للتعديل).
+// ⚡ NEW (خطة توحيد فك ربط الطرف الأساسي في الجلسة المستقلة — 8 أغسطس
+// 2026): قبل كده الجلسة كانت مالهاش نظير لـunlinkClientFromParty أصلاً
+// (فيه link لكن مفيش unlink مشترك) — الزرار السريع في
+// StandaloneSessionDetailModal كان بيصفّر case_sessions.client_id مباشرة
+// من غير ما يلمس case_parties.client_id للطرف المطابق، فيسيب الطرف شايل
+// client_id قديم يخلي getPartyState يصنّفه "طرف ثانوي مربوط" بدل حر لما
+// الفورم يتفتح تاني. الدالة دي بتقفل الفجوة دي بنفس فلسفة/شكل
+// unlinkClientFromParty بالحرف.
+export async function unlinkClientFromSessionParty(
+  partyId: string,
+  isPrimaryParty: boolean,
+  sessionId: string,
+  knownUpdatedAt?: string | null,
+  knownSessionUpdatedAt?: string | null,
+): Promise<{ ok: boolean; conflict?: boolean; conflictScope?: 'party' | 'session' }> {
+  const partyResult = await window.__dbWrite({
+    type: 'UPDATE',
+    table: 'case_parties',
+    id: partyId,
+    data: { client_id: null },
+    knownUpdatedAt: knownUpdatedAt ?? null,
+  });
+  if (partyResult.conflict) return { ok: false, conflict: true, conflictScope: 'party' };
+  let sessionOk = true;
+  if (isPrimaryParty) {
+    const sessionResult = await window.__dbWrite({
+      type: 'UPDATE',
+      table: 'case_sessions',
+      id: sessionId,
+      data: { client_id: null },
+      knownUpdatedAt: knownSessionUpdatedAt ?? null,
+    });
+    if (sessionResult.conflict) return { ok: false, conflict: true, conflictScope: 'session' };
+    sessionOk = !sessionResult.error;
+  }
+  return { ok: !partyResult.error && sessionOk };
+}
+
 // ══════════════════════════════════════════════════════════════
 //  خطة توحيد مصدر بيانات الموكل — المرحلة السادسة (تنبيه عند الربط
 //  اللاحق): لما قضية/جلسة مستقلة عندها بيانات حرة (plaintiff_*) اتربطت
