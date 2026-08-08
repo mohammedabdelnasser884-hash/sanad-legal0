@@ -3,6 +3,7 @@ import {
   makeOfflineTempId, isOfflineTempId, withCaseSelfOfflineSentinel, withFkOfflineSentinel,
   buildCaseInsertData, findMatchingClientByName,
   fetchSessionClientParties, matchClientsForParties, linkClientToParty, unlinkClientFromParty,
+  unlinkClientFromSessionParty,
   copySessionPartiesToNewSession, linkSessionGroupToCase, retryFailedGroupSessionsLinkToCase, updateCaseSessionsForGroup,
   syncSessionIdentityToGroupSiblings,
 } from './caseSessionLinkingShared';
@@ -548,6 +549,74 @@ describe('unlinkClientFromParty', () => {
     window.__dbWrite = fn as unknown as typeof window.__dbWrite;
     const result = await unlinkClientFromParty('party-1', true, 'case-1');
     expect(result).toEqual({ ok: false });
+  });
+});
+
+// 🔒 FIX (توحيد فك ربط الطرف الأساسي في الجلسة المستقلة — 8 أغسطس
+// 2026): نظير unlinkClientFromParty فوق بالحرف، بس لجلسة مستقلة
+// (case_sessions بدل cases). التيستات دي بتغطي بالظبط نفس السيناريوهات
+// اللي unlinkClientFromParty متغطية بيها، عشان نتأكد إن السلوك متطابق.
+describe('unlinkClientFromSessionParty', () => {
+  type DbWriteOp = { type: string; table: string; id?: string; data?: Record<string, unknown> };
+  function mockDbWrite(results: Record<string, { error: unknown; conflict?: boolean }> = {}) {
+    const calls: DbWriteOp[] = [];
+    const fn = vi.fn(async (op: DbWriteOp) => {
+      calls.push(op);
+      return results[`${op.type}:${op.table}`] ?? { error: null };
+    });
+    return { fn, calls };
+  }
+
+  beforeEach(() => {
+    window.__dbWrite = undefined as unknown as typeof window.__dbWrite;
+  });
+
+  it('طرف مش أساسي (isPrimaryParty=false) → UPDATE واحدة بس على case_parties (client_id=null)، مفيش أي لمسة لـ case_sessions', async () => {
+    const { fn, calls } = mockDbWrite();
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const result = await unlinkClientFromSessionParty('party-2', false, 'session-1');
+    expect(result).toEqual({ ok: true });
+    expect(calls).toEqual([{ type: 'UPDATE', table: 'case_parties', id: 'party-2', data: { client_id: null }, knownUpdatedAt: null }]);
+  });
+
+  it('الطرف الأساسي (isPrimaryParty=true) → UPDATE على case_parties وUPDATE على case_sessions.client_id=null مع بعض', async () => {
+    const { fn, calls } = mockDbWrite();
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const result = await unlinkClientFromSessionParty('party-1', true, 'session-1');
+    expect(result).toEqual({ ok: true });
+    expect(calls).toEqual([
+      { type: 'UPDATE', table: 'case_parties', id: 'party-1', data: { client_id: null }, knownUpdatedAt: null },
+      { type: 'UPDATE', table: 'case_sessions', id: 'session-1', data: { client_id: null }, knownUpdatedAt: null },
+    ]);
+  });
+
+  it('فشل UPDATE على case_parties → ok=false حتى لو الطرف مش أساسي', async () => {
+    const { fn } = mockDbWrite({ 'UPDATE:case_parties': { error: new Error('fail') } });
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const result = await unlinkClientFromSessionParty('party-2', false, 'session-1');
+    expect(result).toEqual({ ok: false });
+  });
+
+  it('فشل UPDATE على case_sessions (طرف أساسي) → ok=false حتى لو case_parties نجحت', async () => {
+    const { fn } = mockDbWrite({ 'UPDATE:case_sessions': { error: new Error('fail') } });
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const result = await unlinkClientFromSessionParty('party-1', true, 'session-1');
+    expect(result).toEqual({ ok: false });
+  });
+
+  it('تعارض (conflict) على case_parties → conflictScope: party، مفيش نداء تاني على case_sessions', async () => {
+    const { fn, calls } = mockDbWrite({ 'UPDATE:case_parties': { error: null, conflict: true } });
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const result = await unlinkClientFromSessionParty('party-1', true, 'session-1', 'party-updated-at');
+    expect(result).toEqual({ ok: false, conflict: true, conflictScope: 'party' });
+    expect(calls).toEqual([{ type: 'UPDATE', table: 'case_parties', id: 'party-1', data: { client_id: null }, knownUpdatedAt: 'party-updated-at' }]);
+  });
+
+  it('تعارض (conflict) على case_sessions بعد نجاح case_parties → conflictScope: session', async () => {
+    const { fn } = mockDbWrite({ 'UPDATE:case_sessions': { error: null, conflict: true } });
+    window.__dbWrite = fn as unknown as typeof window.__dbWrite;
+    const result = await unlinkClientFromSessionParty('party-1', true, 'session-1', null, 'session-updated-at');
+    expect(result).toEqual({ ok: false, conflict: true, conflictScope: 'session' });
   });
 });
 
