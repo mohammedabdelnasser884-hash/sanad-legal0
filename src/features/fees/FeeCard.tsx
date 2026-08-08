@@ -1,6 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { I } from '../../constants';
+import { ClientSearchSelect, type ClientSearchResult } from '@/shared/ui/ClientSearchSelect';
 import type { ClientRow, CaseFeeRow, FeePaymentRow, InvoiceRow, PaymentsByFeeId } from '../../types';
 import type { MappedCase } from '../../hooks/useAppData';
 import type { InvoiceModalState, ConfirmDeletePayState, FeeFormState } from './hooks/useFeesActions';
@@ -44,6 +45,9 @@ interface FeeCardProps {
   setShowForm: (v: boolean) => void;
   setConfirmDeleteFee: (v: CaseFeeRow | null) => void;
   payments: PaymentsByFeeId;
+  // ⚡ NEW (8 أغسطس 2026 — البند 6 من تقرير حالة التنفيذ): راجع نفس
+  // التعليق في FeesTabProps.ensureClientsLoaded.
+  ensureClientsLoaded?: (ids: (string | null | undefined)[]) => void;
 }
 
 function FeeCard({
@@ -56,7 +60,7 @@ function FeeCard({
   payClientName, setPayClientName, payClientNameText, setPayClientNameText,
   payAmount, setPayAmount, payDate, setPayDate, payReceiver, setPayReceiver, payNote, setPayNote,
   handleAddPayment, setEditId, setForm, setShowForm, setConfirmDeleteFee,
-  payments,
+  payments, ensureClientsLoaded,
 }: FeeCardProps) {
   const linkedCase = cases.find((c) => c.id===fee.case_id);
   const linkedClient = linkedCase ? clients.find((cl) => cl.id===linkedCase.client_id) : null;
@@ -225,19 +229,25 @@ function FeeCard({
                             !isFullyPaid && addPaymentFor===fee.id
                                 ? React.createElement('div',{className:"space-y-2 slide-up"},
                                     // اسم الموكل — dropdown
+                                    // ⚡ CHANGED (8 أغسطس 2026 — البند 6): ClientSearchSelect بدل
+                                    // <select> محدود — راجع تعليق ensureClientsLoaded في FeeCardProps فوق.
                                     React.createElement('div',{className:"space-y-1.5"},
-                                        React.createElement('label',{className:"text-[10px] text-slate-400 font-bold"},"اسم الموكل"),
-                                        React.createElement('select',{
-                                            value: payClientName==='__manual__' ? '__manual__' : (payClientName||''),
-                                            onChange:(e: React.ChangeEvent<HTMLSelectElement>) =>setPayClientName(e.target.value),
-                                            'data-testid':'pay-client-select',
-                                            className:"w-full p-2.5 text-xs rounded-xl border border-white/10 bg-premium-bg text-white",
-                                            style:{fontFamily:'Cairo,sans-serif',colorScheme:'dark'}
-                                        },
-                                            React.createElement('option',{value:''},'اختر موكل...'),
-                                            clients.map((cl: ClientRow) =>React.createElement('option',{key:cl.id,value:cl.id},cl.full_name)),
-                                            React.createElement('option',{value:'__manual__'},'➕ آخر (اكتب يدوي)')
-                                        ),
+                                        React.createElement(ClientSearchSelect,{
+                                            label:"اسم الموكل",
+                                            testId:'pay-client-select',
+                                            selectedLabel: (() => {
+                                                const matched = clients.find((cl: ClientRow) => cl.id === payClientName);
+                                                return matched?.full_name || '';
+                                            })(),
+                                            isManualSelected: payClientName==='__manual__',
+                                            manualOption:{label:'➕ آخر (اكتب يدوي)'},
+                                            onManualSelect:() => setPayClientName('__manual__'),
+                                            onSelect:(c: ClientSearchResult) => {
+                                                ensureClientsLoaded?.([c.id]);
+                                                setPayClientName(c.id);
+                                            },
+                                            placeholder:'اختر موكل... (اكتب للبحث)',
+                                        }),
                                         payClientName==='__manual__' && React.createElement('input',{
                                             type:"text",
                                             value:payClientNameText||'',
