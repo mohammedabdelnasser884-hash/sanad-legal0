@@ -72,6 +72,21 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
   const primaryPartyId = starredParties[0]?.id;
   const unlinkedStarredParties = starredParties.filter((p) => !p.client_id);
   const hasPartyData = caseParties.length > 0;
+  // 🔒 FIX (توحيد فك ربط الطرف الأساسي — 8 أغسطس 2026): زرار "🔓 فك
+  // الربط" القديم جوه كارت "— الموكل —" تحت (onUnlinkClient) بيصفّر
+  // cases.client_id بس من غير ما يزامن case_parties — بعكس زرار فك
+  // الربط جوه ليستة "أطراف الدعوى" فوق (onUnlinkClientForParty) اللي
+  // بيزامن الاتنين صح. لو القضية فيها بيانات أطراف والطرف الأساسي فيها
+  // بديل حقيقي في الليستة دي، بنخفي الزرار القديم بدل ما نسيب مسارين
+  // (واحد صح وواحد مش متزامن) شغالين في نفس الوقت. لو مفيش تطابق حقيقي
+  // (حالة بيانات غير متوقعة — القضية عندها caseParties لكن مفيش طرف
+  // client_id بتاعه بيساوي caseData.client_id)، الزرار القديم يفضل
+  // ظاهر كـfallback عشان المستخدم ميتقفلش من غير أي طريقة يفك بيها
+  // الربط. القضايا اللي مالهاش caseParties أصلًا (hasPartyData=false)
+  // — صفر تغيير، الزرار القديم يفضل زي ما هو (هو المسار الوحيد أصلًا).
+  const hasMatchingPrimaryParty = !!caseData.client_id
+    && starredParties.some((p) => p.client_id === caseData.client_id);
+  const showLegacyCaseUnlink = !hasPartyData || !hasMatchingPrimaryParty;
   // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 7 — fallback الموكل
   // المحذوف): caseData.client_id موجود لكن client وصل null من الأب —
   // يعني القضية *كانت* مربوطة بموكل اتمسح (soft-deleted) بعد كده، مش
@@ -285,7 +300,7 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                     ),
                     // ⚡ NEW: زرار "فك الربط" — نُقل من EditCaseModal لنفس مكان
                     // زرار "ربط القضية بموكل" (نفس الكارت، يتبدّل حسب حالة الربط).
-                    onUnlinkClient && (
+                    onUnlinkClient && showLegacyCaseUnlink && (
                         showUnlinkConfirm
                             ? React.createElement('div', {className: "mt-3 pt-3 border-t border-white/5 space-y-2"},
                                 React.createElement('p', {className: "text-[10px] text-slate-400 text-center leading-relaxed"},
