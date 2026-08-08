@@ -132,6 +132,34 @@ export function useCaseActions(params: {
     } = params;
     const _userName = profile?.full_name || null;
 
+    // ⚡ NEW (فيكس فئة "اليتيم الوهمي" على القضايا — 8 أغسطس 2026): `cases`
+    // فوق مقيّدة بالصفحة (PAGE_SIZE=15) *وبفلتر* casesFilter — قضية بحالة
+    // مختلفة عن الفلتر المفتوح حاليًا (أو خارج الصفحة الأولى) مش هتكون
+    // موجودة في `cases` أصلًا. الدوال تحت (خصوصًا حساب knownUpdatedAt
+    // للقفل التفاؤلي، وclient_id fallback في handleUpdateCase) كانت
+    // بتدوّر بـ cases.find(id) على القايمة المحدودة دي مباشرة — لو
+    // القضية مش محمّلة، النتيجة undefined بصمت (قفل تفاؤلي معطّل، أو
+    // client_id ممكن يتمسح غلط). getCaseRecord بتدوّر في `cases` الأول
+    // (الحالة العادية، بدون أي طلب إضافي)، ولو مش لاقية بتجيب الصف
+    // مباشرة من قاعدة البيانات فورًا (لازم القيمة تكون جاهزة جوه نفس
+    // العملية، مش بعد إعادة render زي clientsWithExtras).
+    const getCaseRecord = async (caseId: string): Promise<{ updated_at: string | null; client_id: string | null; title: string | null; type: string | null } | null> => {
+        const local = cases.find((c) => c.id === caseId);
+        if (local) return { updated_at: local.updated_at, client_id: local.client_id, title: local.title, type: local.type };
+        const { data, error } = await db
+            .from('cases')
+            .select('id,updated_at,client_id,title,case_type')
+            .eq('id', caseId)
+            .maybeSingle();
+        if (error || !data) return null;
+        return {
+            updated_at: data.updated_at || null,
+            client_id: data.client_id || null,
+            title: data.title || null,
+            type: (data as unknown as { case_type: string | null }).case_type || null,
+        };
+    };
+
     // ─ تسجيل خروج ─
     const handleLogout = async () => {
         // نسجّل الخروج قبل signOut عشان الـ session لسه شغّالة
@@ -443,7 +471,7 @@ export function useCaseActions(params: {
     // 'case-docs' (تسرب تخزين بسيط) — مش روابط مكسورة أو صف قضية عالق زي ما كان
     // ممكن يحصل مع الترتيب القديم (Storage الأول، DB تاني).
     const handlePermanentDeleteCase = async (caseId: string) => {
-        const c = cases.find((x) => x.id === caseId);
+        const c = await getCaseRecord(caseId);
 
         // ─ خطوة 1: جلب storage_path لمستندات القضية (قبل ما صفوفها تتحذف تلقائيًا) ─
         const { data: docs, error: docsFetchError } = await db.from('case_documents')
@@ -487,7 +515,11 @@ export function useCaseActions(params: {
 
     // ─ حذف قضية: يعرض اختيار (أرشفة/حذف نهائي) عن طريق DeleteConfirmModal ─
     const handleDeleteCase = async (caseId: string) => {
-        const c = cases.find((x) => x.id === caseId);
+        // 🔒 FIX (8 أغسطس 2026): fallback فوري من `cases` المحلية (بدون تأخير
+        // فتح مودال التأكيد)، ومكمّل بعدها بـ getCaseRecord لو القضية مش
+        // كانت محمّلة أصلًا (بدل ما يفضل اسمها "القضية" الافتراضي غلط).
+        const localCase = cases.find((x) => x.id === caseId);
+        const c = localCase || (await getCaseRecord(caseId));
         setDeleteConfirm({
             type: 'case', id: caseId,
             name: c?.title || 'القضية',
@@ -650,13 +682,22 @@ export function useCaseActions(params: {
                 return { ok: false, reason: 'write' };
             };
 
+            // 🔒 FIX (فيكس فئة "اليتيم الوهمي" على القضايا — 8 أغسطس 2026):
+            // existingCase كانت بتتجاب بـ cases.find(id) على القايمة
+            // المقيّدة بالصفحة/الفلتر — لو القضية دي مش محمّلة محليًا وقت
+            // التعديل (مثلاً اتفتحت من نتيجة بحث/رابط مباشر)، كان
+            // client_id fallback تحت بيرجع null بصمت (ممكن يمسح ربط
+            // الموكل)، وknownUpdatedAt تحت كان بيتعطّل (قفل تفاؤلي معطّل
+            // بصمت). getCaseRecord بتضمن جلب الصف الحقيقي من الداتابيز
+            // لو مش موجود محليًا.
+            const existingCaseRecord = await getCaseRecord(caseId);
             const payload = {
                 case_number_official: form.number || null,
                 title: form.title,
                 court_name: form.court || null,
                 case_type: form.type || null,
                 status: form.status || undefined,
-                client_id: (form.client_id !== undefined ? form.client_id : cases.find((c) => c.id === caseId)?.client_id) || null,
+                client_id: (form.client_id !== undefined ? form.client_id : existingCaseRecord?.client_id) || null,
                 court_level: form.court_level || null,
                 circuit_number: form.circuit_number || null,
                 next_hearing: form.date || null,
@@ -676,8 +717,7 @@ export function useCaseActions(params: {
             // ويتخزّن في الـ state (شوف useAppData.ts) خصيصًا للاستخدام هنا، بس
             // مكانش بيتبعت فعليًا لـ __dbWrite، فحماية "تعارض التعديل" كانت
             // معطّلة تمامًا لتعديل القضايا (بعكس الأتعاب/الموكلين/الجلسات).
-            const existingCase = cases.find((c) => c.id === caseId);
-            const knownUpdatedAt = existingCase?.updated_at
+            const knownUpdatedAt = existingCaseRecord?.updated_at
                 || (selectedCase?.id === caseId ? selectedCase?.updated_at : null)
                 || null;
 
@@ -773,7 +813,7 @@ export function useCaseActions(params: {
                     userName: _userName,
                     entity_type: 'case', entity_id: caseId, details: form.title || null,
                     case_name: form.title || null,
-                    case_type: form.type || cases.find((c) => c.id === caseId)?.type || null,
+                    case_type: form.type || existingCaseRecord?.type || null,
                     client_name: clients.find((cl) => cl.id === payload.client_id)?.full_name || null,
                 });
                 // تحديث فوري للحالة المحلية — عشان الشاشة المفتوحة (CaseDetailView) تعرض القيم الجديدة فورًا
@@ -814,7 +854,9 @@ export function useCaseActions(params: {
     // فوق). الدالة دي بتحدّث عمود client_id بس، من غير ما تلمس أي حقل تاني
     // في القضية (بعكس handleUpdateCase اللي بيعيد كتابة كل الحقول من الـ form).
     const handleLinkClient = async (caseId: string, clientId: string) => {
-        const existingCase = cases.find((c) => c.id === caseId);
+        // 🔒 FIX (8 أغسطس 2026): getCaseRecord بدل cases.find(id) الخام —
+        // شوف تعليق getCaseRecord فوق، نفس الأسباب.
+        const existingCase = await getCaseRecord(caseId);
         const linkedClient = clients.find((cl) => cl.id === clientId);
         const knownUpdatedAt = existingCase?.updated_at
             || (selectedCase?.id === caseId ? selectedCase?.updated_at : null)
@@ -885,7 +927,8 @@ export function useCaseActions(params: {
     // كده) أو 'case' (جديد) — الطرف اتربط بنجاح فعلاً في حالة 'case'،
     // فالرسالة بتوضح إن القضية الأساسية هي اللي اتعدلت مش الطرف.
     const handleLinkClientForParty = async (caseId: string, partyId: string, clientId: string, isPrimaryParty: boolean, knownUpdatedAt: string | null, onAfterLink: () => void) => {
-        const existingCase = cases.find((c) => c.id === caseId);
+        // 🔒 FIX (8 أغسطس 2026): getCaseRecord بدل cases.find(id) الخام.
+        const existingCase = await getCaseRecord(caseId);
         const linkedClient = clients.find((cl) => cl.id === clientId);
         const knownCaseUpdatedAt = existingCase?.updated_at
             || (selectedCase?.id === caseId ? selectedCase?.updated_at : null)
@@ -939,7 +982,8 @@ export function useCaseActions(params: {
     // للتعديل بدل ما تتقرا من ملف الموكل — نفس آلية EditCaseModal.tsx
     // اللي بتحدد isLinked من client_id).
     const handleUnlinkClient = async (caseId: string) => {
-        const existingCase = cases.find((c) => c.id === caseId);
+        // 🔒 FIX (8 أغسطس 2026): getCaseRecord بدل cases.find(id) الخام.
+        const existingCase = await getCaseRecord(caseId);
         const knownUpdatedAt = existingCase?.updated_at
             || (selectedCase?.id === caseId ? selectedCase?.updated_at : null)
             || null;
@@ -987,7 +1031,8 @@ export function useCaseActions(params: {
     // ⚡ NEW (مرحلة 3، 6 أغسطس 2026): نفس إضافة knownCaseUpdatedAt +
     // تفريق conflictScope في handleLinkClientForParty فوق بالحرف.
     const handleUnlinkClientForParty = async (caseId: string, partyId: string, isPrimaryParty: boolean, knownUpdatedAt: string | null, onAfterLink: () => void) => {
-        const existingCase = cases.find((c) => c.id === caseId);
+        // 🔒 FIX (8 أغسطس 2026): getCaseRecord بدل cases.find(id) الخام.
+        const existingCase = await getCaseRecord(caseId);
         const knownCaseUpdatedAt = existingCase?.updated_at
             || (selectedCase?.id === caseId ? selectedCase?.updated_at : null)
             || null;
