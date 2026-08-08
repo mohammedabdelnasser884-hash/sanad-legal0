@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { db } from '../supabaseClient';
 import { recordError, recordSuccess } from '../systemHealth';
 import { ilikeOrClause } from '../shared/lib/sanitize';
@@ -136,6 +136,49 @@ async function fetchPartiesMapByCaseIds(caseIds: string[]): Promise<{ [k: string
     return map;
 }
 
+// ⚡ NEW (فيكس فئة "اليتيم الوهمي" على القضايا — 8 أغسطس 2026): نفس منطق
+// الـ .map() المكرر في fetchCases/searchCases بالحرف — مستخرج هنا كدالة
+// مشتركة عشان ensureCasesLoaded (تحت) يقدر يبني MappedCase بنفس الشكل
+// بالظبط لأي قضية بتتجاب بالـid مباشرة (برّه الصفحة/الفلتر الحالي).
+function mapCaseRow(
+    r: CaseRow,
+    sessionsMap: { [k: string]: string },
+    partiesMap: { [k: string]: PartyDisplayRow[] },
+): MappedCase {
+    return {
+        id:             r.id,
+        number:         r.case_number_official || '—',
+        title:          r.title || '—',
+        court:          r.court_name || '—',
+        type:           r.case_type || 'عام',
+        court_level:    r.court_level || null,
+        circuit_number: r.circuit_number || null,
+        status:         r.status || 'نشطة',
+        date:           sessionsMap[r.id] || r.next_hearing || '—',
+        client_id:      r.client_id,
+        plaintiff:      null,
+        plaintiff_role: null,
+        defendant:      null,
+        defendant_role: null,
+        year:           r.created_at ? new Date(r.created_at).getFullYear() : new Date().getFullYear(),
+        updated_at:     r.updated_at || null,
+        court_floor:    r.court_floor || null,
+        court_hall:     r.court_hall || null,
+        session_hall:   r.session_hall || null,
+        secretary_hall: r.secretary_hall || null,
+        secretary_name: r.secretary_name || null,
+        secretary_mobile: r.secretary_mobile || null,
+        session_time:   r.session_time || null,
+        plaintiff_national_id: null,
+        plaintiff_power_of_attorney: null,
+        defendant_national_id: null,
+        plaintiff_address: null,
+        plaintiff_legal_title: (r as unknown as { plaintiff_legal_title: string | null }).plaintiff_legal_title || null,
+        defendant_legal_title: (r as unknown as { defendant_legal_title: string | null }).defendant_legal_title || null,
+        parties:        partiesMap[r.id] || [],
+    };
+}
+
 export function useAppData(profile: ProfileRow | null) {
     const isAdmin = profile?.role === 'admin';
     const PAGE_SIZE = 15;
@@ -155,6 +198,109 @@ export function useAppData(profile: ProfileRow | null) {
     const [clientsPage,    setClientsPage]    = useState(0);
     const [clientsTotal,   setClientsTotal]   = useState(0);
     const [clientsLoading, setClientsLoading] = useState(false);
+
+    // ⚡ FIX (باگ "الموكل محذوف" غلط — 8 أغسطس 2026): `clients` فوق
+    // مقيّدة بالصفحة (PAGE_SIZE=15) وبتتحمّل بالتدريج ("عرض المزيد").
+    // أي مكان بيدوّر على موكل معيّن بـ clients.find(id) (تفاصيل القضية،
+    // بادچ "موكل محذوف"، دروب-داون الربط...) كان بيفشل غلط لو الموكل
+    // موجود فعليًا في قاعدة البيانات لكن لسه مش من ضمن أول 15 المحمّلين
+    // محليًا — فبيتعرض كـ"محذوف" مع إنه مش محذوف أصلاً. extraClients
+    // كاش منفصل لموكلين اتجابوا بالـ id مباشرة (مش بالصفحة) عشان نسد
+    // الفجوة دي من غير ما نلمس عدّاد/ترقيم تاب الموكلين نفسه.
+    const [extraClients, setExtraClients] = useState<Record<string, MappedClient>>({});
+
+    const ensureClientsLoaded = useCallback(async (ids: (string | null | undefined)[]) => {
+        if (!profile) return;
+        const wanted = Array.from(new Set(ids.filter((id): id is string => !!id)));
+        const missing = wanted.filter((id) => !clients.some((c) => c.id === id) && !extraClients[id]);
+        if (missing.length === 0) return;
+
+        const { data, error } = await db
+            .from('clients')
+            .select('*')
+            .is('deleted_at', null)
+            .in('id', missing);
+
+        if (error) {
+            recordError('db_clients_by_id', error.message);
+            return;
+        }
+        const mapped: MappedClient[] = (data || []).map((c: ClientRow) => ({
+            ...c,
+            full_name: c.client_name || '—',
+            type: c.client_type || 'individual',
+        }));
+        if (mapped.length === 0) return;
+        setExtraClients((prev) => {
+            const next = { ...prev };
+            mapped.forEach((c) => { next[c.id] = c; });
+            return next;
+        });
+    }, [profile, clients, extraClients]);
+
+    // القايمة الموحّدة اللي يستخدمها أي مكان بيدوّر على موكل بالـid
+    // (مش بيعرض قايمة مُرقّمة/معدودة) — بديل مباشر لـ`clients` الخام
+    // في CaseDetailView/EditCaseModal وأخواتهم.
+    const clientsWithExtras = useMemo(() => {
+        const extras = Object.values(extraClients).filter((ec) => !clients.some((c) => c.id === ec.id));
+        return extras.length ? [...clients, ...extras] : clients;
+    }, [clients, extraClients]);
+
+    // ⚡ NEW (فيكس فئة "اليتيم الوهمي" على القضايا — 8 أغسطس 2026): نفس فكرة
+    // extraClients/ensureClientsLoaded/clientsWithExtras فوق بالظبط، بس
+    // للقضايا. `cases` مقيّدة بالصفحة (PAGE_SIZE=15) *وكمان* بفلتر
+    // `casesFilter` — يعني قضية بحالة مختلفة عن الفلتر المفتوح حاليًا
+    // (مثلاً قضية مقفولة والفلتر "نشطة") مش هتكون موجودة في `cases` أصلًا
+    // حتى لو في الصفحة الأولى. أماكن زي useCaseActions.ts (حساب
+    // knownUpdatedAt للقفل التفاؤلي، أو client_id fallback) وuseFeesActions.ts
+    // (case_name/case_type snapshot) كانت بتدوّر بـ cases.find(id) على
+    // القايمة المحدودة دي مباشرة — casesWithExtras هي البديل الموثوق.
+    const [extraCases, setExtraCases] = useState<Record<string, MappedCase>>({});
+
+    const ensureCasesLoaded = useCallback(async (ids: (string | null | undefined)[]) => {
+        if (!profile) return;
+        const wanted = Array.from(new Set(ids.filter((id): id is string => !!id)));
+        const missing = wanted.filter((id) => !cases.some((c) => c.id === id) && !extraCases[id]);
+        if (missing.length === 0) return;
+
+        const { data, error } = await db
+            .from('cases')
+            .select('*')
+            .is('deleted_at', null)
+            .in('id', missing);
+
+        if (error) {
+            recordError('db_cases_by_id', error.message);
+            return;
+        }
+        const rows = (data || []) as CaseRow[];
+        if (rows.length === 0) return;
+
+        const caseIds = rows.map((r) => r.id);
+        let sessionsMap: { [k: string]: string } = {};
+        const { data: sessionsData, error: sessErr } = await db
+            .from('case_sessions')
+            .select('case_id,session_date')
+            .in('case_id', caseIds);
+        if (sessErr) recordError('db_sessions_by_case_ids', sessErr.message);
+        else sessionsMap = buildNearestSessionMap(sessionsData || []);
+        const partiesMap = await fetchPartiesMapByCaseIds(caseIds);
+
+        const mapped = rows.map((r) => mapCaseRow(r, sessionsMap, partiesMap));
+        setExtraCases((prev) => {
+            const next = { ...prev };
+            mapped.forEach((c) => { next[c.id] = c; });
+            return next;
+        });
+    }, [profile, cases, extraCases]);
+
+    // القايمة الموحّدة اللي يستخدمها أي مكان بيدوّر على قضية بالـid
+    // (مش بيعرض قايمة مُرقّمة/معدودة أو مفلترة بالحالة) — بديل مباشر
+    // لـ`cases` الخام في useCaseActions.ts/useFeesActions.ts وأخواتهم.
+    const casesWithExtras = useMemo(() => {
+        const extras = Object.values(extraCases).filter((ec) => !cases.some((c) => c.id === ec.id));
+        return extras.length ? [...cases, ...extras] : cases;
+    }, [cases, extraCases]);
 
     // ── fetchCases ──────────────────────────────────────────
     const fetchCases = useCallback(async (page = 0, filter = casesFilter) => {
@@ -200,52 +346,8 @@ export function useAppData(profile: ProfileRow | null) {
         // نداء واحد لكل القضايا المحملة في الصفحة دي، مش نداء لكل قضية.
         const partiesMap = await fetchPartiesMapByCaseIds(caseIds);
 
-        const mapped: MappedCase[] = (data || []).map((r: CaseRow) => ({
-            id:             r.id,
-            number:         r.case_number_official || '—',
-            title:          r.title || '—',
-            court:          r.court_name || '—',
-            type:           r.case_type || 'عام',
-            court_level:    r.court_level || null,
-            circuit_number: r.circuit_number || null,
-            status:         r.status || 'نشطة',
-            date:           sessionsMap[r.id] || r.next_hearing || '—',
-            client_id:      r.client_id,
-            // ⚡ FIX (F.4، 6 أغسطس 2026): حقول الأطراف الفردية القديمة دي
-            // (plaintiff/plaintiff_role/defendant/defendant_role/*_national_id/
-            // *_power_of_attorney/plaintiff_address) اتشالت فعليًا من جدول
-            // cases مع الهجرة، فمعادش موجودة في CaseRow خالص. سايبين الحقول
-            // null هنا (بدل ما نمسحها من MappedCase) عشان أي مستهلك قديم لسه
-            // بيقراها يفضل شغال بدون كراش — مصدر العرض الحقيقي بقى
-            // partiesMap[r.id] (case_parties) عن طريق derivePartiesDisplay.
-            plaintiff:      null,
-            plaintiff_role: null,
-            defendant:      null,
-            defendant_role: null,
-            year:           r.created_at ? new Date(r.created_at).getFullYear() : new Date().getFullYear(),
-            updated_at:     r.updated_at || null,  // BUG-19: محتاجينه لـ knownUpdatedAt في handleUpdateCase
-            court_floor:    r.court_floor || null,
-            court_hall:     r.court_hall || null,
-            session_hall:   r.session_hall || null,
-            secretary_hall: r.secretary_hall || null,
-            secretary_name: r.secretary_name || null,
-            secretary_mobile: r.secretary_mobile || null,
-            session_time:   r.session_time || null,
-            plaintiff_national_id: null,
-            plaintiff_power_of_attorney: null,
-            defendant_national_id: null,
-            plaintiff_address: null,
-            // 🔒 FIX (تحليل لوجز E2E — 8 أغسطس 2026): plaintiff_legal_title/
-            // defendant_legal_title اترجعوا هنا من غير مبرر — العمودين دول
-            // مش زي بقية الأعمدة فوق (مش بديل ليهم case_parties)، ولسه
-            // العمودين موجودين فعليًا في جدول cases (لسه معملهاش DROP COLUMN
-            // حقيقي — راجع database/migrations/legacy-columns-drop). كاست
-            // مؤقت هنا (زي partiesMap[r.id] تحت) لحد ما database.types.ts
-            // يتحدّث يشملهم رسميًا.
-            plaintiff_legal_title: (r as unknown as { plaintiff_legal_title: string | null }).plaintiff_legal_title || null,
-            defendant_legal_title: (r as unknown as { defendant_legal_title: string | null }).defendant_legal_title || null,
-            parties:        partiesMap[r.id] || [],
-        }));
+        // BUG-19: updated_at محتاجينه لـ knownUpdatedAt في handleUpdateCase.
+        const mapped: MappedCase[] = (data || []).map((r: CaseRow) => mapCaseRow(r, sessionsMap, partiesMap));
 
         if (page === 0) setCases(mapped);
         else setCases((prev: MappedCase[]) => [...prev, ...mapped]);
@@ -254,7 +356,16 @@ export function useAppData(profile: ProfileRow | null) {
         setCasesPage(page);
         recordSuccess('db_cases');
         setCasesLoading(false);
-    }, [profile, casesFilter]);
+
+        // ⚡ FIX (باگ "الموكل محذوف" غلط): نتأكد إن أي موكل مرتبط (أساسي
+        // أو طرف) بالقضايا اللي لسه اتحمّلت متاح فعليًا، حتى لو مش من
+        // ضمن أول صفحة من تاب الموكلين — بدون ما نستنى المستخدم.
+        const referencedClientIds = [
+            ...mapped.map((c) => c.client_id),
+            ...mapped.flatMap((c) => (c.parties || []).map((p) => p.client_id)),
+        ];
+        ensureClientsLoaded(referencedClientIds);
+    }, [profile, casesFilter, ensureClientsLoaded]);
 
     // ── searchCases (بحث داخل قسم القضايا كله — مش مقيد بتاب) ──
     const searchCases = useCallback(async (term: string, filter = casesFilter) => {
@@ -302,49 +413,22 @@ export function useAppData(profile: ProfileRow | null) {
         // ⚡ B.4: نفس المنطق اللي في fetchCases فوق.
         const partiesMap = await fetchPartiesMapByCaseIds(caseIds);
 
-        const mapped: MappedCase[] = (data || []).map((r: CaseRow) => ({
-            id:             r.id,
-            number:         r.case_number_official || '—',
-            title:          r.title || '—',
-            court:          r.court_name || '—',
-            type:           r.case_type || 'عام',
-            court_level:    r.court_level || null,
-            circuit_number: r.circuit_number || null,
-            status:         r.status || 'نشطة',
-            date:           sessionsMap[r.id] || r.next_hearing || '—',
-            client_id:      r.client_id,
-            // ⚡ FIX (F.4، 6 أغسطس 2026): نفس تعليق fetchCases فوق بالظبط —
-            // الأعمدة دي اتشالت من قاعدة البيانات، فبتفضل null هنا.
-            plaintiff:      null,
-            plaintiff_role: null,
-            defendant:      null,
-            defendant_role: null,
-            year:           r.created_at ? new Date(r.created_at).getFullYear() : new Date().getFullYear(),
-            updated_at:     r.updated_at || null,
-            court_floor:    r.court_floor || null,
-            court_hall:     r.court_hall || null,
-            session_hall:   r.session_hall || null,
-            secretary_hall: r.secretary_hall || null,
-            secretary_name: r.secretary_name || null,
-            secretary_mobile: r.secretary_mobile || null,
-            session_time:   r.session_time || null,
-            plaintiff_national_id: null,
-            plaintiff_power_of_attorney: null,
-            defendant_national_id: null,
-            plaintiff_address: null,
-            // 🔒 FIX (تحليل لوجز E2E — 8 أغسطس 2026): نفس فيكس fetchCases فوق
-            // بالظبط — plaintiff_legal_title/defendant_legal_title اترجعوا.
-            plaintiff_legal_title: (r as unknown as { plaintiff_legal_title: string | null }).plaintiff_legal_title || null,
-            defendant_legal_title: (r as unknown as { defendant_legal_title: string | null }).defendant_legal_title || null,
-            parties:        partiesMap[r.id] || [],
-        }));
+        const mapped: MappedCase[] = (data || []).map((r: CaseRow) => mapCaseRow(r, sessionsMap, partiesMap));
 
         setCases(mapped);
         setCasesTotal(count || 0);
         setCasesPage(0);
         recordSuccess('db_cases_search');
         setCasesLoading(false);
-    }, [profile, casesFilter, fetchCases]);
+
+        // نفس فيكس fetchCases فوق — نتائج البحث ممكن كمان تشاور على
+        // موكلين مش محمّلين في الصفحة الحالية من تاب الموكلين.
+        const referencedClientIds = [
+            ...mapped.map((c) => c.client_id),
+            ...mapped.flatMap((c) => (c.parties || []).map((p) => p.client_id)),
+        ];
+        ensureClientsLoaded(referencedClientIds);
+    }, [profile, casesFilter, fetchCases, ensureClientsLoaded]);
 
     const fetchLawyers = useCallback(async () => {
         if (!isAdmin) return;
@@ -407,6 +491,16 @@ export function useAppData(profile: ProfileRow | null) {
         dbError,
         clients,     setClients,
         clientsPage, setClientsPage, clientsTotal, clientsLoading,
+        // ⚡ FIX (باگ "الموكل محذوف" غلط): clientsWithExtras = clients +
+        // أي موكل اتجاب بالـid مباشرة عبر ensureClientsLoaded — استخدمها
+        // في أي مكان بيدوّر على موكل بعينه (تفاصيل قضية، بادچات orphan)
+        // بدل `clients` الخام لو مش عارض قايمة مُرقّمة.
+        clientsWithExtras, ensureClientsLoaded,
+        // ⚡ NEW: casesWithExtras = cases + أي قضية اتجابت بالـid مباشرة عبر
+        // ensureCasesLoaded — استخدمها في أي مكان بيدوّر على قضية بعينها
+        // (knownUpdatedAt، client_id fallback، case_name/case_type snapshot)
+        // بدل `cases` الخام المقيّدة بالصفحة والفلتر.
+        casesWithExtras, ensureCasesLoaded,
         lawyers,     setLawyers,
         fetchCases,  fetchLawyers,   fetchClients,  searchCases,
     };
