@@ -111,7 +111,7 @@ test('4) مودال "تحويل لقضية؟" — إنشاء قضية من بي�
   await page.getByTestId('new-session-date').fill(today);
   await page.getByTestId('party-side-card-plaintiff').click();
   await page.getByTestId('new-session-plaintiff-0-star').click();
-  await page.getByTestId('new-session-plaintiff-0-name').fill(`موكل تحويل E2E ${Date.now()}`);
+  await page.getByTestId('new-session-plaintiff-0-name').fill(`اختبار E2E - موكل تحويل ${Date.now()}`);
   await page.getByTestId('new-session-plaintiff-0-capacity').fill('مدعي');
   await page.getByTestId('new-session-plaintiff-0-national-id').fill(`3${Date.now()}`.slice(0, 14));
   await page.getByTestId('new-session-plaintiff-subform-save').click();
@@ -152,7 +152,7 @@ test('4) مودال "تحويل لقضية؟" — إنشاء قضية من بي�
 
 test('5) إضافة الموكل لقائمة الموكلين فقط من خطوة idle', async ({ page }) => {
   await login(page);
-  const clientName = `موكل فقط E2E ${Date.now()}`;
+  const clientName = `اختبار E2E - موكل فقط ${Date.now()}`;
   await page.getByTestId('nav-calendar').click();
   await page.getByTestId('calendar-new-session-button').click();
   await page.getByTestId('new-session-modal').waitFor({ state: 'visible', timeout: 10_000 });
@@ -342,7 +342,7 @@ test('9) ربط الجلسة بقضية جديدة من شاشة التفاصي�
 // وصولاً لتوست النجاح.
 test('10) ربط طرف من جلسة مستقلة بموكل موجود بالفعل (🔗 ربط بموكل موجود)', async ({ page }) => {
   await login(page);
-  const clientName = `موكل E2E جاهز للربط - ${Date.now()}`;
+  const clientName = `اختبار E2E - موكل جاهز للربط - ${Date.now()}`;
   // 🔒 FIX (تحليل لوجز E2E — 8 أغسطس 2026، تصحيح): كنا جرّبنا نبعت نفس
   // الرقم القومي الثابت ('12345678901234') هنا عشان نمنع تعارض البيانات —
   // ده فشل فعليًا لأن نفس الرقم ده متسجّل زمان كموكل حقيقي (تست 9 فوق،
