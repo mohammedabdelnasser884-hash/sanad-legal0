@@ -138,6 +138,15 @@ function App() {
         casesSearch, setCasesSearch,
         clients,  setClients,
         clientsPage, setClientsPage, clientsTotal, clientsLoading,
+        // ⚡ FIX (باگ "الموكل محذوف" غلط لما القضية فيها موكل مش من ضمن
+        // أول 15 المحمّلين): clientsWithExtras بديل clients لأي بحث عن
+        // موكل بعينه (مش عرض قايمة)، وensureClientsLoaded بيجيب أي موكل
+        // بالـid مباشرة لو مش محمّل.
+        clientsWithExtras, ensureClientsLoaded,
+        // ⚡ NEW (8 أغسطس 2026 — البند 4 من تقرير حالة التنفيذ): نفس فيكس
+        // clientsWithExtras بالظبط، بس للقضايا — تاب الأتعاب محتاج قضايا
+        // خارج أول صفحة محمّلة (snapshot اسم/نوع القضية عند حفظ/حذف أتعاب).
+        casesWithExtras, ensureCasesLoaded,
         lawyers,  setLawyers,
         fetchCases, fetchLawyers, fetchClients, searchCases,
     } = data;
@@ -150,8 +159,15 @@ function App() {
             _setSelectedCase(caseOrUpdater);
             setSelectedCaseInitialTab(initialTab);
             nav.openModal('caseDetail');
+            // ⚡ FIX (باگ "الموكل محذوف" غلط): نتأكد إن الموكل الأساسي
+            // وموكلين الأطراف بتوع القضية دي متاحين فعليًا (مش بس ضمن
+            // أول 15 موكل محمّلين في الذاكرة) وقت ما القضية بتتفتح.
+            ensureClientsLoaded([
+                caseOrUpdater.client_id,
+                ...(caseOrUpdater.parties || []).map((p) => p.client_id),
+            ]);
         } else { _setSelectedCase(null); }
-    }, [nav]);
+    }, [nav, ensureClientsLoaded]);
 
     const setSelectedClient = useCallback((clientOrNull: MappedClient | null, openInEditMode: boolean = false) => {
         if (clientOrNull) { _setSelectedClient(clientOrNull); setSelectedClientEditMode(openInEditMode); nav.openModal('clientDetail'); }
@@ -164,13 +180,18 @@ function App() {
     }, [nav]);
 
     const { handleLogout, handleSaveCase, handleDeleteCase, handleUpdateCase, handleLinkClient, handleLinkClientForParty, handleUnlinkClient, handleUnlinkClientForParty } = useCaseActions({
-        sendTelegram, fetchCases, cases, lawyers, clients, selectedCase,
+        // ⚡ FIX (8 أغسطس 2026): clientsWithExtras بدل clients الخام — كانت
+        // useCaseActions بتدوّر بـ clients.find(id) على القايمة المقيّدة
+        // بالصفحة (15 موكل)، فممكن تسجّل client_name فاضي في اللوج لموكل
+        // موجود فعليًا بس مش من ضمن أول صفحة محمّلة. راجع تعليق useAppData.ts.
+        sendTelegram, fetchCases, cases, lawyers, clients: clientsWithExtras, selectedCase,
         setCases, setLawyers, setClients, setProfile, setAuthUser,
         setSelectedCase, setDeleteConfirm, setSavingCase, setShowCaseModal,
         casesFilter, nav, profile,
     });
     const { handleSaveClient, handleDeleteClient, handleUpdateClient, handleSaveLawyer } = useClientActions({
-        sendTelegram, fetchClients, fetchLawyers, clients, clientSearch,
+        // ⚡ FIX (8 أغسطس 2026): نفس فيكس useCaseActions فوق بالظبط.
+        sendTelegram, fetchClients, fetchLawyers, clients: clientsWithExtras, clientSearch,
         setClients, setSelectedClient, setDeleteConfirm, setSavingClient,
         setSavingLawyer, setShowClientModal, setShowLawyerModal, nav, profile,
         clientLinkTarget: clientModalContext?.linkTarget ?? null,
@@ -342,7 +363,7 @@ function App() {
     // ─────────────────────────────────────────────────────────
     const Header      = React.createElement(AppHeader, { profile, setShowMenu: (v: boolean) => setShowHeaderMenu(v), setShowSearch, isAdmin, fetchCases, casesFilter, loadingCases: casesLoading });
     const Dashboard   = React.createElement(DashboardTab, {
-        profile, cases, clients,
+        profile, cases, clients: clientsWithExtras,
         todaySessions, upcomingSessions, missedSessions,
         upcomingTasks, missedTasks, loadingUrgent,
         todayOpen, setTodayOpen, upcomingOpen, setUpcomingOpen,
@@ -368,7 +389,9 @@ function App() {
         setShowCaseModal, setSelectedCase,
         loadingCases: casesLoading, dbError,
         // 🆕 (بند 1.2 — 6 أغسطس 2026): بادج "موكل محذوف" على كارت القضية.
-        clients,
+        // ⚡ FIX (8 أغسطس 2026): clientsWithExtras بدل clients الخام —
+        // كان بيوهم إن الموكل محذوف لمجرد إنه مش من ضمن أول 15 محمّلين.
+        clients: clientsWithExtras,
     });
     const TeamTabContent    = React.createElement(TeamTab,    { lawyers, setShowLawyerModal });
     const ClientsTabContent = React.createElement(ClientsTab, {
@@ -376,7 +399,7 @@ function App() {
         clientsPage, setClientsPage, clientsTotal, clientsLoading,
         fetchClients, setSelectedClient, setShowClientModal,
     });
-    const DocsTab = React.createElement(ArchiveTab, { cases, clients, nav });
+    const DocsTab = React.createElement(ArchiveTab, { cases, clients: clientsWithExtras, nav });
 
     const showMenu = showHeaderMenu;
 
@@ -407,7 +430,7 @@ function App() {
                     }, React.createElement('span', { className: 'text-sm' }, '⚡'), 'إضافة جلسة')
                 ),
                 React.createElement(SessionsCalendar, {
-                    cases, clients,
+                    cases, clients: clientsWithExtras,
                     onOpenCase: (c) => { setSelectedCase(c, 'timeline'); },
                     onOpenReminders: () => { setRemindersInitialFilter('overdue'); setTab('reminders'); },
                     onClientAdded: () => { fetchClients(0, clientSearch); },
@@ -423,7 +446,12 @@ function App() {
                     openNewClientModal,
                 })
             ),
-            tab === 'fees' && React.createElement(FeesTab, { cases, clients, showSummaryModal: showFeesSummary, setShowSummaryModal: setShowFeesSummary, country, profile, nav }),
+            // ⚡ FIX (8 أغسطس 2026 — البند 4 من تقرير حالة التنفيذ): casesWithExtras
+            // بدل cases الخام — useFeesActions/useInvoicePrinting/FeeCard كانوا
+            // بيدوّروا بـ cases.find(id) على القايمة المقيّدة بالصفحة، فممكن
+            // يسجّلوا case_name/case_type فاضيين في اللوج/الفاتورة لقضية موجودة
+            // فعليًا بس مش من ضمن أول صفحة محمّلة (نفس فئة باگ "اليتيم الوهمي").
+            tab === 'fees' && React.createElement(FeesTab, { cases: casesWithExtras, clients: clientsWithExtras, showSummaryModal: showFeesSummary, setShowSummaryModal: setShowFeesSummary, country, profile, nav, ensureClientsLoaded }),
             tab === 'reminders' && React.createElement('div', { className: 'space-y-4 fade-in' },
                 React.createElement(RemindersTab, { initialFilter: remindersInitialFilter, profile, nav })
             ),
@@ -433,7 +461,11 @@ function App() {
             ),
             tab === 'documents' && DocsTab,
             tab === 'admin' && (isAdmin
-                ? React.createElement(AdminPanel, { profile, lawyers, clients, fetchLawyers, country, onCountryChange: (c: string) => { setCountry(c); }, nav })
+                // ⚡ FIX (8 أغسطس 2026 — البند 5 من تقرير حالة التنفيذ): clientsWithExtras
+                // بدل clients الخام — useAdminArchive بيدوّر بـ clients.find(id) عشان
+                // client_name في سجل موكل مؤرشف، فممكن يرجع فاضي لموكل مش من ضمن
+                // أول صفحة محمّلة.
+                ? React.createElement(AdminPanel, { profile, lawyers, clients: clientsWithExtras, fetchLawyers, country, onCountryChange: (c: string) => { setCountry(c); }, nav })
                 : React.createElement('div', { className: 'flex flex-col items-center justify-center pt-24 gap-3' },
                     React.createElement('div', { className: 'w-14 h-14 rounded-2xl bg-red-500/10 flex items-center justify-center' },
                         React.createElement(I.Shield, { className: 'w-7 h-7 text-red-400' })
@@ -451,7 +483,9 @@ function App() {
 
         // ── Modals ────────────────────────────────────────────
         React.createElement(AppModals, {
-            cases, clients, lawyers, profile, country, isAdmin, casesFilter, nav,
+            // ⚡ FIX (8 أغسطس 2026): clientsWithExtras بدل clients الخام —
+            // راجع تعليق useAppData.ts/setSelectedCase فوق.
+            cases, clients: clientsWithExtras, ensureClientsLoaded, lawyers, profile, country, isAdmin, casesFilter, nav,
             showSearch, showAI, showCaseModal, showNewSessionModal,
             showLawyerModal, showClientModal, savingCase, savingLawyer, savingClient,
             deleteConfirm, selectedClient, selectedClientEditMode, selectedCase, selectedCaseInitialTab,
