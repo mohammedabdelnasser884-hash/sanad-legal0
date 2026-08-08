@@ -299,9 +299,17 @@ describe('fetchSessionClientParties', () => {
 // بيانات الجلسة القادمة عند تحديث نتيجة جلسة مستقلة فيها أكتر من شخص
 // تحت أي طرف (SessionUpdateModal.tsx).
 describe('copySessionPartiesToNewSession', () => {
-  function makeMockDb(selectResult: { data?: unknown; error?: unknown }, insertError: unknown = null) {
+  // 🔒 FIX (تحليل لوجز E2E — 8 أغسطس 2026): الدالة بقت بتجيب بيانات
+  // الموكلين الأحياء (جدول clients) لأي طرف عنده client_id، فالموك دلوقتي
+  // بيغطي جدول clients كمان مش case_parties بس.
+  function makeMockDb(
+    selectResult: { data?: unknown; error?: unknown },
+    insertError: unknown = null,
+    clientsResult: { data?: unknown; error?: unknown } = { data: [], error: null },
+  ) {
     const eqSpy = vi.fn();
     const insertSpy = vi.fn(() => Promise.resolve({ error: insertError }));
+    const clientsInSpy = vi.fn();
     const db = {
       from: vi.fn((table: string) => {
         if (table === 'case_parties') {
@@ -315,10 +323,20 @@ describe('copySessionPartiesToNewSession', () => {
             insert: insertSpy,
           };
         }
+        if (table === 'clients') {
+          return {
+            select: vi.fn(() => ({
+              in: vi.fn((col: string, ids: unknown) => {
+                clientsInSpy(col, ids);
+                return Promise.resolve(clientsResult);
+              }),
+            })),
+          };
+        }
         throw new Error(`unexpected table: ${table}`);
       }),
     };
-    return { db, eqSpy, insertSpy };
+    return { db, eqSpy, insertSpy, clientsInSpy };
   }
 
   const oldRow = {
@@ -327,14 +345,31 @@ describe('copySessionPartiesToNewSession', () => {
     client_id: 'client-1', sort_order: 0,
   };
 
-  it('بيقرا صفوف الجلسة القديمة وبينسخها (INSERT صفوف جديدة) للجلسة الجديدة', async () => {
-    const { db, eqSpy, insertSpy } = makeMockDb({ data: [oldRow], error: null });
+  it('بيقرا صفوف الجلسة القديمة وبينسخها (INSERT صفوف جديدة) للجلسة الجديدة — بدون موكل حي مطابق، القيم المخزّنة زي ما هي', async () => {
+    const { db, eqSpy, insertSpy, clientsInSpy } = makeMockDb({ data: [oldRow], error: null });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await copySessionPartiesToNewSession(db as any, 'old-session', 'new-session');
     expect(result).toEqual({ ok: true });
     expect(eqSpy).toHaveBeenCalledWith('session_id', 'old-session');
+    expect(clientsInSpy).toHaveBeenCalledWith('id', ['client-1']);
     expect(insertSpy).toHaveBeenCalledWith([
       { ...oldRow, case_id: null, session_id: 'new-session' },
+    ]);
+  });
+
+  it('🔒 طرف مربوط بموكل حي اسمه/بياناته اتغيرت → الجلسة الجديدة بتاخد القيم الحية مش نسخة الجلسة القديمة', async () => {
+    const liveClient = { id: 'client-1', full_name: 'اسم محدّث بعد التعديل', national_id: '30001010100000', cr_number: '999/2026', address: 'الجيزة' };
+    const { db, insertSpy } = makeMockDb({ data: [oldRow], error: null }, null, { data: [liveClient], error: null });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await copySessionPartiesToNewSession(db as any, 'old-session', 'new-session');
+    expect(result).toEqual({ ok: true });
+    expect(insertSpy).toHaveBeenCalledWith([
+      {
+        case_id: null, session_id: 'new-session', side: 'plaintiff', is_client: true,
+        name: 'اسم محدّث بعد التعديل', capacity: 'وريث',
+        national_id: '30001010100000', address: 'الجيزة', power_of_attorney: '999/2026',
+        client_id: 'client-1', sort_order: 0,
+      },
     ]);
   });
 
