@@ -59,6 +59,13 @@ interface CaseDetailViewProps {
     caseData: MappedCase;
     client: ClientRow | null;
     clients?: ClientRow[];
+    // ⚡ FIX (باگ "الموكل محذوف" غلط — 8 أغسطس 2026): case_parties هنا
+    // بتتحمّل "live" (fresh) من قاعدة البيانات بعد فتح الشاشة (useCaseDetailActions)،
+    // وممكن تشاور على موكل لسه مش موجود في `clients` (المُمرّرة من فوق
+    // بالفعل موسّعة، لكن ده يغطي أي حالة سباق/تحديث بعد الفتح). لو
+    // موجودة، بتتنادى بقائمة client_id لأي طرف يظهر orphan عشان تتأكد
+    // إنه فعلاً محذوف مش بس مش محمّل. راجع useAppData.ts (ensureClientsLoaded).
+    onEnsureClientsLoaded?: (ids: (string | null | undefined)[]) => void | Promise<void>;
     onClose: () => void;
     onUpdate?: (newStatus: string) => void;
     onDelete?: (caseId: string) => void | Promise<void>;
@@ -106,7 +113,7 @@ interface CaseDetailViewProps {
     openNewClientModal?: (ctx: ClientModalContext) => void;
 }
 
-function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDelete, onEdit, onLinkClient, onLinkClientForParty, onUnlinkClient, onUnlinkClientForParty, onCreateAndLinkClient, onCreateAndLinkClientForParty, onNotify, initialTab='timeline', profile=null, country=null, savingCase=false, onOpenClientProfile, openNewClientModal}: CaseDetailViewProps){
+function CaseDetailView({caseData, client, clients=[], onEnsureClientsLoaded, onClose, onUpdate, onDelete, onEdit, onLinkClient, onLinkClientForParty, onUnlinkClient, onUnlinkClientForParty, onCreateAndLinkClient, onCreateAndLinkClientForParty, onNotify, initialTab='timeline', profile=null, country=null, savingCase=false, onOpenClientProfile, openNewClientModal}: CaseDetailViewProps){
     const [activeSection, setActiveSection] = useState(initialTab);
     const [showEditCase, setShowEditCase] = useState(false);
     const [linkingClient, setLinkingClient] = useState(false);
@@ -181,6 +188,22 @@ function CaseDetailView({caseData, client, clients=[], onClose, onUpdate, onDele
         const ctx: PartyDomainContext = { primaryClientId: caseData.client_id || null, clients };
         return caseParties.filter((party) => isPartyOrphaned(party, ctx)).length;
     }, [caseParties, clients, caseData.client_id]);
+
+    // ⚡ FIX (باگ "الموكل محذوف" غلط — 8 أغسطس 2026): caseParties هنا بتتحمّل
+    // live بعد فتح الشاشة، وممكن تشاور على موكل (أساسي أو طرف) لسه مش
+    // موجود في `clients` المُمرّرة (لو الفتح حصل قبل ما ensureClientsLoaded
+    // في App.tsx يخلص، أو موكل اتضاف/اتربط بعد التحميل الأول). بنتأكد هنا
+    // إنه فعلاً محذوف قبل ما نعرض الشارة/التحذير، بدل ما نفترض من غياب
+    // الـid عن القايمة المحلية بس.
+    useEffect(() => {
+        if (!onEnsureClientsLoaded) return;
+        const ids = [
+            caseData.client_id,
+            ...caseParties.map((p) => p.client_id),
+        ];
+        onEnsureClientsLoaded(ids);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [caseData.client_id, caseParties]);
 
     // لما مودال الواتساب يتفتح، بنختار افتراضيًا أول موكل عنده رقم فعلي
     // (أو أول واحد في القايمة لو مفيش حد عنده رقم) — نفس السلوك القديم
