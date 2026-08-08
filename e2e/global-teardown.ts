@@ -39,6 +39,13 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 // (bucket 'case-docs', عمود storage_path — نفس المنطق المستخدم في
 // useCaseDocuments.ts/handleDeleteDoc). دلوقتي بنجيب storage_path
 // لكل صف قبل ما نمسحه من الجدول، وبعدين بنمسح الملفات من الـstorage.
+//
+// ⚠️ FIX (تنظيف تام — 8 أغسطس 2026): مستندات "الأرشيف الرقمي"
+// (ArchiveTab.tsx) بتتسجل بـcase_id = NULL (مش مرتبطة بقضية)، فكانت
+// برة نطاق استعلام case_documents اللي بيدور بـcase_id IN caseIds —
+// حتى لو اسمها فيه الماركر بالظبط. اتضاف استعلام مستقل بيدور على
+// case_documents مباشرة بـ(case_id IS NULL AND file_name ILIKE MARKER)
+// ويمسح ملفاتها من الـstorage بنفس الطريقة.
 
 const MARKER = '%اختبار E2E%';
 const CHUNK_SIZE = 150;
@@ -178,6 +185,38 @@ export default async function globalTeardown(): Promise<void> {
         removedFiles += removed?.length ?? 0;
       }
       counts.case_docs_storage_files = removedFiles;
+    }
+
+    // 5.6) مستندات الأرشيف الرقمي المستقلة (ArchiveTab.tsx) — بتتسجل بـ
+    // case_id = NULL (مش مرتبطة بأي قضية)، فالاستعلام فوق (اللي بيدور
+    // بـcase_id IN caseIds) بيفوّتها تمامًا حتى لو اسمها فيه الماركر
+    // بالظبط. هنا استعلام مستقل بيدور عليها مباشرة بالماركر على
+    // file_name، برضو بيجيب storage_path الأول قبل المسح عشان نقدر
+    // نمسح الملفات الفعلية من bucket 'case-docs' بعد كده.
+    const { data: standaloneDocs, error: standaloneDocsErr } = await supabase
+      .from('case_documents')
+      .select('id, storage_path')
+      .is('case_id', null)
+      .ilike('file_name', MARKER);
+    if (standaloneDocsErr) throw standaloneDocsErr;
+    const standaloneDocIds = (standaloneDocs ?? []).map((r) => r.id as string);
+    const standaloneDocStoragePaths = (standaloneDocs ?? [])
+      .map((r) => r.storage_path as string | null)
+      .filter((p): p is string => !!p);
+
+    counts.case_documents_standalone = await deleteByIdIn(supabase, 'case_documents', 'id', standaloneDocIds);
+
+    if (standaloneDocStoragePaths.length > 0) {
+      let removedStandaloneFiles = 0;
+      for (const part of chunk(standaloneDocStoragePaths, STORAGE_CHUNK_SIZE)) {
+        const { data: removed, error: storageErr } = await supabase.storage.from('case-docs').remove(part);
+        if (storageErr) {
+          console.warn('  ⚠️ فشل حذف ملفات أرشيف مستقلة من case-docs storage:', storageErr.message);
+          continue;
+        }
+        removedStandaloneFiles += removed?.length ?? 0;
+      }
+      counts.case_docs_storage_files_standalone = removedStandaloneFiles;
     }
 
     counts.case_notes = await deleteByIdIn(supabase, 'case_notes', 'case_id', caseIds);
