@@ -67,6 +67,24 @@ function makeMockDb() {
         })),
       };
     }
+    // 🔒 FIX (توحيد فك ربط الطرف الأساسي — 8 أغسطس 2026): syncUnlinkedPrimaryParty
+    // جوه handleUnlinkClient بتقرا case_parties لتلاقي الطرف الأساسي المطابق —
+    // db.from('case_parties').select('id,updated_at').eq('case_id',x).eq('client_id',y).eq('is_client',true).limit(1).maybeSingle()
+    if (table === 'case_parties') {
+      return {
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                limit: vi.fn(() => ({
+                  maybeSingle: vi.fn(() => Promise.resolve(get(`${table}:maybeSingle`))),
+                })),
+              })),
+            })),
+          })),
+        })),
+      };
+    }
     return {};
   });
 
@@ -793,6 +811,86 @@ describe('useCaseActions', () => {
       expect(logActivity).not.toHaveBeenCalled();
       expect(params.fetchCases).not.toHaveBeenCalled();
       expect(onAfterLink).not.toHaveBeenCalled();
+    });
+  });
+
+  // 🔒 FIX (توحيد فك ربط الطرف الأساسي — 8 أغسطس 2026): قبل الفيكس ده
+  // handleUnlinkClient كانت بتصفّر cases.client_id بس، من غير أي مزامنة
+  // مع case_parties. التيستات دي بتغطي الإضافة الجديدة (syncUnlinkedPrimaryParty)
+  // بالإضافة لسلوك الدالة الأصلي (اللي كان بلا تيست خالص قبل كده).
+  describe('handleUnlinkClient', () => {
+    it('نجاح أونلاين + فيه صف case_parties مطابق للطرف الأساسي → UPDATE:cases وUPDATE:case_parties (client_id=null) الاتنين', async () => {
+      dbWriteMock().mockResolvedValue({ error: null, offline: false, queued: false });
+      mockDb.setResult('case_parties:maybeSingle', { data: { id: 'party-1', updated_at: '2026-08-01T00:00:00.000Z' }, error: null });
+      const targetCase = makeCase({ id: 'case-1', client_id: 'client-1' });
+      const params = makeParams({ cases: [targetCase] });
+      const { handleUnlinkClient } = useCaseActions(params);
+
+      await handleUnlinkClient('case-1');
+
+      const calls = dbWriteMock().mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>);
+      expect(calls).toContainEqual(expect.objectContaining({ type: 'UPDATE', table: 'cases', id: 'case-1', data: { client_id: null } }));
+      expect(calls).toContainEqual(expect.objectContaining({
+        type: 'UPDATE', table: 'case_parties', id: 'party-1', data: { client_id: null }, knownUpdatedAt: '2026-08-01T00:00:00.000Z',
+      }));
+      expect(toast).toHaveBeenCalledWith('✅ تم فك الربط — بيانات الموكل في القضية بقت قابلة للتعديل الحر');
+    });
+
+    it('نجاح أونلاين + مفيش أي صف case_parties (قضية قديمة) → UPDATE:cases بس، مفيش أي محاولة كتابة على case_parties', async () => {
+      dbWriteMock().mockResolvedValue({ error: null, offline: false, queued: false });
+      mockDb.setResult('case_parties:maybeSingle', { data: null, error: null });
+      const targetCase = makeCase({ id: 'case-2', client_id: 'client-1' });
+      const params = makeParams({ cases: [targetCase] });
+      const { handleUnlinkClient } = useCaseActions(params);
+
+      await handleUnlinkClient('case-2');
+
+      const calls = dbWriteMock().mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>);
+      expect(calls).toEqual([expect.objectContaining({ type: 'UPDATE', table: 'cases', id: 'case-2', data: { client_id: null } })]);
+      expect(toast).toHaveBeenCalledWith('✅ تم فك الربط — بيانات الموكل في القضية بقت قابلة للتعديل الحر');
+    });
+
+    it('تعارض (conflict) على case_parties بعد نجاح فك ربط القضية → توست تنبيه إضافي، القضية تفضل متفكة الربط (مفيش rollback)', async () => {
+      dbWriteMock().mockImplementation(async (op: { table: string }) => {
+        if (op.table === 'case_parties') return { error: null, conflict: true };
+        return { error: null, offline: false, queued: false };
+      });
+      mockDb.setResult('case_parties:maybeSingle', { data: { id: 'party-1', updated_at: '2026-08-01T00:00:00.000Z' }, error: null });
+      const targetCase = makeCase({ id: 'case-3', client_id: 'client-1' });
+      const params = makeParams({ cases: [targetCase] });
+      const { handleUnlinkClient } = useCaseActions(params);
+
+      await handleUnlinkClient('case-3');
+
+      expect(toast).toHaveBeenCalledWith('✅ تم فك الربط — بيانات الموكل في القضية بقت قابلة للتعديل الحر');
+      expect(toast).toHaveBeenCalledWith('⚠️ فُك ربط القضية، لكن بيانات الطرف الأساسي عدّلها شخص آخر — راجعها من تاب الأطراف', true);
+      expect(params.setCases).toHaveBeenCalled();
+    });
+
+    it('تعارض (conflict) على cases نفسها → توست تعارض، مفيش أي محاولة قراءة/كتابة على case_parties خالص', async () => {
+      dbWriteMock().mockResolvedValue({ error: null, offline: false, queued: false, conflict: true });
+      const targetCase = makeCase({ id: 'case-4', client_id: 'client-1' });
+      const params = makeParams({ cases: [targetCase] });
+      const { handleUnlinkClient } = useCaseActions(params);
+
+      await handleUnlinkClient('case-4');
+
+      expect(toast).toHaveBeenCalledWith('⚠️ هذه القضية عدّلها شخص آخر بعد ما فتحتها — أعد فتحها وحاول فك الربط مرة أخرى', true);
+      expect(mockDb.from).not.toHaveBeenCalledWith('case_parties');
+    });
+
+    it('أوفلاين (queued) + فيه صف case_parties مطابق → توست الحفظ المحلي، ومحاولة مزامنة case_parties برضه (best-effort، مش بتوقف على نجاح الكتابة الأساسية)', async () => {
+      dbWriteMock().mockResolvedValue({ error: null, offline: true, queued: true });
+      mockDb.setResult('case_parties:maybeSingle', { data: { id: 'party-1', updated_at: '2026-08-01T00:00:00.000Z' }, error: null });
+      const targetCase = makeCase({ id: 'case-5', client_id: 'client-1' });
+      const params = makeParams({ cases: [targetCase] });
+      const { handleUnlinkClient } = useCaseActions(params);
+
+      await handleUnlinkClient('case-5');
+
+      expect(toast).toHaveBeenCalledWith('📥 فك الربط محفوظ محلياً — سيُزامن عند عودة الإنترنت');
+      const calls = dbWriteMock().mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>);
+      expect(calls).toContainEqual(expect.objectContaining({ type: 'UPDATE', table: 'case_parties', id: 'party-1', data: { client_id: null } }));
     });
   });
 });
