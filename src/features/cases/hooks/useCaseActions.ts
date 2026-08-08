@@ -981,11 +981,52 @@ export function useCaseActions(params: {
     // القضية بتفضل زي ما هي كانت آخر مرة، بس دلوقتي بقت بيانات حرة قابلة
     // للتعديل بدل ما تتقرا من ملف الموكل — نفس آلية EditCaseModal.tsx
     // اللي بتحدد isLinked من client_id).
+    // 🔒 FIX (توحيد فك ربط الطرف الأساسي — 8 أغسطس 2026): الدالة دي كانت
+    // بتصفّر cases.client_id بس، من غير ما تلمس صف case_parties المطابق
+    // للطرف الأساسي — لو القضية فيها بيانات أطراف (case_parties)، الصف
+    // ده يفضل شايل client_id قديم، فـgetPartyState يصنّفه "طرف ثانوي
+    // مربوط" لسه بدل حر رغم إن cases.client_id بقى null. syncPrimaryParty
+    // تحت best-effort ومنفصلة تمامًا عن نجاح/فشل العملية الأساسية —
+    // فشلها (تعارض أو خطأ شبكة) بيطلع تنبيه إضافي بس، ومش بيرجّع تصفير
+    // cases.client_id للخلف ولا يمنع نجاح التوست الأساسي (نفس فلسفة
+    // partiesResult/identitySyncResult في StandaloneSessionDetailModal.tsx).
+    // القضايا القديمة اللي مالهاش case_parties أصلًا (fallback الشرط
+    // `matchedParty` تحت) — صفر تغيير سلوك، بترجع بالظبط لما كانت عليه.
+    const syncUnlinkedPrimaryParty = async (caseId: string, unlinkedClientId: string | null) => {
+        if (!unlinkedClientId) return;
+        try {
+            const { data: matchedParty } = await db.from('case_parties')
+                .select('id,updated_at')
+                .eq('case_id', caseId)
+                .eq('client_id', unlinkedClientId)
+                .eq('is_client', true)
+                .limit(1)
+                .maybeSingle();
+            if (!matchedParty) return;
+            const partyResult = await window.__dbWrite({
+                type: 'UPDATE', table: 'case_parties', id: matchedParty.id,
+                data: { client_id: null }, knownUpdatedAt: matchedParty.updated_at ?? null,
+            });
+            if (partyResult.conflict) {
+                toast('⚠️ فُك ربط القضية، لكن بيانات الطرف الأساسي عدّلها شخص آخر — راجعها من تاب الأطراف', true);
+                return;
+            }
+            if (partyResult.error) {
+                toast('⚠️ فُك ربط القضية، لكن حصل خطأ في مزامنة بيانات الطرف الأساسي — راجعها من تاب الأطراف', true);
+            }
+        } catch {
+            // best-effort — أي خطأ غير متوقع هنا مبيأثرش على نجاح فك ربط القضية نفسه.
+        }
+    };
+
     const handleUnlinkClient = async (caseId: string) => {
         // 🔒 FIX (8 أغسطس 2026): getCaseRecord بدل cases.find(id) الخام.
         const existingCase = await getCaseRecord(caseId);
         const knownUpdatedAt = existingCase?.updated_at
             || (selectedCase?.id === caseId ? selectedCase?.updated_at : null)
+            || null;
+        const unlinkedClientId = existingCase?.client_id
+            || (selectedCase?.id === caseId ? selectedCase?.client_id : null)
             || null;
         const { error, offline, queued, conflict, data: writtenRow } = await window.__dbWrite({
             type: 'UPDATE', table: 'cases', data: { client_id: null }, id: caseId, knownUpdatedAt
@@ -994,6 +1035,7 @@ export function useCaseActions(params: {
             toast('📥 فك الربط محفوظ محلياً — سيُزامن عند عودة الإنترنت');
             setCases((prev) => prev.map((c) => c.id === caseId ? { ...c, client_id: null } : c));
             if (selectedCase?.id === caseId) setSelectedCase((p) => p ? { ...p, client_id: null } : p);
+            await syncUnlinkedPrimaryParty(caseId, unlinkedClientId);
             return;
         }
         if (conflict) {
@@ -1014,6 +1056,7 @@ export function useCaseActions(params: {
         setCases((prev) => prev.map((c) => c.id === caseId ? { ...c, client_id: null, ...freshFields } : c));
         if (selectedCase?.id === caseId) setSelectedCase((p) => p ? { ...p, client_id: null, ...freshFields } : p);
         fetchCases(0, casesFilter);
+        await syncUnlinkedPrimaryParty(caseId, unlinkedClientId);
     };
 
     // ─ فك ربط طرف بعينه (case_parties) عن موكله ─ (خطة توحيد مصدر بيانات
