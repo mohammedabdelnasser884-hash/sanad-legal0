@@ -72,21 +72,19 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
   const primaryPartyId = starredParties[0]?.id;
   const unlinkedStarredParties = starredParties.filter((p) => !p.client_id);
   const hasPartyData = caseParties.length > 0;
-  // 🔒 FIX (توحيد فك ربط الطرف الأساسي — 8 أغسطس 2026): زرار "🔓 فك
-  // الربط" القديم جوه كارت "— الموكل —" تحت (onUnlinkClient) بيصفّر
-  // cases.client_id بس من غير ما يزامن case_parties — بعكس زرار فك
-  // الربط جوه ليستة "أطراف الدعوى" فوق (onUnlinkClientForParty) اللي
-  // بيزامن الاتنين صح. لو القضية فيها بيانات أطراف والطرف الأساسي فيها
-  // بديل حقيقي في الليستة دي، بنخفي الزرار القديم بدل ما نسيب مسارين
-  // (واحد صح وواحد مش متزامن) شغالين في نفس الوقت. لو مفيش تطابق حقيقي
-  // (حالة بيانات غير متوقعة — القضية عندها caseParties لكن مفيش طرف
-  // client_id بتاعه بيساوي caseData.client_id)، الزرار القديم يفضل
-  // ظاهر كـfallback عشان المستخدم ميتقفلش من غير أي طريقة يفك بيها
-  // الربط. القضايا اللي مالهاش caseParties أصلًا (hasPartyData=false)
-  // — صفر تغيير، الزرار القديم يفضل زي ما هو (هو المسار الوحيد أصلًا).
-  const hasMatchingPrimaryParty = !!caseData.client_id
-    && starredParties.some((p) => p.client_id === caseData.client_id);
-  const showLegacyCaseUnlink = !hasPartyData || !hasMatchingPrimaryParty;
+  // 🔒 FIX (توحيد فك ربط الطرف الأساسي — 8 أغسطس 2026، مُحدَّث): زرار
+  // "🔓 فك الربط" القديم جوه كارت "— الموكل —" تحت (onUnlinkClient)
+  // بيصفّر cases.client_id بس من غير ما يزامن case_parties — بعكس زرار
+  // فك الربط جوه ليستة "أطراف الدعوى" فوق (onUnlinkClientForParty) اللي
+  // بيزامن الاتنين صح. بقرار صريح من جيمي (8 أغسطس 2026): الزرار القديم
+  // يتشال خالص طالما القضية فيها caseParties — كل الموكلين (أساسي أو
+  // ثانوي) بقى ليهم طريقة واحدة بس لفك الربط: زرار الليستة فوق، بلا أي
+  // استثناء fallback حتى لو مفيش طرف client_id بتاعه بيطابق
+  // caseData.client_id (حالة بيانات غير متسقة نادرة — تتصلّح من الداتابيز
+  // مباشرة، مش من الواجهة). القضايا اللي مالهاش caseParties أصلًا
+  // (hasPartyData=false) لسه بتشوف الزرار القديم — هو المسار الوحيد
+  // المتاح ليها، صفر تغيير في السلوك بتاعها.
+  const showLegacyCaseUnlink = !hasPartyData;
   // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 7 — fallback الموكل
   // المحذوف): caseData.client_id موجود لكن client وصل null من الأب —
   // يعني القضية *كانت* مربوطة بموكل اتمسح (soft-deleted) بعد كده، مش
