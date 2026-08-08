@@ -42,7 +42,7 @@ function ChangePasswordModal({ user, onSave, onClose, saving }: ChangePasswordMo
             React.createElement('p',{className:"text-[9px] text-slate-500"},user.full_name)
           )
         ),
-        React.createElement('button',{onClick:onClose,className:"w-8 h-8 rounded-full bg-white/8 flex items-center justify-center text-slate-400 hover:text-white"},
+        React.createElement('button',{onClick:onClose,className:"w-8 h-8 rounded-full bg-white/8 flex items-center justify-center text-slate-400 hover:text-white",'data-testid':'admin-changepass-close'},
           React.createElement(I.X))
       ),
 
