@@ -455,23 +455,46 @@ export async function copySessionPartiesToNewSession(
   if (error) return { ok: false };
   if (!data || data.length === 0) return { ok: true };
 
-  const rows = (data as unknown as {
+  const partyRows = data as unknown as {
     side: string; is_client: boolean; name: string; capacity: string;
     national_id: string | null; address: string | null; power_of_attorney: string | null;
     client_id: string | null; sort_order: number;
-  }[]).map((p) => ({
-    case_id: null,
-    session_id: newSessionId,
-    side: p.side,
-    is_client: p.is_client,
-    name: p.name,
-    capacity: p.capacity,
-    national_id: p.national_id,
-    address: p.address,
-    power_of_attorney: p.power_of_attorney,
-    client_id: p.client_id,
-    sort_order: p.sort_order,
-  }));
+  }[];
+
+  // 🔒 FIX (تحليل لوجز E2E — 8 أغسطس 2026): لو أي طرف مربوط بموكل حي
+  // (client_id)، الجلسة القادمة لازم تاخد بياناته الحية وقت النسخ دي —
+  // مش نسخة مجمّدة من اسم/رقم قومي/توكيل/عنوان الجلسة القديمة زي ما كانت
+  // وقت إنشائها. لو الموكل اتعدّل بعد كده (مثلاً من ملفه الشخصي)، الجلسة
+  // القادمة الجديدة تعكس القيم الحالية فورًا. الجلسة القديمة نفسها تفضل
+  // زي ما هي (سجل تاريخي، مفيش UPDATE عليها) — النسخة دي بس (INSERT
+  // للجلسة الجديدة) هي اللي بتاخد القيم الحية.
+  const clientIds = Array.from(new Set(partyRows.map((p) => p.client_id).filter((id): id is string => !!id)));
+  const liveClientsById = new Map<string, { full_name: string | null; national_id: string | null; cr_number: string | null; address: string | null }>();
+  if (clientIds.length > 0) {
+    const { data: liveClients } = await db.from('clients')
+      .select('id,full_name,national_id,cr_number,address')
+      .in('id', clientIds);
+    for (const c of (liveClients as unknown as { id: string; full_name: string | null; national_id: string | null; cr_number: string | null; address: string | null }[]) || []) {
+      liveClientsById.set(c.id, c);
+    }
+  }
+
+  const rows = partyRows.map((p) => {
+    const live = p.client_id ? liveClientsById.get(p.client_id) : undefined;
+    return {
+      case_id: null,
+      session_id: newSessionId,
+      side: p.side,
+      is_client: p.is_client,
+      name: live ? (live.full_name || p.name) : p.name,
+      capacity: p.capacity,
+      national_id: live ? (live.national_id || p.national_id) : p.national_id,
+      address: live ? (live.address || p.address) : p.address,
+      power_of_attorney: live ? (live.cr_number || p.power_of_attorney) : p.power_of_attorney,
+      client_id: p.client_id,
+      sort_order: p.sort_order,
+    };
+  });
 
   const { error: insertErr } = await db.from('case_parties').insert(rows);
   return { ok: !insertErr };
@@ -862,11 +885,14 @@ export function findClientDataMismatches(
   client: ClientPartyFields,
 ): FieldMismatch[] {
   const mismatches: FieldMismatch[] = [];
-  const clientName = (client.full_name || client.client_name || '').trim();
-  const freeName = (freeText.plaintiff || '').trim();
-  if (freeName && clientName && freeName !== clientName) {
-    mismatches.push({ field: 'name', label: 'الاسم', freeTextValue: freeName, clientValue: clientName });
-  }
+  // 🔒 FIX (تحليل لوجز E2E — 8 أغسطس 2026): كان فيه فحص تعارض على الاسم
+  // هنا (freeName !== clientName → تنبيه) — ده غلط منطقيًا لخطوة "ربط
+  // بموكل موجود بالفعل": المستخدم بيختار الموكل بالظبط عشان يعتمد اسمه
+  // المسجل في ملفه بدل الاسم الحر المكتوب في الجلسة/القضية، فاختلاف
+  // الاسمين هو المتوقع دايمًا (أو حتى سبب الربط نفسه) مش علامة "اختار
+  // موكل غلط" زي اختلاف الرقم القومي/رقم التوكيل. تنبيه التعارض فضل
+  // مقصور على الحقول اللي اختلافها فعلاً بيدل على مشكلة بيانات حقيقية
+  // (هوية رسمية) — الرقم القومي، رقم التوكيل، والعنوان تحت.
   const freeNid = (freeText.plaintiff_national_id || '').trim();
   const clientNid = (client.national_id || '').trim();
   if (freeNid && clientNid && freeNid !== clientNid) {
