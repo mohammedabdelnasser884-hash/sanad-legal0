@@ -204,12 +204,22 @@ export function useCaseActions(params: {
             secretary_mobile: form.secretary_mobile || null,
             // ⚡ CHANGED (خطة تفكيك legacy columns — Phase F.1، 6 أغسطس 2026):
             // وقّفنا كتابة plaintiff/defendant/*_role/*_national_id/
-            // *_power_of_attorney/*_address/*_legal_title هنا خالص — كل
-            // أطراف الدعوى بتتسجل في case_parties بس (insertCaseParties
-            // تحت)، وكل شاشات العرض بقت بتقرا من هناك (مراحل B.1-B.4).
-            // form.plaintiff_legal_title/defendant_legal_title لسه بيوصلوا
-            // من الفورم لكن كمدخل فاليديشن بس (validateParties تحت) — مش
-            // بيتكتبوا على أي عمود.
+            // *_power_of_attorney/*_address هنا خالص — كل أطراف الدعوى
+            // بتتسجل في case_parties بس (insertCaseParties تحت)، وكل شاشات
+            // العرض بقت بتقرا من هناك (مراحل B.1-B.4).
+            // 🔒 FIX (تحليل لوجز E2E — 8 أغسطس 2026): plaintiff_legal_title/
+            // defendant_legal_title اترجعوا هنا — كانوا اتشالوا مع باقي
+            // الأعمدة القديمة فوق غلط. عمودي المسمى القانوني مش بديل عنهم
+            // case_parties — دول عمودين على مستوى القضية نفسها (لكل الجهة،
+            // مش لكل شخص) ولسه مصدر البيانات الوحيد اللي بتقرا منه شاشات
+            // كتير فعليًا (ChecklistSection.tsx وInfoSection.tsx وCaseDetailView.tsx
+            // وCasesTab.tsx وCaseSummary.tsx/CaseDataExtract.tsx/AILegalAssistant.tsx).
+            // كانوا بيتبعتوا كمدخل فاليديشن بس (validateParties) من غير ما
+            // يتكتبوا فعليًا على أي عمود — يعني أي مسمى قانوني بيكتبه
+            // المستخدم كان بيتفقد صامتًا فور الحفظ (باج فقدان بيانات حقيقي،
+            // مش مجرد تنظيف كود).
+            plaintiff_legal_title: form.plaintiff_legal_title || null,
+            defendant_legal_title: form.defendant_legal_title || null,
             // 🔒 FIX (تقرير الموثوقية — نتيجة 3، ٦.٢): تحسين احتياطي —
             // التريجر trg_tenant_id_cases (set_tenant_id_from_profile) بيملّ
             // tenant_id تلقائيًا من current_tenant_id() لو الحقل جاي فاضي،
@@ -656,8 +666,11 @@ export function useCaseActions(params: {
                 secretary_mobile: form.secretary_mobile || null,
                 // ⚡ CHANGED (Phase F.1، 6 أغسطس 2026): نفس تعديل handleSaveCase
                 // فوق بالحرف — وقّفنا كتابة الأعمدة القديمة هنا برضه.
-                // plaintiff_legal_title/defendant_legal_title لسه بيوصلوا من
-                // الفورم كمدخل فاليديشن بس (syncCaseParties تحت).
+                // 🔒 FIX (تحليل لوجز E2E — 8 أغسطس 2026): نفس فيكس handleSaveCase
+                // فوق — plaintiff_legal_title/defendant_legal_title اترجعوا،
+                // كانوا بيتفقدوا صامتًا عند كل تعديل قضية.
+                plaintiff_legal_title: form.plaintiff_legal_title || null,
+                defendant_legal_title: form.defendant_legal_title || null,
             };
             // FIX: Optimistic Locking لتعديل القضايا — كان `updated_at` بيتجاب
             // ويتخزّن في الـ state (شوف useAppData.ts) خصيصًا للاستخدام هنا، بس
