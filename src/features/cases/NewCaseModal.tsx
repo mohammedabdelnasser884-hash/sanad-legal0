@@ -356,11 +356,10 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
                             type: finalType,
                             court_level: finalCourtLevel,
                             client_id: primaryPlaintiff?.client_id || undefined,
-                            // ⚠️ لسه بتتبعت (مش لكتابتها على cases.plaintiff_legal_title/
-                            // defendant_legal_title بعد دلوقتي — دي كانت الاستخدام
-                            // الوحيد الآمن للحقلين — لكن useCaseActions.ts لسه محتاجهم
-                            // فقط كمدخل لفاليديشن السيرفر validateParties (قاعدة 6:
-                            // إلزامية المسمى القانوني عند ≥٢ أشخاص في نفس الجهة)).
+                            // 🔒 FIX (تحليل لوجز E2E — 8 أغسطس 2026): useCaseActions.ts
+                            // بيكتبهم فعليًا على cases.plaintiff_legal_title/
+                            // defendant_legal_title تاني (كانوا اتوقفوا غلط أثناء
+                            // خطة تفكيك legacy columns) — مش مجرد مدخل فاليديشن.
                             plaintiff_legal_title: partyFields.legalTitles.plaintiff || undefined,
                             defendant_legal_title: partyFields.legalTitles.defendant || undefined,
                             // ⚡ NEW (مرحلة 4.2): array الأطراف الكامل — useCaseActions.ts
