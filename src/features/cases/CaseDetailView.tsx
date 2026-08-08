@@ -179,15 +179,35 @@ function CaseDetailView({caseData, client, clients=[], onEnsureClientsLoaded, on
         return Array.from(byId.values());
     }, [client, caseParties, clients]);
 
+    // ⚡ FIX (8 أغسطس 2026 — باگ "الموكل محذوف" غلط، شاشة تفاصيل القضية):
+    // `client` جاي من الأب (AppModals.tsx) محسوب بـ
+    // `clients.find(cl.id === selectedCase?.client_id)` — نفس الاعتماد
+    // الحصري على العمود القديم اللي سبّب نفس المشكلة في CasesTab.tsx
+    // (كارت القضية في القائمة). القضايا القديمة اللي اترّبط فيها الطرف
+    // الأساسي بموكل بعد إنشائها بزمن (قبل ما مزامنة cases.client_id
+    // تتفعّل، أو لظرف لم يزامنها) ممكن يفضل cases.client_id فيها فاضي/غلط
+    // مع إن case_parties.client_id (المصدر الأحدث) سليم ومربوط فعليًا —
+    // فـ`client` بيوصل null والشاشة بتعرض "⚠️ الموكل محذوف" غلط رغم إن
+    // الموكل حي وشغال (زي ما ظهر في ملف الموكل نفسه). effectiveClient هنا
+    // بيرجع لأول طرف أساسي (is_client) عنده client_id لو `client` وصل
+    // null، قبل ما نحكم إنه فعلاً orphan.
+    const effectiveClient = React.useMemo(() => {
+        if (client) return client;
+        const primaryParty = caseParties.find((p) => p.is_client && p.client_id);
+        if (!primaryParty?.client_id) return null;
+        return clients.find((c) => c.id === primaryParty.client_id) || null;
+    }, [client, caseParties, clients]);
+    const effectivePrimaryClientId = effectiveClient?.id || caseData.client_id || null;
+
     // ⚡ NEW (المرحلة 3 — سد فجوة 5.3): عدد الأطراف عندهم client_id لكن
     // الموكل المربوط بيه اتحذف/مش مرئي (orphan) — بغض النظر لو أساسي
     // (caseData.client_id) أو ثانوي، getPartyState/isPartyOrphaned هي
     // اللي بتقرر. بيتحسب مرة واحدة لكل تغيير في caseParties/clients،
     // نفس نمط linkedClients فوق بالظبط.
     const orphanedPartiesCount = React.useMemo(() => {
-        const ctx: PartyDomainContext = { primaryClientId: caseData.client_id || null, clients };
+        const ctx: PartyDomainContext = { primaryClientId: effectivePrimaryClientId, clients };
         return caseParties.filter((party) => isPartyOrphaned(party, ctx)).length;
-    }, [caseParties, clients, caseData.client_id]);
+    }, [caseParties, clients, effectivePrimaryClientId]);
 
     // ⚡ FIX (باگ "الموكل محذوف" غلط — 8 أغسطس 2026): caseParties هنا بتتحمّل
     // live بعد فتح الشاشة، وممكن تشاور على موكل (أساسي أو طرف) لسه مش
@@ -305,7 +325,7 @@ function CaseDetailView({caseData, client, clients=[], onEnsureClientsLoaded, on
                 },
                 countryCourts: COUNTRY_CONFIGS[country as string]?.courts,
                 countryCaseTypes: COUNTRY_CONFIGS[country as string]?.caseTypes,
-                linkedClient: client,
+                linkedClient: effectiveClient,
                 onOpenClientProfile: onOpenClientProfile ? (c: ClientRow) => { setShowEditCase(false); onOpenClientProfile(c); } : undefined,
                 // ⚡ NEW (مرحلة 4 خطوة 2): لربط/إنشاء موكل لأي طرف جديد يتضاف
                 // أثناء التعديل (بخلاف linkedClient الأصلي المقفول بالفعل).
@@ -636,7 +656,7 @@ function CaseDetailView({caseData, client, clients=[], onEnsureClientsLoaded, on
 
             // ═══ البيانات ═══
             activeSection === 'info' && React.createElement(InfoSection, {
-                caseData, client, sessions, notes, docs, clients, linkingClient,
+                caseData, client: effectiveClient, sessions, notes, docs, clients, linkingClient,
                 caseParties,
                 onLinkClient: async (clientId: string) => {
                     if (!onLinkClient) return;
@@ -685,7 +705,7 @@ function CaseDetailView({caseData, client, clients=[], onEnsureClientsLoaded, on
             }),
 
             // ═══ المراجعة (نواقص الملف) — Rule-based بدون AI، المرحلة 1 من خطة المساعد الذكي ═══
-            activeSection === 'checklist' && React.createElement(ChecklistSection, { caseData, client, sessions, notes, docs, caseParties, onGoToTab: setActiveSection })
+            activeSection === 'checklist' && React.createElement(ChecklistSection, { caseData, client: effectiveClient, sessions, notes, docs, caseParties, onGoToTab: setActiveSection })
         ),
 
         // ── مودال تأكيد حذف الجلسة ──
