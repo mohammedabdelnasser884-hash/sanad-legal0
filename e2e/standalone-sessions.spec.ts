@@ -343,7 +343,14 @@ test('9) ربط الجلسة بقضية جديدة من شاشة التفاصي�
 test('10) ربط طرف من جلسة مستقلة بموكل موجود بالفعل (🔗 ربط بموكل موجود)', async ({ page }) => {
   await login(page);
   const clientName = `موكل E2E جاهز للربط - ${Date.now()}`;
-  await createClient(page, clientName);
+  // 🔒 FIX (تحليل لوجز E2E — 8 أغسطس 2026): كان بيتعمل الموكل من غير رقم
+  // قومي مبعوت صراحةً، فـcreateClient كان بيولّد رقم عشوائي (Date.now())
+  // مختلف عن رقم الطرف الثابت ('12345678901234' في createStandaloneSession
+  // تحت) — يعني تعارض حقيقي كان بيظهر دايمًا (findPartyDataMismatches)
+  // ويوقف الربط عند خطوة "⚠️ القيم دي مختلفة عن ملف الموكل" بدل ما يربط
+  // على طول، عكس افتراض التست نفسه (شوف الكومنت تحت). بنبعت نفس الرقم
+  // القومي هنا عشان نضمن صفر تعارض ونطابق النية الأصلية للتست.
+  await createClient(page, clientName, '12345678901234');
 
   const title = `اختبار E2E - ربط بموكل موجود - ${Date.now()}`;
   await createStandaloneSession(page, title);
