@@ -5,6 +5,7 @@ import type { CaseDocWithUrl, CasePartyRow } from '../hooks/useCaseDetailActions
 // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 6): كشف التعارض بين البيانات
 // الحرة المكتوبة في القضية وملف الموكل المختار وقت الربط اللاحق.
 import { findClientDataMismatches, findPartyDataMismatches, type FieldMismatch } from '../../calendar/hooks/caseSessionLinkingShared';
+import { ClientSearchSelect, type ClientSearchResult } from '../../../shared/ui/ClientSearchSelect';
 // 🆕 (خطة "المسمى القانوني" — مرحلة 5): منطق موحّد لعرض المسمى القانوني
 // عند تعدد الأشخاص تحت طرف واحد — نفس الدالة مستخدمة في هيدر CaseDetailView.tsx.
 import { summarizePartySide } from '../../../shared/parties/partyDisplay';
@@ -80,7 +81,12 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
   // بدل الشرط اليدوي — نفس النتيجة بالظبط.
   const isOrphaned = isOrphanedLink(caseData.client_id, client);
   const [linkStep, setLinkStep] = useState<'closed' | 'choice' | 'pickExisting' | 'confirmMismatch'>('closed');
-  const [pickedClientId, setPickedClientId] = useState('');
+  // ⚡ CHANGED (8 أغسطس 2026 — البند 6، الجزء الثاني): كان string clientId
+  // + `clients.find()` عند الحاجة لبيانات كاملة (فحص التعارض) — دلوقتي
+  // بنخزّن الصف الكامل اللي ClientSearchSelect.onSelect بيرجّعه مباشرة،
+  // عشان فحص التعارض يعتمد على نتيجة بحث حقيقية مش على قايمة `clients`
+  // (أول 15 موكل محمّلين بس) — راجع تقرير حالة التنفيذ 8-8-v3.
+  const [pickedClient, setPickedClient] = useState<ClientSearchResult | null>(null);
   // ⚡ NEW (Phase 3 — 4 أغسطس 2026): null = المسار القديم ("ربط بموكل
   // موجود" للقضية كلها، فولباك القضايا القديمة بلا caseParties) — قيمة =
   // طرف بعينه من unlinkedStarredParties يبقى الاختيار/الربط الجاي مخصص
@@ -394,18 +400,19 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                         ? React.createElement('div', {className: "space-y-3"},
                             React.createElement('p', {className: "text-[9px] font-black text-slate-500 tracking-widest"},
                                 existingClientTargetParty ? `— اختر موكلاً لـ "${existingClientTargetParty.name}" —` : "— اختر موكلاً —"),
-                            React.createElement('select', {
-                                value: pickedClientId,
-                                onChange: (e: React.ChangeEvent<HTMLSelectElement>) => setPickedClientId(e.target.value),
-                                disabled: linkingClient,
-                                className: "w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white font-bold outline-none"
-                            },
-                                React.createElement('option', {value: ''}, '— اختر موكلاً —'),
-                                clients.map((c: MappedClient) => React.createElement('option', {key: c.id, value: c.id}, c.full_name))
-                            ),
+                            // ⚡ CHANGED (8 أغسطس 2026 — البند 6، الجزء الثاني): `<select>`
+                            // القديم (مبني على قايمة `clients` أول 15 محمّلين) اتحول
+                            // لـ`ClientSearchSelect` (بحث حقيقي في الداتابيز). زرار "ربط"
+                            // تحت لسه بيتفعّل بس بعد اختيار موكل (نفس UX خطوتين القديم).
+                            React.createElement(ClientSearchSelect, {
+                                selectedLabel: pickedClient?.full_name || '',
+                                onSelect: (c: ClientSearchResult) => setPickedClient(c),
+                                placeholder: '— اختر موكلاً —',
+                                testId: 'info-link-client-search',
+                            }),
                             React.createElement('div', {className: "flex gap-2"},
                                 React.createElement('button', {
-                                    disabled: !pickedClientId || linkingClient,
+                                    disabled: !pickedClient || linkingClient,
                                     onClick: async () => {
                                         // ⚡ CHANGED (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 1، فقرة 6 من
                                         // التقرير): كان بيتخطى فحص التعارض تمامًا هنا على افتراض إن
@@ -413,32 +420,33 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                                         // دقيق فعليًا (الطرف نفسه ممكن يكون فيه بيانات حرة قديمة/مختلفة عن
                                         // ملف الموكل). دلوقتي بنعمل نفس فحص findPartyDataMismatches اللي
                                         // بيحصل للقضية كلها تحت، بس على بيانات الطرف المحدد.
+                                        // ⚡ CHANGED (8 أغسطس 2026): بيستخدم `pickedClient` (الصف الكامل من
+                                        // نتيجة البحث) مباشرة، بدل `clients.find()` على قايمة مقيّدة.
+                                        if (!pickedClient) return;
                                         if (existingClientTargetParty) {
-                                            const pickedClientForParty = clients.find((c) => c.id === pickedClientId);
-                                            const partyMismatches = pickedClientForParty ? findPartyDataMismatches(
+                                            const partyMismatches = findPartyDataMismatches(
                                                 {
                                                     name: existingClientTargetParty.name,
                                                     national_id: existingClientTargetParty.national_id,
                                                     power_of_attorney: existingClientTargetParty.power_of_attorney,
                                                     address: existingClientTargetParty.address,
                                                 },
-                                                pickedClientForParty,
-                                            ) : [];
+                                                pickedClient,
+                                            );
                                             if (partyMismatches.length > 0) {
                                                 setPendingMismatches(partyMismatches);
                                                 setLinkStep('confirmMismatch');
                                                 return;
                                             }
-                                            await onLinkClientForParty!(existingClientTargetParty.id, pickedClientId, existingClientTargetParty.id === primaryPartyId, existingClientTargetParty.updated_at ?? null);
-                                            setLinkStep('closed'); setPickedClientId(''); setExistingClientTargetParty(null);
+                                            await onLinkClientForParty!(existingClientTargetParty.id, pickedClient.id, existingClientTargetParty.id === primaryPartyId, existingClientTargetParty.updated_at ?? null);
+                                            setLinkStep('closed'); setPickedClient(null); setExistingClientTargetParty(null);
                                             return;
                                         }
                                         // ── مسار قديم (القضية كلها) — زي ما هو بالظبط ──
                                         // ⚡ NEW (مرحلة 6): قبل الربط، نقارن بيانات القضية الحرة (لو موجودة)
                                         // بملف الموكل المختار. لو فيه تعارض حقيقي، بنوقف ونعرض تأكيد
                                         // بدل ما نستبدل صامت (onLinkClient بقى بيزامن الحقول دي فعليًا).
-                                        const pickedClient = clients.find((c) => c.id === pickedClientId);
-                                        const mismatches = pickedClient ? findClientDataMismatches(
+                                        const mismatches = findClientDataMismatches(
                                             {
                                                 plaintiff: caseData.plaintiff,
                                                 plaintiff_national_id: caseData.plaintiff_national_id,
@@ -446,19 +454,19 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                                                 plaintiff_address: caseData.plaintiff_address,
                                             },
                                             pickedClient,
-                                        ) : [];
+                                        );
                                         if (mismatches.length > 0) {
                                             setPendingMismatches(mismatches);
                                             setLinkStep('confirmMismatch');
                                             return;
                                         }
-                                        await onLinkClient!(pickedClientId); setLinkStep('closed'); setPickedClientId('');
+                                        await onLinkClient!(pickedClient.id); setLinkStep('closed'); setPickedClient(null);
                                     },
                                     className: "flex-1 bg-premium-gold text-premium-bg rounded-xl py-2.5 text-[11px] font-black disabled:opacity-40"
                                 }, linkingClient ? '... جارٍ الربط' : 'ربط'),
                                 React.createElement('button', {
                                     disabled: linkingClient,
-                                    onClick: () => { setLinkStep('choice'); setPickedClientId(''); setExistingClientTargetParty(null); },
+                                    onClick: () => { setLinkStep('choice'); setPickedClient(null); setExistingClientTargetParty(null); },
                                     className: "flex-1 bg-white/5 border border-white/10 text-slate-300 rounded-xl py-2.5 text-[11px] font-black"
                                 }, 'رجوع')
                             )
@@ -485,12 +493,13 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                                         // ⚡ NEW (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 1): existingClientTargetParty
                                         // متحدد → نفس مسار ربط الطرف زي فوق، بس بعد تأكيد المستخدم على
                                         // استبدال البيانات. من غيره (المسار القديم — القضية كلها) زي ما هو.
+                                        if (!pickedClient) return;
                                         if (existingClientTargetParty) {
-                                            await onLinkClientForParty!(existingClientTargetParty.id, pickedClientId, existingClientTargetParty.id === primaryPartyId, existingClientTargetParty.updated_at ?? null);
+                                            await onLinkClientForParty!(existingClientTargetParty.id, pickedClient.id, existingClientTargetParty.id === primaryPartyId, existingClientTargetParty.updated_at ?? null);
                                         } else {
-                                            await onLinkClient!(pickedClientId);
+                                            await onLinkClient!(pickedClient.id);
                                         }
-                                        setLinkStep('closed'); setPickedClientId(''); setPendingMismatches([]); setExistingClientTargetParty(null);
+                                        setLinkStep('closed'); setPickedClient(null); setPendingMismatches([]); setExistingClientTargetParty(null);
                                     },
                                     className: "flex-1 bg-premium-gold text-premium-bg rounded-xl py-2.5 text-[11px] font-black disabled:opacity-40"
                                 }, linkingClient ? '... جارٍ الربط' : 'نعم، استخدم بيانات الموكل'),
