@@ -412,6 +412,12 @@ export interface Database {
           secretary_name: string | null
           secretary_mobile: string | null
           session_group_id: string | null
+          // 🔒 FIX (مراجعة بعد استرجاع أعمدة المسمى القانوني — 8 أغسطس 2026):
+          // العمودين دول اتمسحوا غلط من الأنواع وقت F.4 مع باقي الأعمدة
+          // القديمة، ورجّعناهم في القاعدة الحية (SQL) لكن الملف ده فضل ناقصهم.
+          // مش legacy — دول عمودي "المسمى القانوني الجامع" النشطين فعليًا.
+          plaintiff_legal_title: string | null
+          defendant_legal_title: string | null
         }
         Insert: {
           id?: string
@@ -437,6 +443,8 @@ export interface Database {
           secretary_name?: string | null
           secretary_mobile?: string | null
           session_group_id?: string | null
+          plaintiff_legal_title?: string | null
+          defendant_legal_title?: string | null
         }
         Update: {
           id?: string
@@ -462,6 +470,8 @@ export interface Database {
           secretary_name?: string | null
           secretary_mobile?: string | null
           session_group_id?: string | null
+          plaintiff_legal_title?: string | null
+          defendant_legal_title?: string | null
         }
         // ⚠️ FIX (14 يوليو 2026): كانت فاضية، وده كان بيمنع supabase-js من
         // استنتاج نوع الـ embed `cases(...)` جوه .select() (بيرجع
@@ -506,6 +516,12 @@ export interface Database {
           case_number: string | null
           court: string | null
           deleted_at: string | null
+          // 🔒 FIX (مراجعة بعد استرجاع أعمدة المسمى القانوني — 8 أغسطس 2026):
+          // العمودين دول اتمسحوا غلط من الأنواع وقت F.4 مع باقي الأعمدة
+          // القديمة، ورجّعناهم في القاعدة الحية (SQL) لكن الملف ده فضل ناقصهم.
+          // مش legacy — دول عمودي "المسمى القانوني الجامع" النشطين فعليًا.
+          plaintiff_legal_title: string | null
+          defendant_legal_title: string | null
         }
         Insert: {
           id?: string
@@ -534,6 +550,8 @@ export interface Database {
           case_number?: string | null
           court?: string | null
           deleted_at?: string | null
+          plaintiff_legal_title?: string | null
+          defendant_legal_title?: string | null
         }
         Update: {
           id?: string
@@ -562,6 +580,8 @@ export interface Database {
           case_number?: string | null
           court?: string | null
           deleted_at?: string | null
+          plaintiff_legal_title?: string | null
+          defendant_legal_title?: string | null
         }
         // ⚠️ مطلوبة بنيويًا من supabase-js (بيتحقق منها داخليًا وقت استنتاج
         // نوع from()/insert()/update()) — من غيرها التحقق بينهار لـ `never`
