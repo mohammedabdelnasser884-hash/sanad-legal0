@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { toast } from '../../shared/lib/notifications';
 import { Inp } from '@/shared/ui/Inp';
 import { Sel } from '@/shared/ui/Sel';
+import { ClientSearchSelect, type ClientSearchResult } from '@/shared/ui/ClientSearchSelect';
 import { createPortal } from 'react-dom';
 import { I, COUNTRY_CONFIGS, loadOfficeSetting } from '../../constants';
 import { useFeesActions } from './hooks/useFeesActions';
@@ -29,6 +30,13 @@ interface FeesTabProps {
     // يقفل المودال المفتوح بس (راجع BUG-08 تحت). محتاجين nav عشان نسجّل
     // كل مودال في نظام التنقل المركزي، بالظبط زي باقي التابات.
     nav: NavigationState;
+    // ⚡ NEW (8 أغسطس 2026 — البند 6 من تقرير حالة التنفيذ): دروب-داون
+    // اختيار الموكل بقى بيبحث في الداتابيز مباشرة (ClientSearchSelect)
+    // بدل ما يقتصر على أول صفحة محمّلة محليًا. لو الموكل المختار مش
+    // موجود أصلًا في clientsWithExtras، بنستدعي ensureClientsLoaded
+    // فورًا وقت الاختيار عشان .find(client_id) وقت الحفظ (جوه
+    // useFeesActions.ts) يلاقيه أكيد ومايرجّعش اسم فاضي.
+    ensureClientsLoaded?: (ids: (string | null | undefined)[]) => void;
 }
 
 // شكل عناصر feesSections الثابتة (تابات محصّلة/مؤجلة/مفتوحة) — من useFeesActions
@@ -42,7 +50,7 @@ interface FeeSectionInfo {
     countActiveBg: string;
 }
 
-function FeesTab({cases, clients, showSummaryModal, setShowSummaryModal, country, profile=null, nav}: FeesTabProps){
+function FeesTab({cases, clients, showSummaryModal, setShowSummaryModal, country, profile=null, nav, ensureClientsLoaded}: FeesTabProps){
     const {
       fees, payments, expandedPayments, setExpandedPayments,
       loading, showForm: showFormRaw, setShowForm: setShowFormRaw, form, setForm, saving, editId, setEditId,
@@ -252,21 +260,26 @@ function FeesTab({cases, clients, showSummaryModal, setShowSummaryModal, country
                         options:[{value:'',label:'اختر القضية...'}, ...cases.map((c) =>({value:c.id,label:c.title}))]
                     }),
                     React.createElement('div',{className:"space-y-1.5"},
-                        React.createElement('label',{className:"text-[10px] text-slate-400 font-bold"},"اسم الموكل"),
-                        React.createElement('select',{
-                            value: form.client_name_manual === '__manual__' ? '__manual__' : (form.client_id || ''),
-                            onChange:(e: React.ChangeEvent<HTMLSelectElement>) =>{
-                                const v = e.target.value;
-                                if(v==='__manual__') setForm((p) =>({...p, client_name_manual:'__manual__', client_id:''}));
-                                else setForm((p) =>({...p, client_name_manual:'', client_id: v}));
+                        // ⚡ CHANGED (8 أغسطس 2026 — البند 6): ClientSearchSelect بدل
+                        // <select> محدود بأول 15 موكل محمّلين — بيبحث في الداتابيز
+                        // مباشرة، وبيستدعي ensureClientsLoaded فورًا وقت الاختيار
+                        // (راجع تعليق ensureClientsLoaded في تعريف FeesTabProps فوق).
+                        React.createElement(ClientSearchSelect,{
+                            label:"اسم الموكل",
+                            testId:'fee-client-select',
+                            selectedLabel: (() => {
+                                const matched = clients.find((cl) => cl.id === form.client_id);
+                                return matched?.full_name || '';
+                            })(),
+                            isManualSelected: form.client_name_manual === '__manual__',
+                            manualOption:{label:'➕ آخر (اكتب يدوي)'},
+                            onManualSelect:() => setForm((p) =>({...p, client_name_manual:'__manual__', client_id:''})),
+                            onSelect:(c: ClientSearchResult) => {
+                                ensureClientsLoaded?.([c.id]);
+                                setForm((p) =>({...p, client_name_manual:'', client_id: c.id}));
                             },
-                            className:"w-full p-2.5 text-xs rounded-xl border border-white/10 bg-black/30 text-white",
-                            style:{fontFamily:'Cairo,sans-serif',colorScheme:'dark'}
-                        },
-                            React.createElement('option',{value:''},'اختر موكل...'),
-                            clients.map((cl) =>React.createElement('option',{key:cl.id, value:cl.id}, cl.full_name)),
-                            React.createElement('option',{value:'__manual__'},'➕ آخر (اكتب يدوي)')
-                        ),
+                            placeholder:'اختر موكل... (اكتب للبحث)',
+                        }),
                         form.client_name_manual==='__manual__' && React.createElement('input',{
                             type:"text",
                             value:form.client_name_text||'',
@@ -326,7 +339,7 @@ function FeesTab({cases, clients, showSummaryModal, setShowSummaryModal, country
               )
             : React.createElement('div',{className:"space-y-3"},
                 filteredFees.map((fee) => React.createElement(FeeCard, {
-                    key: fee.id, fee, cases, clients, currency, fmt, fmtDate,
+                    key: fee.id, fee, cases, clients, currency, fmt, fmtDate, ensureClientsLoaded,
                     detailsFor, setDetailsFor,
                     expandedPayments, setExpandedPayments,
                     invoiceLoadingFor, setInvoiceLoadingFor, getOrCreateInvoice, setInvoiceModal, toast,
