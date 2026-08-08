@@ -658,6 +658,11 @@ function CaseDetailView({caseData, client, clients=[], onEnsureClientsLoaded, on
             activeSection === 'info' && React.createElement(InfoSection, {
                 caseData, client: effectiveClient, sessions, notes, docs, clients, linkingClient,
                 caseParties,
+                // ⚡ NEW (توسيع كارت الموكل — 8 أغسطس 2026): linkedClients
+                // كانت محسوبة فوق أصلًا (الهيدر السريع + مودال الواتساب)
+                // ومش بتوصّل لـInfoSection — بنمررها هنا عشان كارت
+                // "— الموكلين —" الجديد يعرض كل الموكلين المرتبطين فعليًا.
+                linkedClients,
                 onLinkClient: async (clientId: string) => {
                     if (!onLinkClient) return;
                     setLinkingClient(true);
