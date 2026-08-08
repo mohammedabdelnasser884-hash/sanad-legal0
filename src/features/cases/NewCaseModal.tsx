@@ -3,6 +3,7 @@ import { toast } from '../../shared/lib/notifications';
 import { I } from '../../constants';
 import { Inp } from '@/shared/ui/Inp';
 import { Sel } from '@/shared/ui/Sel';
+import { ClientSearchSelect, type ClientSearchResult } from '@/shared/ui/ClientSearchSelect';
 import DatePicker from '@/shared/ui/DatePicker';
 import { usePartyFields } from '@/shared/parties/usePartyFields';
 import { PartyFieldsGroup } from '@/shared/parties/PartyFieldsGroup';
@@ -91,11 +92,14 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
     // ربط طرف بعينه بموكل موجود من النظام — بيملى الاسم/الرقم القومي/
     // التوكيل/العنوان دفعة واحدة من بيانات الموكل الحقيقية (نفس سلوك
     // الربط القديم، بس دلوقتي لأي طرف عليه ⭐ مش للموكل الوحيد بس).
-    const linkClientToParty = (partyId: string, clientId: string) => {
-        if(!clientId){ partyFields.updateParty(partyId,'client_id',null); return; }
-        const picked = clients.find((c: ClientRow) =>c.id===clientId);
-        if(!picked) return;
-        partyFields.updateParty(partyId,'client_id',clientId);
+    // ⚡ CHANGED (8 أغسطس 2026 — البند 6، الجزء الثاني): بياخد الصف
+    // الكامل (ClientSearchResult | null) اللي ClientSearchSelect.onSelect
+    // بيرجّعه مباشرة، بدل clientId + `clients.find()` محلي — ده كان
+    // بيعتمد على قايمة `clients` (أول 15 موكل محمّلين بس) اللي مش
+    // مضمون فيها الموكل المختار من نتيجة بحث حقيقي في الداتابيز.
+    const linkClientToParty = (partyId: string, picked: ClientSearchResult | null) => {
+        if(!picked){ partyFields.updateParty(partyId,'client_id',null); return; }
+        partyFields.updateParty(partyId,'client_id',picked.id);
         partyFields.updateParty(partyId,'name',picked.full_name || '');
         partyFields.updateParty(partyId,'national_id',picked.national_id || '');
         partyFields.updateParty(partyId,'power_of_attorney',picked.cr_number || '');
@@ -104,17 +108,17 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
 
     // ⚡ NEW (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 1، فقرة 1 من التقرير):
     // نفس فكرة EditCaseModal.tsx بالحرف — فحص تعارض قبل الاستبدال الصامت.
-    const [linkMismatchState, setLinkMismatchState] = useState<{ partyId: string; clientId: string; mismatches: FieldMismatch[] } | null>(null);
-    const requestLinkClientToParty = (party: PartyFieldValue, clientId: string) => {
-        if(!clientId){ linkClientToParty(party.id,''); return; }
-        const picked = clients.find((c: ClientRow) => c.id===clientId);
-        if(!picked) return;
+    // ⚡ CHANGED (8 أغسطس 2026): mismatchState بيحتفظ بالصف الكامل بدل
+    // clientId بس (مفيش داعي لـ`.find()` تاني وقت التأكيد).
+    const [linkMismatchState, setLinkMismatchState] = useState<{ partyId: string; picked: ClientSearchResult; mismatches: FieldMismatch[] } | null>(null);
+    const requestLinkClientToParty = (party: PartyFieldValue, picked: ClientSearchResult | null) => {
+        if(!picked){ linkClientToParty(party.id,null); return; }
         const mismatches = findPartyDataMismatches(
             { name: party.name, national_id: party.national_id, power_of_attorney: party.power_of_attorney, address: party.address },
             picked,
         );
-        if(mismatches.length > 0){ setLinkMismatchState({ partyId: party.id, clientId, mismatches }); return; }
-        linkClientToParty(party.id, clientId);
+        if(mismatches.length > 0){ setLinkMismatchState({ partyId: party.id, picked, mismatches }); return; }
+        linkClientToParty(party.id, picked);
     };
 
     // ⚡ NEW (خطة تطوير أطراف الدعوى — مرحلة 4 خطوة 2): بعد ما موديل
@@ -138,12 +142,22 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
     // الأب في المراحل اللي هتتحدد لاحقًا.
     const renderPartyExtra = (party: PartyFieldValue) => {
         if(!party.is_client) return null;
+        // ⚡ CHANGED (8 أغسطس 2026 — البند 6، الجزء الثاني): الدروب-داون
+        // القديم (`Sel` مبني على قايمة `clients` أول 15 محمّلين) اتحول
+        // لـ`ClientSearchSelect` (بحث حقيقي في الداتابيز). اسم الموكل
+        // المختار حاليًا (لو موجود) بيتجاب من نفس قايمة `clients` بس
+        // كعرض بصري بس (fallback فاضي لو مش موجود فيها) — مفيش أي منطق
+        // ربط/فحص تعارض بيعتمد عليها تاني.
+        const currentClient = party.client_id ? clients.find((c: ClientRow) => c.id === party.client_id) : null;
         return React.createElement('div',{className:'space-y-2'},
-            clients.length>0 && linkMismatchState?.partyId !== party.id && React.createElement(Sel,{
+            linkMismatchState?.partyId !== party.id && React.createElement(ClientSearchSelect,{
                 label:"ربط بموكل من النظام (اختياري)",
-                value:party.client_id || '',
-                onChange:(e: React.ChangeEvent<HTMLSelectElement>) =>requestLinkClientToParty(party,e.target.value),
-                options:[{value:'',label:'— بدون ربط (بيانات يدوية) —'},...clients.map((c: ClientRow) =>({value:c.id,label:c.full_name}))]
+                selectedLabel: currentClient?.full_name || '',
+                isManualSelected: !party.client_id,
+                manualOption: { label: '— بدون ربط (بيانات يدوية) —' },
+                onManualSelect: () => requestLinkClientToParty(party, null),
+                onSelect: (picked: ClientSearchResult) => requestLinkClientToParty(party, picked),
+                testId: `new-case-party-client-search-${party.id}`,
             }),
             // ⚡ NEW (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 1): تأكيد تعارض.
             linkMismatchState?.partyId === party.id && React.createElement('div',{className:'bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5 space-y-2', 'data-testid':`new-case-link-mismatch-${party.id}`},
@@ -154,7 +168,7 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
                 React.createElement('div',{className:'flex gap-2'},
                     React.createElement('button',{
                         type:'button',
-                        onClick:()=>{ linkClientToParty(party.id, linkMismatchState.clientId); setLinkMismatchState(null); },
+                        onClick:()=>{ linkClientToParty(party.id, linkMismatchState.picked); setLinkMismatchState(null); },
                         className:'flex-1 py-2 rounded-lg bg-premium-gold text-premium-bg text-[10px] font-black',
                         'data-testid':`new-case-link-mismatch-confirm-${party.id}`,
                     },'استخدم بيانات الموكل'),
