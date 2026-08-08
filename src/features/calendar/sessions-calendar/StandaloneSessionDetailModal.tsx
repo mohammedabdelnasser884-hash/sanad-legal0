@@ -1247,16 +1247,30 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
     // تمامًا عن إنشاء القضية، فمينفعش اختفاء واحد يخفي التاني.
     const hasCase = !!session.case_id;
     const hasClient = !!session.client_id;
-    // ⚡ NEW: الموكل الحي المرتبط بالجلسة (لو موجود وغير محذوف) — بيتمرر
-    // لـ EditStandaloneModal عشان يقفل حقول الموكل الثلاثة.
-    const linkedClient = session.client_id ? (clients.find((c) => c.id === session.client_id) || null) : null;
+    // ⚡ FIX (8 أغسطس 2026 — نفس باگ "الموكل محذوف" غلط اللي اتصلح في
+    // CasesTab.tsx/CaseDetailView.tsx): كان بيعتمد على session.client_id
+    // القديم بس. لو الجلسة اترّبط طرفها الأساسي بموكل عبر case_parties
+    // (sessionParties فوق، محمّلة أصلاً لعرض تعدد الأطراف) بعد ما
+    // session.client_id فضل من غير مزامنة، كان بيظهر "محذوف" غلط مع إن
+    // الموكل حي ومربوط فعلاً. primaryPartyClientId بياخد أول طرف عنده
+    // client_id من sessionParties كـ fallback لو العمود القديم فاضي/غلط.
+    // ⚠️ لازم نجرّب نتيجة كل id على حدة (مش || على الـids الخام) — لو
+    // session.client_id نفسه موجود بس غلط/قديم (مش null، بس مش بيتلاقى
+    // في clients)، الـ|| كان هيوقف عنده وميوصلش لـprimaryPartyClientId
+    // الصحيح خالص.
+    const primaryPartyClientId = sessionParties.find((p) => p.client_id)?.client_id || null;
+    const linkedClient = [session.client_id, primaryPartyClientId]
+        .filter((id): id is string => !!id)
+        .map((id) => clients.find((c) => c.id === id))
+        .find((c): c is ClientRow => !!c) || null;
+    const effectiveClientId = linkedClient?.id || session.client_id || primaryPartyClientId || null;
     // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 7 — fallback الموكل
-    // المحذوف): hasClient=true (session.client_id موجود) لكن linkedClient
+    // المحذوف): hasClient=true (effectiveClientId موجود) لكن linkedClient
     // طلع null — يعني الموكل ده اتحذف (soft-deleted) بعد ما الجلسة
     // اتربطت بيه، مش إن الجلسة مش مربوطة بحد أصلاً.
     // ⚡ CHANGED (خطة توحيد قفل الطرف، المرحلة 2): isOrphanedLink() الموحّدة
     // بدل الشرط اليدوي — نفس النتيجة بالظبط (hasClient && !linkedClient).
-    const isOrphaned = isOrphanedLink(session.client_id, linkedClient);
+    const isOrphaned = isOrphanedLink(effectiveClientId, linkedClient);
 
     // كائن قضية اصطناعي خفيف بيتبنى من بيانات الجلسة المستقلة نفسها (مفيش قضية حقيقية أصلاً)
     // عشان يتمرر لـ SessionUpdateModal اللي بيتوقع caseData: MappedCase — نفس القيم بالظبط
@@ -1513,63 +1527,4 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
                         className: 'flex-1 py-2.5 rounded-2xl text-xs font-bold text-slate-300 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-50',
                         'data-testid': 'standalone-session-link-trigger'
                     }, '🔗 ربط'),
-                    React.createElement('button', {
-                        onClick: () => setShowEdit(true),
-                        disabled: loadingFull,
-                        className: 'flex-1 py-2.5 rounded-2xl text-xs font-bold text-slate-300 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-50',
-                        'data-testid': 'standalone-session-edit-trigger'
-                    }, '✏️ تعديل'),
-                    React.createElement('button', {
-                        onClick: () => setShowConfirmDelete(true),
-                        disabled: deleting,
-                        className: 'flex-1 py-2.5 rounded-2xl text-xs font-bold text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 transition-all disabled:opacity-40',
-                        'data-testid': 'standalone-session-delete-trigger'
-                    }, '🗑 حذف')
-                )
-            )
-        )
-    );
-
-    return React.createElement(React.Fragment, null,
-        createPortal(modal, document.body),
-        showConfirmDelete && createPortal(React.createElement(DeleteConfirmModal, {
-            title: "حذف الجلسة",
-            itemName: session.title || session.case_number || 'جلسة مستقلة',
-            itemType: "الجلسة",
-            mode: "delete",
-            loading: deleting,
-            onConfirm: handleDelete,
-            onCancel: () => setShowConfirmDelete(false),
-            inputTestId: 'standalone-session-delete-input',
-            confirmTestId: 'standalone-session-delete-confirm',
-            cancelTestId: 'standalone-session-delete-cancel',
-        }), document.body),
-        showEdit && React.createElement(EditStandaloneModal, {
-            session, db,
-            onClose: () => setShowEdit(false),
-            onSaved: () => { onDone(); onClose(); },
-            linkedClient,
-            clients,
-            onOpenClientProfile: onOpenClientProfile ? (c: ClientRow) => { setShowEdit(false); onOpenClientProfile(c); } : undefined,
-            openNewClientModal,
-        }),
-        showUpdate && React.createElement(SessionUpdateModal, {
-            session, caseData, db,
-            onClose: () => setShowUpdate(false),
-            onDone: () => { onDone(); onClose(); },
-            onNotify,
-            linkedClient,
-        }),
-        showLink && React.createElement(LinkSessionModal, {
-            session, db, hasClient,
-            onClose: () => setShowLink(false),
-            onDone,
-            onFullClose: () => { setShowLink(false); onDone(); onClose(); },
-            onClientAdded,
-            linkedClient,
-            onOpenCreateClientForSessionParty,
-        })
-    );
-}
-
-export default StandaloneSessionDetailModal;
+                    React.createElement
