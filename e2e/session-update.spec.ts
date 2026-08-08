@@ -100,8 +100,8 @@ test('تحديث جلسة مستقلة (بلا موكل مربوط) — الجل
 test('تحديث جلسة مستقلة مربوطة بموكل — الجلسة القادمة بتاخد بيانات الموكل الحية مش نسخة الجلسة القديمة', async ({ page }) => {
   await login(page);
   const sessionTitle = `اختبار E2E - تحديث بموكل مربوط - ${Date.now()}`;
-  const originalClientName = `موكل تحديث E2E ${Date.now()}`;
-  const updatedClientName = `اسم موكل مختلف تمامًا بعد التعديل - ${Date.now()}`;
+  const originalClientName = `اختبار E2E - موكل تحديث ${Date.now()}`;
+  const updatedClientName = `اختبار E2E - اسم موكل مختلف تمامًا بعد التعديل - ${Date.now()}`;
   const nationalId = `7${Date.now()}`.slice(0, 14);
 
   // 1) إنشاء جلسة مستقلة بطرف مدعي واحد (⭐)
