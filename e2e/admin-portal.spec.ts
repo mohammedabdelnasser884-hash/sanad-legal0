@@ -12,7 +12,7 @@ import { login, openAdminSection, createClient, expectToast } from './utils';
 
 test('إعداد بوابة موكل تجريبي لأول مرة (تفعيل + PIN)', async ({ page }) => {
   await login(page);
-  const name = 'بوابة اختبار ' + Date.now();
+  const name = 'اختبار E2E - بوابة اختبار ' + Date.now();
   await createClient(page, name);
 
   await openAdminSection(page, 'portal');
@@ -34,7 +34,7 @@ test('إعداد بوابة موكل تجريبي لأول مرة (تفعيل + 
 
 test('تعديل بوابة موكل تجريبي بعد إعدادها: تعطيل الوصول', async ({ page }) => {
   await login(page);
-  const name = 'تعطيل بوابة اختبار ' + Date.now();
+  const name = 'اختبار E2E - تعطيل بوابة اختبار ' + Date.now();
   await createClient(page, name);
 
   await openAdminSection(page, 'portal');
@@ -62,7 +62,7 @@ test('تعديل بوابة موكل تجريبي بعد إعدادها: تعط�
 
 test('إضافة وصول جديد من هيدر القسم (AddPortalUserModal) لموكل تجريبي', async ({ page }) => {
   await login(page);
-  const name = 'وصول جديد اختبار ' + Date.now();
+  const name = 'اختبار E2E - وصول جديد اختبار ' + Date.now();
   await createClient(page, name);
 
   await openAdminSection(page, 'portal');
@@ -85,7 +85,7 @@ test('إضافة وصول جديد من هيدر القسم (AddPortalUserModal)
 
 test('إغلاق مودال تعديل بوابة الموكل من غير حفظ', async ({ page }) => {
   await login(page);
-  const name = 'إغلاق بوابة اختبار ' + Date.now();
+  const name = 'اختبار E2E - إغلاق بوابة اختبار ' + Date.now();
   await createClient(page, name);
 
   await openAdminSection(page, 'portal');
