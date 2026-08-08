@@ -102,4 +102,14 @@ test('زر تغيير كلمة المرور من قسم الأمان بيفتح 
 
   await card.first().getByTestId('admin-security-changepass').click();
   await expect(page.getByTestId('admin-changepass-new')).toBeVisible({ timeout: 5_000 });
+
+  // 🔒 FIX (تحليل لوجز E2E — 8 أغسطس 2026): كان التست بيسيب مودال تغيير
+  // كلمة المرور مفتوح لحد نهايته، فـafterEach (deleteTestUser →
+  // closeAdminSectionIfOpen) كان بيحاول يدوس على admin-section-back
+  // ومفيش استجابة (المودال المفتوح — بس div بـz-50 — بياخد كل ضغطات
+  // الماوس)، فبيفشل بـTimeout كل مرة. لازم نقفل المودال قبل ما التست
+  // يخلص، زي باقي التستات في الملف ده اللي بتقفل تأكيداتها (قفل/فتح
+  // حساب، تسجيل خروج) قبل ما تخلص.
+  await page.getByTestId('admin-changepass-close').click();
+  await expect(page.getByTestId('admin-changepass-new')).not.toBeVisible({ timeout: 5_000 });
 });
