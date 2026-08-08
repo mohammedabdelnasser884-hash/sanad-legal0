@@ -24,6 +24,12 @@ interface InfoSectionProps {
   // قبل مرحلة 4، أو لسه معملهاش تعديل بالفورم الجديد) = fallback كامل
   // لعرض الأعمدة القديمة زي ما كان بالظبط.
   caseParties?: CasePartyRow[];
+  // ⚡ NEW (توسيع كارت الموكل — 8 أغسطس 2026): كل الموكلين المرتبطين
+  // فعليًا بالقضية (أساسي + ثانويين)، محسوبة مسبقًا في CaseDetailView
+  // (linkedClients — نفس المصدر المستخدم في الهيدر السريع ومودال
+  // الواتساب). بتتعرض في كارت "— الموكلين —" بدل كارت "— الموكل —"
+  // المفرد القديم، لو caseParties موجودة.
+  linkedClients?: MappedClient[];
   // ⚡ NEW (19 يوليو 2026): للسماح بربط القضية بموكل موجود من نفس تاب
   // البيانات لما القضية لسه مش مرتبطة بحد (شوف useCaseActions.handleLinkClient).
   clients?: MappedClient[];
@@ -62,7 +68,7 @@ interface InfoRow {
   value: string | null;
 }
 
-function InfoSection({ caseData, client, sessions, notes, docs, caseParties = [], clients = [], linkingClient = false, onLinkClient, onLinkClientForParty, onCreateAndLinkClient, unlinkingClient = false, onUnlinkClient, onUnlinkClientForParty, onCreateAndLinkClientForParty }: InfoSectionProps) {
+function InfoSection({ caseData, client, sessions, notes, docs, caseParties = [], linkedClients = [], clients = [], linkingClient = false, onLinkClient, onLinkClientForParty, onCreateAndLinkClient, unlinkingClient = false, onUnlinkClient, onUnlinkClientForParty, onCreateAndLinkClientForParty }: InfoSectionProps) {
   // ⚡ NEW (مرحلة 13.1 — قسم 9 في الخطة): كل الأطراف عليهم ⭐ (is_client)،
   // والأطراف منهم اللي لسه مش مربوطة بموكل (client_id فاضي) — دي اللي
   // محتاجة زرار "إنشاء موكل". الطرف الأول (بترتيب sort_order، نفس ترتيب
@@ -283,8 +289,33 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                     })()
                 ),
 
-                // بيانات الموكل
-                client && React.createElement('div', {className: "bg-premium-card border border-emerald-500/15 rounded-2xl p-4"},
+                // بيانات الموكل/الموكلين
+                // ⚡ CHANGED (توسيع كارت الموكل — 8 أغسطس 2026): القضايا اللي
+                // فيها caseParties (نظام تعدد الأطراف) بقت بتعرض كل الموكلين
+                // المرتبطين فعليًا (أساسي + ثانويين) في كارت واحد "— الموكلين —"،
+                // اسم ورقم موبايل بس لكل واحد — بدل ما تقتصر على الموكل
+                // الأساسي (cases.client_id) بس زي الأول. القضايا القديمة اللي
+                // مالهاش caseParties لسه بتاخد الكارت القديم بالظبط (مفرد،
+                // مع نوع الموكل وزرار فك الربط) — صفر تغيير في سلوكها.
+                hasPartyData
+                ? linkedClients.length > 0 && React.createElement('div', {className: "bg-premium-card border border-emerald-500/15 rounded-2xl p-4"},
+                    React.createElement('p', {className: "text-[9px] font-black text-emerald-400/70 mb-3 tracking-widest"}, "— الموكلين —"),
+                    React.createElement('div', {className: "space-y-3"},
+                        linkedClients.map((c) => React.createElement('div', {
+                            key: c.id,
+                            className: "flex items-center gap-3"
+                        },
+                            React.createElement('div', {className: "w-9 h-9 rounded-xl bg-emerald-500/15 flex items-center justify-center text-emerald-400 font-black text-xs shrink-0"},
+                                (c.full_name || 'م').charAt(0)
+                            ),
+                            React.createElement('div', null,
+                                React.createElement('p', {className: "text-sm font-black text-white"}, c.full_name),
+                                c.phone && React.createElement('a', {href:`tel:${c.phone}`, className: "text-[10px] text-slate-400 mt-0.5 block"}, '📞 '+c.phone)
+                            )
+                        ))
+                    )
+                  )
+                : client && React.createElement('div', {className: "bg-premium-card border border-emerald-500/15 rounded-2xl p-4"},
                     React.createElement('p', {className: "text-[9px] font-black text-emerald-400/70 mb-3 tracking-widest"}, "— الموكل —"),
                     React.createElement('div', {className: "flex items-center gap-3"},
                         React.createElement('div', {className: "w-11 h-11 rounded-xl bg-emerald-500/15 flex items-center justify-center text-emerald-400 font-black text-sm"},
@@ -298,6 +329,9 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                     ),
                     // ⚡ NEW: زرار "فك الربط" — نُقل من EditCaseModal لنفس مكان
                     // زرار "ربط القضية بموكل" (نفس الكارت، يتبدّل حسب حالة الربط).
+                    // ملحوظة: hasPartyData=false هنا دايمًا (الفرع التاني فوق)،
+                    // فـshowLegacyCaseUnlink (=!hasPartyData) دايمًا true — الشرط
+                    // اتساب زي ما هو من غير تغيير عشان لو المتغير اتعدّل لاحقًا.
                     onUnlinkClient && showLegacyCaseUnlink && (
                         showUnlinkConfirm
                             ? React.createElement('div', {className: "mt-3 pt-3 border-t border-white/5 space-y-2"},
