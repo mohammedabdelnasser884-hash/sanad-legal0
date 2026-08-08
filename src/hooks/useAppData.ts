@@ -211,12 +211,12 @@ export function useAppData(profile: ProfileRow | null) {
             status:         r.status || 'نشطة',
             date:           sessionsMap[r.id] || r.next_hearing || '—',
             client_id:      r.client_id,
-            // ⚡ FIX (F.4، 6 أغسطس 2026): كل حقول الأطراف القديمة دي (plaintiff/
-            // plaintiff_role/defendant/defendant_role/*_national_id/
-            // *_power_of_attorney/plaintiff_address/*_legal_title) اتشالت فعليًا
-            // من جدول cases مع الهجرة، فمعادش موجودة في CaseRow خالص. سايبين
-            // الحقول null هنا (بدل ما نمسحها من MappedCase) عشان أي مستهلك قديم
-            // لسه بيقراها يفضل شغال بدون كراش — مصدر العرض الحقيقي بقى
+            // ⚡ FIX (F.4، 6 أغسطس 2026): حقول الأطراف الفردية القديمة دي
+            // (plaintiff/plaintiff_role/defendant/defendant_role/*_national_id/
+            // *_power_of_attorney/plaintiff_address) اتشالت فعليًا من جدول
+            // cases مع الهجرة، فمعادش موجودة في CaseRow خالص. سايبين الحقول
+            // null هنا (بدل ما نمسحها من MappedCase) عشان أي مستهلك قديم لسه
+            // بيقراها يفضل شغال بدون كراش — مصدر العرض الحقيقي بقى
             // partiesMap[r.id] (case_parties) عن طريق derivePartiesDisplay.
             plaintiff:      null,
             plaintiff_role: null,
@@ -235,8 +235,15 @@ export function useAppData(profile: ProfileRow | null) {
             plaintiff_power_of_attorney: null,
             defendant_national_id: null,
             plaintiff_address: null,
-            plaintiff_legal_title: null,
-            defendant_legal_title: null,
+            // 🔒 FIX (تحليل لوجز E2E — 8 أغسطس 2026): plaintiff_legal_title/
+            // defendant_legal_title اترجعوا هنا من غير مبرر — العمودين دول
+            // مش زي بقية الأعمدة فوق (مش بديل ليهم case_parties)، ولسه
+            // العمودين موجودين فعليًا في جدول cases (لسه معملهاش DROP COLUMN
+            // حقيقي — راجع database/migrations/legacy-columns-drop). كاست
+            // مؤقت هنا (زي partiesMap[r.id] تحت) لحد ما database.types.ts
+            // يتحدّث يشملهم رسميًا.
+            plaintiff_legal_title: (r as unknown as { plaintiff_legal_title: string | null }).plaintiff_legal_title || null,
+            defendant_legal_title: (r as unknown as { defendant_legal_title: string | null }).defendant_legal_title || null,
             parties:        partiesMap[r.id] || [],
         }));
 
@@ -325,8 +332,10 @@ export function useAppData(profile: ProfileRow | null) {
             plaintiff_power_of_attorney: null,
             defendant_national_id: null,
             plaintiff_address: null,
-            plaintiff_legal_title: null,
-            defendant_legal_title: null,
+            // 🔒 FIX (تحليل لوجز E2E — 8 أغسطس 2026): نفس فيكس fetchCases فوق
+            // بالظبط — plaintiff_legal_title/defendant_legal_title اترجعوا.
+            plaintiff_legal_title: (r as unknown as { plaintiff_legal_title: string | null }).plaintiff_legal_title || null,
+            defendant_legal_title: (r as unknown as { defendant_legal_title: string | null }).defendant_legal_title || null,
             parties:        partiesMap[r.id] || [],
         }));
 
