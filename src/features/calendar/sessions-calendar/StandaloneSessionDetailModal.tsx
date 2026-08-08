@@ -5,6 +5,7 @@ import { showErrorToast } from '../../../shared/lib/errorReporting';
 import { I } from '../../../constants';
 import { Inp } from '@/shared/ui/Inp';
 import { Sel } from '@/shared/ui/Sel';
+import { ClientSearchSelect, type ClientSearchResult } from '@/shared/ui/ClientSearchSelect';
 import SessionUpdateModal from './SessionUpdateModal';
 import DeleteConfirmModal from '@/shared/modals/DeleteConfirmModal';
 import { useSessionLinking } from '../hooks/useSessionLinking';
@@ -315,27 +316,27 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
     // EditCaseModal.tsx بالحرف (بما فيها فحص findPartyDataMismatches قبل
     // الاستبدال). قبل كده الملف ده معندوش أي طريقة تربط طرف غير مربوط
     // غير قفل الفورم وفتح "🔗 ربط" المنفصل (LinkSessionModal).
-    const linkClientToParty = (partyId: string, clientId: string) => {
-        if (!clientId) { partyFields.updateParty(partyId, 'client_id', null); return; }
-        const picked = clients.find((c) => c.id === clientId);
-        if (!picked) return;
-        partyFields.updateParty(partyId, 'client_id', clientId);
+    // ⚡ CHANGED (8 أغسطس 2026 — البند 6، الجزء الثاني): بياخد الصف الكامل
+    // (ClientSearchResult | null) اللي ClientSearchSelect.onSelect بيرجّعه
+    // مباشرة، بدل clientId + `clients.find()` محلي — راجع تقرير حالة
+    // التنفيذ 8-8-v3.
+    const linkClientToParty = (partyId: string, picked: ClientSearchResult | null) => {
+        if (!picked) { partyFields.updateParty(partyId, 'client_id', null); return; }
+        partyFields.updateParty(partyId, 'client_id', picked.id);
         partyFields.updateParty(partyId, 'name', picked.full_name || '');
         partyFields.updateParty(partyId, 'national_id', picked.national_id || '');
         partyFields.updateParty(partyId, 'power_of_attorney', picked.cr_number || '');
         partyFields.updateParty(partyId, 'address', picked.address || '');
     };
-    const [linkMismatchState, setLinkMismatchState] = useState<{ partyId: string; clientId: string; mismatches: FieldMismatch[] } | null>(null);
-    const requestLinkClientToParty = (party: PartyFieldValue, clientId: string) => {
-        if (!clientId) return;
-        const picked = clients.find((c) => c.id === clientId);
+    const [linkMismatchState, setLinkMismatchState] = useState<{ partyId: string; picked: ClientSearchResult; mismatches: FieldMismatch[] } | null>(null);
+    const requestLinkClientToParty = (party: PartyFieldValue, picked: ClientSearchResult | null) => {
         if (!picked) return;
         const mismatches = findPartyDataMismatches(
             { name: party.name, national_id: party.national_id, power_of_attorney: party.power_of_attorney, address: party.address },
             picked,
         );
-        if (mismatches.length > 0) { setLinkMismatchState({ partyId: party.id, clientId, mismatches }); return; }
-        linkClientToParty(party.id, clientId);
+        if (mismatches.length > 0) { setLinkMismatchState({ partyId: party.id, picked, mismatches }); return; }
+        linkClientToParty(party.id, picked);
     };
 
     // 🆕 (بند 2.3 — 6 أغسطس 2026): بعد حفظ موكل جديد عبر الموديل الموحّد
@@ -360,11 +361,16 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
             // طرف غير مربوط أصلًا — الدروب-داون الجديد بس، من غير أي
             // زرار unlink (مفيش حاجة تتفك أصلًا).
             return React.createElement('div', { className: 'space-y-2' },
-                clients.length > 0 && linkMismatchState?.partyId !== party.id && React.createElement(Sel, {
+                // ⚡ CHANGED (8 أغسطس 2026 — البند 6، الجزء الثاني): `Sel`
+                // القديم اتحول لـ`ClientSearchSelect` (بحث حقيقي في
+                // الداتابيز بدل قايمة `clients` أول 15 محمّلين). الطرف هنا
+                // مالوش موكل مربوط أصلًا (الفرع ده بس لما !party.client_id)،
+                // فمفيش حاجة تتفك — مفيش manualOption هنا زي القديم بالظبط.
+                linkMismatchState?.partyId !== party.id && React.createElement(ClientSearchSelect, {
                     label: 'ربط بموكل من النظام (اختياري)',
-                    value: '',
-                    onChange: (e: React.ChangeEvent<HTMLSelectElement>) => requestLinkClientToParty(party, e.target.value),
-                    options: [{ value: '', label: '— بدون ربط (بيانات يدوية) —' }, ...clients.map((c) => ({ value: c.id, label: c.full_name }))],
+                    selectedLabel: '',
+                    onSelect: (picked: ClientSearchResult) => requestLinkClientToParty(party, picked),
+                    testId: `edit-standalone-session-party-client-search-${party.id}`,
                 }),
                 linkMismatchState?.partyId === party.id && React.createElement('div', { className: 'bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5 space-y-2', 'data-testid': `edit-standalone-session-link-mismatch-${party.id}` },
                     React.createElement('p', { className: 'text-[9px] text-amber-400 font-black' }, '⚠️ القيم دي مختلفة عن ملف الموكل:'),
@@ -374,7 +380,7 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
                     React.createElement('div', { className: 'flex gap-2' },
                         React.createElement('button', {
                             type: 'button',
-                            onClick: () => { linkClientToParty(party.id, linkMismatchState.clientId); setLinkMismatchState(null); },
+                            onClick: () => { linkClientToParty(party.id, linkMismatchState.picked); setLinkMismatchState(null); },
                             className: 'flex-1 py-2 rounded-lg bg-premium-gold text-premium-bg text-[10px] font-black',
                             'data-testid': `edit-standalone-session-link-mismatch-confirm-${party.id}`,
                         }, 'استخدم بيانات الموكل'),
