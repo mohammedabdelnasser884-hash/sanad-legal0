@@ -22,6 +22,10 @@ interface AppModalsProps {
     // ── بيانات أساسية ──
     cases: MappedCase[];
     clients: MappedClient[];
+    // ⚡ FIX (باگ "الموكل محذوف" غلط — 8 أغسطس 2026): بتوصّل لـ
+    // CaseDetailView عشان تجيب أي موكل طرف لسه مش محمّل بالـid مباشرة
+    // بعد ما case_parties الحقيقية (live) تتحمّل. راجع useAppData.ts.
+    ensureClientsLoaded?: (ids: (string | null | undefined)[]) => void | Promise<void>;
     lawyers: ProfileRow[];
     profile: ProfileRow | null;
     country: string;
@@ -141,7 +145,7 @@ interface AppModalsProps {
 //  "Modals" الأصلية، وده مكوّن منفصل خالص اتعمل من قبل.)
 // ─────────────────────────────────────────────────────────
 function AppModals({
-    cases, clients, lawyers, profile, country, isAdmin, casesFilter, nav,
+    cases, clients, ensureClientsLoaded, lawyers, profile, country, isAdmin, casesFilter, nav,
     showSearch, showAI, showCaseModal, showNewSessionModal,
     showLawyerModal, showClientModal, savingCase, savingLawyer, savingClient,
     deleteConfirm, selectedClient, selectedClientEditMode, selectedCase, selectedCaseInitialTab,
@@ -237,6 +241,11 @@ function AppModals({
             caseData: selectedCase,
             client: clients.find((cl) => cl.id === selectedCase?.client_id) || null,
             clients,
+            // ⚡ FIX (باگ "الموكل محذوف" غلط): CaseDetailView بيجيب
+            // case_parties حيّة (fresh) بعد ما يفتح — لو فيها موكل لسه مش
+            // موجود في `clients` (المُمرّرة فوق أصلاً clientsWithExtras من
+            // App.tsx)، بيستخدم الدالة دي يجيبه بالـid مباشرة.
+            onEnsureClientsLoaded: ensureClientsLoaded,
             initialTab: selectedCaseInitialTab,
             // 🔒 FIX (تشخيص لوجز E2E — 30 يوليو 2026): إضافة/تعديل/حذف جلسة
             // جوه تبويب جلسات القضية (CaseDetailView) ما كانش بيرجّع أي إشارة
