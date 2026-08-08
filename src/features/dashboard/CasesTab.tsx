@@ -4,15 +4,26 @@ import type { MappedCase } from '../../hooks/useAppData';
 // 🆕 (بند 1.2 — بادج CasesTab.tsx، خطة توحيد قفل الطرف مرحلة 3، 6 أغسطس
 // 2026): نفس نظام الشارات الموحّد (getPartyStateBadge) المستخدم بالفعل
 // في StandaloneSessionDetailModal.tsx/EditCaseModal.tsx — هنا بنعرضها
-// على مستوى كارت القضية في القائمة نفسها (بيانات الموكل الأساسي بس،
-// c.client_id + clients، بلا أي استعلام إضافي). نطاق ضيّق عمدًا: بادج
+// على مستوى كارت القضية في القائمة نفسها. نطاق ضيّق عمدًا: بادج
 // "🟠 موكل محذوف" بس لما الموكل الأساسي orphan — ده الجزء اللي كان
 // مفقود تمامًا قبل كده (CasesTab ما كانش بيعرض أي مؤشر خالص لموكل
 // اتحذف)، مش عرض "🟢 موكل المكتب" لكل قضية (ده مش هيضيف قيمة فعلية في
-// قائمة طويلة وهيبقى ضوضاء بصرية). البادجات التانية (🔵🟣 لأطراف
-// ثانوية) تحتاج case_parties لكل قضية — ده جزء غير منفّذ عمدًا (خارج
-// نطاق هذا البند، هيحتاج استعلام إضافي لكل صف في القائمة).
-import { isOrphanedLink, getPartyStateBadge } from '@/shared/parties/partyDomainService';
+// قائمة طويلة وهيبقى ضوضاء بصرية).
+//
+// ⚡ FIX (8 أغسطس 2026 — بادچ غلط لقضايا قديمة): كان بيتحقق بس من
+// `c.client_id` (العمود القديم على جدول cases). بعد التحول لنظام
+// case_parties، القضايا اللي اتعملت/اتحدّثت بعد كده بقى رابطها الحقيقي
+// بالموكل مُخزّن في case_parties.client_id (اللي فعلاً شغال صح في شاشة
+// تفاصيل الموكل)، و`cases.client_id` ممكن يفضل فاضي/قديم من غير ما
+// يتزامن. النتيجة: قضايا موكلها موجود وربطها سليم كانت بتظهر "محذوف"
+// غلط لمجرد إن العمود القديم مش متزامن. partiesMap أصلاً بيتحمّل مرة
+// واحدة لكل صفحة كاملة (fetchPartiesMapByCaseIds في useAppData.ts) —
+// مش استعلام إضافي لكل صف زي ما كان متوقع وقت كتابة التعليق الأصلي —
+// فبقى ممكن نستخدم c.parties هنا من غير أي تكلفة إضافية. المنطق دلوقتي:
+// اجمع كل الـclient_id (من c.client_id القديم + كل أطراف c.parties)،
+// ولو فيه على الأقل واحد بيتلاقى في clients، القضية مش orphan — حتى لو
+// العمود القديم نفسه فاضي أو غلط.
+import { getPartyStateBadge } from '@/shared/parties/partyDomainService';
 import type { ClientRow } from '../../types';
 
 const PAGE_SIZE = 15;
@@ -125,10 +136,16 @@ function CasesTab({ cases, casesFilter, setCasesFilter, casesPage, setCasesPage,
     const isSearching = localSearch.trim().length > 0;
 
     const renderCaseCard = (c: MappedCase) => {
-        // 🆕 (بند 1.2 — 6 أغسطس 2026): orphan بس لو client_id موجود
-        // والموكل مش لاقيه في القائمة الحية (اتحذف/soft-deleted).
-        const linkedClient = c.client_id ? clients.find((cl) => cl.id === c.client_id) : null;
-        const orphanBadge = isOrphanedLink(c.client_id, linkedClient) ? getPartyStateBadge('ORPHAN') : null;
+        // ⚡ FIX (8 أغسطس 2026): بنجمع كل الـclient_id المشار ليها —
+        // العمود القديم c.client_id + client_id أي طرف في c.parties
+        // (case_parties، المصدر الحديث للربط). orphan بس لو فيه على
+        // الأقل إشارة واحدة لموكل ومفيش ولا واحدة منها بتتلاقى فعليًا
+        // في clients — مش بس لو العمود القديم تحديدًا فاضي/غلط.
+        const referencedClientIds = Array.from(new Set(
+            [c.client_id, ...(c.parties || []).map((p) => p.client_id)].filter((id): id is string => !!id)
+        ));
+        const hasResolvedClient = referencedClientIds.some((id) => clients.some((cl) => cl.id === id));
+        const orphanBadge = (referencedClientIds.length > 0 && !hasResolvedClient) ? getPartyStateBadge('ORPHAN') : null;
         return React.createElement('div', {
             key: c.id,
             onClick: () => setSelectedCase(c),
