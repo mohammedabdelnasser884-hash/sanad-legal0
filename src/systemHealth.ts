@@ -19,6 +19,7 @@ export type KnownServiceKey =
   | 'db_reminders'
   | 'db_dashboard'
   | 'db_fees'
+  | 'db_documents'
   | 'session_scheduler'
   | 'office_login'
   | 'app_general';
@@ -60,6 +61,7 @@ const SERVICE_LABELS: Record<KnownServiceKey, string> = {
   db_reminders:      'جلب التذكيرات',
   db_dashboard:      'تحميل الرئيسية',
   db_fees:           'جلب الأتعاب',
+  db_documents:      'تحميل الجلسات والمستندات',
   session_scheduler: 'جدولة الإشعارات التلقائية',
   office_login:      'تسجيل الدخول',
   app_general:       'النظام',
@@ -85,6 +87,7 @@ const KNOWN_ERROR_MSGS: Record<KnownServiceKey, string> = {
   db_reminders:      'تعذّر تحميل التذكيرات. تحقق من الاتصال بالإنترنت.',
   db_dashboard:      'تعذّر تحميل بيانات الرئيسية. تحقق من الاتصال بالإنترنت.',
   db_fees:           'تعذّر تحميل بيانات الأتعاب. تحقق من الاتصال بالإنترنت.',
+  db_documents:      'تعذّر تحميل جلسات/مستندات هذه القضية. تحقق من الاتصال بالإنترنت.',
   session_scheduler: 'توقف نظام الإشعارات التلقائية. أعد فتح التطبيق.',
   office_login:      'تعذّر تسجيل الدخول. تحقق من اتصال الإنترنت وحاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.',
   app_general:       'حصلت مشكلة في النظام. تحقق من اتصال الإنترنت أو حاول تاني.',
