@@ -29,3 +29,24 @@ export type BackupRow = Tables<'backups'>;
 
 // دفعات مجمّعة حسب fee_id — الشكل اللي بيترجع من fetchFees في useFeesActions
 export type PaymentsByFeeId = Record<string, FeePaymentRow[]>;
+
+// ⚡ NEW (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة، المرحلة 6 — 9 أغسطس
+// 2026): كانت أصلاً معرّفة جوه useSessionLinking.ts (هوك كامل بقى كود
+// ميت 100% واتحذف في المرحلة دي). النوع نفسه لسه مستخدم فعليًا في
+// StandaloneSessionDetailModal.tsx (session prop)، فاتنقل هنا بدل ما يترحّل
+// مع باقي الهوك. case_sessions مفيهاش أعمدة plaintiff/defendant القديمة
+// أصلاً (اتشالت في فاز 3) — النوع ده بيوسّع CaseSessionRow ليقبلها كاختيارية
+// بس عشان أي كائن جلسة قديم/تست لسه ببنية قديمة يفضل يتصرّف بنفس الشكل من
+// غير كسر (صفر تغيير سلوك).
+type LegacySessionPartyFields = {
+  plaintiff?: string | null;
+  plaintiff_role?: string | null;
+  plaintiff_national_id?: string | null;
+  plaintiff_power_of_attorney?: string | null;
+  defendant?: string | null;
+  defendant_role?: string | null;
+  defendant_national_id?: string | null;
+  plaintiff_legal_title?: string | null;
+  defendant_legal_title?: string | null;
+};
+export type SessionWithLegacyFields = CaseSessionRow & LegacySessionPartyFields;
