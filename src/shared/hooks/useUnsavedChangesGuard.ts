@@ -43,7 +43,7 @@ interface UnsavedChangesGuard {
     confirmModal: React.ReactNode;
 }
 
-export function useUnsavedChangesGuard<T>(current: T, baseline: T, onClose: () => void): UnsavedChangesGuard {
+export function useUnsavedChangesGuard<T>(current: T, baseline: T, onClose: () => void, onDiscard?: () => void): UnsavedChangesGuard {
     // baseline بتتاخد نسخة ثابتة أول مرة بس (حالة الفورم الأصلية/المحمّلة)
     const baselineRef = useRef<string>(JSON.stringify(baseline));
     useEffect(() => {
@@ -51,12 +51,12 @@ export function useUnsavedChangesGuard<T>(current: T, baseline: T, onClose: () =
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    // آخر نسخة من current/onClose — الدالة المسجّلة لزر الرجوع الفعلي
-    // (registerNestedModal تحت) بتتنادى بعد كده بوقت (مش وقت الرندر)،
-    // فلازم تقرا القيمة الطازة وقت الاستدعاء الفعلي مش نسخة قديمة اتقفلت
-    // (closure) وقت التسجيل.
-    const latestRef = useRef({ current, onClose });
-    useEffect(() => { latestRef.current = { current, onClose }; });
+    // آخر نسخة من current/onClose/onDiscard — الدالة المسجّلة لزر الرجوع
+    // الفعلي (registerNestedModal تحت) بتتنادى بعد كده بوقت (مش وقت
+    // الرندر)، فلازم تقرا القيمة الطازة وقت الاستدعاء الفعلي مش نسخة قديمة
+    // اتقفلت (closure) وقت التسجيل.
+    const latestRef = useRef({ current, onClose, onDiscard });
+    useEffect(() => { latestRef.current = { current, onClose, onDiscard }; });
 
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
 
@@ -85,9 +85,14 @@ export function useUnsavedChangesGuard<T>(current: T, baseline: T, onClose: () =
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [regEpoch]);
 
+    // ⚡ FIX (خروج بلا حفظ بيسيب المسودة في localStorage — 9 أغسطس 2026):
+    // ده اللحظة الوحيدة اللي المستخدم فيها بيصرّح صراحة "لا، مش عايز
+    // البيانات دي" (دوس تأكيد "اخرج من غير حفظ"). لو مفيش onDiscard هنا
+    // بيتنادى، المسودة كانت بتفضل في localStorage للأبد لحد أول حفظ ناجح،
+    // فترجع تفاجئ المستخدم تاني في أول فورم جديد من نفس النوع.
     const confirmModal = isConfirmOpen
         ? React.createElement(UnsavedChangesConfirmModal, {
-            onConfirm: () => { setIsConfirmOpen(false); latestRef.current.onClose(); },
+            onConfirm: () => { setIsConfirmOpen(false); latestRef.current.onDiscard?.(); latestRef.current.onClose(); },
             onCancel: () => setIsConfirmOpen(false),
         })
         : null;
