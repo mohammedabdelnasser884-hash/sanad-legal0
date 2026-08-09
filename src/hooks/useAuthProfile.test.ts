@@ -15,6 +15,7 @@ let getSessionResult: { data: { session: { user: { id: string; email?: string | 
   data: { session: null },
 };
 let maybeSingleResult: MaybeSingleResult = { data: null, error: null };
+let abortShouldHang = false;
 let authChangeListeners: Array<(event: string, session: { user: { id: string; email?: string | null } } | null) => void> = [];
 const unsubscribeSpy = vi.fn();
 const fromSpy = vi.fn();
@@ -29,7 +30,21 @@ function buildMaybeSingleChain() {
   return {
     eq: vi.fn((col: string, val: unknown) => {
       fromSpy(col, val);
-      return { maybeSingle: vi.fn(() => Promise.resolve(maybeSingleResult)) };
+      // ⚡ NEW (فيكس timeout — 9 أغسطس 2026): loadProfile بقى بيعدي
+      // .abortSignal(...) قبل .maybeSingle() لما أونلاين — لازم السلسلة
+      // المموكة تدعمها. abortSignal بيرجع نفس نتيجة maybeSingleResult
+      // العادية، إلا لو التست ضبطت abortShouldHang=true (تست الـtimeout).
+      return {
+        abortSignal: vi.fn((signal: AbortSignal) => ({
+          maybeSingle: vi.fn(() => new Promise((resolve, reject) => {
+            if (abortShouldHang) {
+              signal.addEventListener('abort', () => reject(new Error('aborted')));
+              return; // متعلّقة عمدًا — التست بتستخدم fake timers لتفعيل الـabort
+            }
+            resolve(maybeSingleResult);
+          })),
+        })),
+      };
     }),
   };
 }
@@ -56,6 +71,7 @@ beforeEach(async () => {
   localStorage.clear();
   getSessionResult = { data: { session: null } };
   maybeSingleResult = { data: null, error: null };
+  abortShouldHang = false;
   authChangeListeners = [];
   getSession.mockClear();
   onAuthStateChange.mockClear();
@@ -146,6 +162,48 @@ describe('useAuthProfile', () => {
     expect(result.current.authLoading).toBe(false);
     expect(result.current.profile).toBeNull();
     onLineSpy.mockRestore();
+  });
+
+  // ══════════════════════════════════════════════════════════════════
+  // ✅ NEW (فيكس "شاشة اللوجو بتفضل ثابتة كتير" — 9 أغسطس 2026):
+  // navigator.onLine=false دلوقتي بيتحقق منه قبل أي نداء شبكة، ونداء
+  // الشبكة نفسه (لو أونلاين) بقى عليه سقف 8 ثواني (AbortController) —
+  // زي useDbConnectivity بالظبط — عشان الشاشة ما تفضلش عالقة لو الاتصال
+  // ضعيف/متقطع من غير ما navigator.onLine يبقى false فعليًا.
+  // ══════════════════════════════════════════════════════════════════
+  it('✅ NEW: navigator.onLine=false من الأساس → مفيش أي نداء شبكة خالص (db.from)، ولو فيه كاش يترجع فورًا', async () => {
+    const onLineSpy = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+    getSessionResult = { data: { session: { user: USER } } };
+    maybeSingleResult = { data: PROFILE, error: null };
+    const first = renderHook(() => useAuthProfile());
+    await waitFor(() => expect(first.result.current.profile).toEqual(PROFILE));
+    first.unmount();
+    from.mockClear();
+
+    onLineSpy.mockReturnValue(false);
+    const { result } = renderHook(() => useAuthProfile());
+    await waitFor(() => expect(result.current.profile).toEqual(PROFILE));
+    expect(from).not.toHaveBeenCalled();
+    onLineSpy.mockRestore();
+  });
+
+  it('✅ NEW: أونلاين لكن النداء متعلّق (اتصال ضعيف) → بيتقفل بعد 8 ثواني بدل ما يفضل عالق للأبد، ويرجع للكاش لو موجود', async () => {
+    vi.useFakeTimers();
+    const onLineSpy = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+    getSessionResult = { data: { session: { user: USER } } };
+    maybeSingleResult = { data: PROFILE, error: null };
+    const first = renderHook(() => useAuthProfile());
+    await waitFor(() => expect(first.result.current.profile).toEqual(PROFILE));
+    first.unmount();
+
+    abortShouldHang = true;
+    const { result } = renderHook(() => useAuthProfile());
+    await act(async () => { await vi.advanceTimersByTimeAsync(8000); });
+    await waitFor(() => expect(result.current.authLoading).toBe(false));
+    expect(result.current.profile).toEqual(PROFILE);
+    expect(recordError).not.toHaveBeenCalled();
+    onLineSpy.mockRestore();
+    vi.useRealTimers();
   });
 
   it('onAuthStateChange: session جديدة بمستخدم → بتنادي loadProfile وبتحدّث profile', async () => {
