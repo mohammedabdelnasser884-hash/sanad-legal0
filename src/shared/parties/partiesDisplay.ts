@@ -41,6 +41,17 @@ function buildSideLabel(names: string[]): string | null {
     return `${names[0]} وآخرون`;
 }
 
+// ⚡ NEW (كارت القضية بيعرض كل أسماء الأطراف — 8 أغسطس 2026): نسخة
+// "كاملة" من buildSideLabel فوق — بتسرد كل الأسماء (مش الأول بس + "وآخرون")،
+// مفصولة بفاصلة عربية. مُستخدمة في كارت القضية بالليستة (CasesTab.tsx)
+// اللي عايز يعرض كل الخصوم فعليًا برّه (من غير فتح القضية)، مع الاعتماد
+// على truncate/ellipsis في الـCSS لو النص طويل عن عرض الكارت — نفس ارتفاع
+// الكارت بالظبط (سطر واحد)، بس بمساحة نص أكبر بدل الاختصار الفوري.
+function buildFullSideLabel(names: string[]): string | null {
+    if (names.length === 0) return null;
+    return names.join('، ');
+}
+
 /**
  * بيرجع { plaintiff, defendant } — نص واحد جاهز للعرض لكل جهة. كل جهة
  * بتُحسب لوحدها: لو عندها صفوف case_parties فعلية بيتبنى منها نص، وإلا
@@ -73,6 +84,36 @@ export function derivePartiesLine(
     fallback: LegacyPartiesFallback
 ): string | null {
     const { plaintiff, defendant } = derivePartiesDisplay(parties, fallback);
+    if (plaintiff && defendant) return `${plaintiff} ضد ${defendant}`;
+    return plaintiff || defendant || null;
+}
+
+// ⚡ NEW (كارت القضية بيعرض كل أسماء الأطراف — 8 أغسطس 2026): زي
+// derivePartiesDisplay بالظبط، بس بتستخدم buildFullSideLabel (كل الأسماء،
+// مش الأول بس + "وآخرون") لو فيه case_parties فعلية. الفولباك (مفيش
+// case_parties خالص) زي ما هو بالظبط — مفيش أكتر من اسم مفرد أصلاً في
+// الحالة دي فمفيش فرق.
+export function deriveFullPartiesDisplay(
+    parties: PartyDisplayRow[] | null | undefined,
+    fallback: LegacyPartiesFallback
+): PartiesDisplayResult {
+    const rows = (parties || []).filter((p) => !!p.name);
+    const plaintiffNames = rows.filter((p) => p.side === 'plaintiff').map((p) => p.name as string);
+    const defendantNames = rows.filter((p) => p.side === 'defendant').map((p) => p.name as string);
+
+    const plaintiff = buildFullSideLabel(plaintiffNames) ?? (effectiveLegalTitleForDisplay(fallback.plaintiffLegalTitle) || fallback.plaintiff || null);
+    const defendant = buildFullSideLabel(defendantNames) ?? (effectiveLegalTitleForDisplay(fallback.defendantLegalTitle) || fallback.defendant || null);
+
+    return { plaintiff, defendant };
+}
+
+/** زي derivePartiesLine بالظبط، بس بأسماء كاملة (شوف deriveFullPartiesDisplay
+ * فوق) — لكارت القضية بالليستة (CasesTab.tsx). */
+export function deriveFullPartiesLine(
+    parties: PartyDisplayRow[] | null | undefined,
+    fallback: LegacyPartiesFallback
+): string | null {
+    const { plaintiff, defendant } = deriveFullPartiesDisplay(parties, fallback);
     if (plaintiff && defendant) return `${plaintiff} ضد ${defendant}`;
     return plaintiff || defendant || null;
 }
