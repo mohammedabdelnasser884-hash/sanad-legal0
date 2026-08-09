@@ -8,6 +8,7 @@ import RequiredDocumentsList from './RequiredDocumentsList';
 import NextStepSuggestion from './NextStepSuggestion';
 import CaseSummary from './CaseSummary';
 import ClientMessage from './ClientMessage';
+import { effectiveLegalTitleForDisplay } from '../../shared/parties/partyDisplay';
 import { SectionCard } from '../../shared/ui/TaskResultKit';
 import type { AIMessage, AITopic, LegalArticle, GroqModel, DocTemplateConfig } from './hooks/aiAssistantTypes';
 import type { ClientRow, ProfileRow } from '../../types';
@@ -91,9 +92,13 @@ function AILegalAssistant({onClose, cases, clients, profile, country}: AILegalAs
         // ⚡ NEW (24 يوليو، خطة سد فجوات عرض الأطراف — مرحلة 3-أ): لو الطرف
         // فيه أكتر من شخص ومكتوب له مسمى قانوني، يُستخدم بدل الاسم المفرد
         // في تعبئة حقول توليد المستند. الحالة الغالبة (فاضي) صفر تغيير.
-        sf('plaintiff', c.plaintiff_legal_title || c.plaintiff || '');
+        // ⚡ FIX (توحيد المسمى القانوني الجامع — 8 أغسطس 2026): لو المسمى
+        // صفة عامة بس (زي "متهمين")، effectiveLegalTitleForDisplay بترجع
+        // '' فنرجع للاسم المفرد — عشان مايتحطش "متهمين" كاسم طرف فعلي جوه
+        // مستند قانوني متولّد. "ورثة فلان" (مسمى مميّز) بيفضل يُستخدم زي الأول.
+        sf('plaintiff', effectiveLegalTitleForDisplay(c.plaintiff_legal_title) || c.plaintiff || '');
         sf('plaintiffRole', c.plaintiff_role || '');
-        sf('defendant', c.defendant_legal_title || c.defendant || '');
+        sf('defendant', effectiveLegalTitleForDisplay(c.defendant_legal_title) || c.defendant || '');
         sf('defendantRole', c.defendant_role || '');
     };
 
