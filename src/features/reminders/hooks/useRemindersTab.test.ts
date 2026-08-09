@@ -224,6 +224,84 @@ describe('useRemindersTab', () => {
     });
   });
 
+  // ══════════════════════════════════════════════════════════════════
+  // ✅ NEW (فيكس "البانر الأحمر بيرجع يظهر" — 9 أغسطس 2026):
+  // fetchOverdue/fetchDone كانوا بيسجّلوا recordError('db_reminders', ...)
+  // في كل مرة يحصل فيها خطأ، حتى لو fetchUpcoming نجح offline من الكاش —
+  // فبيرجع يعلّم مفتاح db_reminders كـ"فاشل" ويظهر البانر الأحمر تاني فورًا.
+  // الفيكس: نفس فكرة كاش fetchUpcoming، بس لصفحة 0 (أول تحميل) بس.
+  // ══════════════════════════════════════════════════════════════════
+  describe('✅ NEW: كاش أوف لاين للمتأخرة/المنجزة (fetchOverdue/fetchDone)', () => {
+    it('فشل جلب المتأخرة ومفيش نسخة محفوظة → recordError بمفتاح db_reminders، وقائمة فاضية', async () => {
+      mockDb.setResult('reminders:overdue', { data: null, error: { message: 'fetch failed' } });
+      const { result } = await renderReady();
+
+      expect(recordError).toHaveBeenCalledWith('db_reminders', 'fetch failed');
+      expect(result.current.pillSections.find((s) => s.key === 'overdue')!.data).toEqual([]);
+    });
+
+    it('نجاح جلب المتأخرة صفحة 0 → recordSuccess بمفتاح db_reminders والنسخة بتتخزن في الكاش', async () => {
+      mockDb.setResult('reminders:overdue', { data: [makeReminder({ id: 'over-cached' })], error: null, count: 1 });
+      await renderReady();
+
+      expect(recordSuccess).toHaveBeenCalledWith('db_reminders');
+    });
+
+    it('فشل جلب المتأخرة أوف لاين لكن فيه نسخة محفوظة من قبل لنفس المكتب → بيرجع النسخة المحفوظة بهدوء، من غير recordError', async () => {
+      mockDb.setResult('reminders:overdue', { data: [makeReminder({ id: 'over-cached' })], error: null, count: 1 });
+      const first = await renderReady();
+      expect(first.result.current.pillSections.find((s) => s.key === 'overdue')!.data).toEqual([expect.objectContaining({ id: 'over-cached' })]);
+      first.unmount();
+      vi.clearAllMocks();
+
+      mockDb.setResult('reminders:overdue', { data: null, error: { message: 'network error' } });
+      const { result } = await renderReady();
+
+      expect(result.current.pillSections.find((s) => s.key === 'overdue')!.data).toEqual([expect.objectContaining({ id: 'over-cached' })]);
+      expect(recordError).not.toHaveBeenCalledWith('db_reminders', expect.anything());
+    });
+
+    it('فشل جلب المنجزة أوف لاين لكن فيه نسخة محفوظة من قبل → بيرجع النسخة المحفوظة بهدوء، من غير recordError', async () => {
+      mockDb.setResult('reminders:done', { data: [makeReminder({ id: 'done-cached', done: true })], error: null, count: 1 });
+      const first = await renderReady();
+      expect(first.result.current.pillSections.find((s) => s.key === 'done')!.data).toEqual([expect.objectContaining({ id: 'done-cached' })]);
+      first.unmount();
+      vi.clearAllMocks();
+
+      mockDb.setResult('reminders:done', { data: null, error: { message: 'network error' } });
+      const { result } = await renderReady();
+
+      expect(result.current.pillSections.find((s) => s.key === 'done')!.data).toEqual([expect.objectContaining({ id: 'done-cached' })]);
+      expect(recordError).not.toHaveBeenCalledWith('db_reminders', expect.anything());
+    });
+
+    it('نسخة كاش المتأخرة مربوطة بـtenant_id — مكتب تاني ميشوفش كاش مكتب غيره ويسجّل recordError عادي', async () => {
+      mockDb.setResult('reminders:overdue', { data: [makeReminder({ id: 'over-tenant1' })], error: null, count: 1 });
+      const first = await renderReady();
+      first.unmount();
+      vi.clearAllMocks();
+
+      const otherTenantProfile = { ...profile, tenant_id: 'tenant-2' } as ProfileRow;
+      mockDb.setResult('reminders:overdue', { data: null, error: { message: 'network error' } });
+      const { result } = await renderReady(undefined, otherTenantProfile);
+
+      expect(result.current.pillSections.find((s) => s.key === 'overdue')!.data).toEqual([]);
+      expect(recordError).toHaveBeenCalledWith('db_reminders', 'network error');
+    });
+
+    it('فشل loadMore (صفحة تانية غير صفحة 0) → recordError عادي، من غير رجوع للكاش (الكاش لصفحة 0 بس)', async () => {
+      mockDb.setResult('reminders:overdue', { data: [makeReminder({ id: 'over-page0' })], error: null, count: 30 });
+      const { result } = await renderReady();
+
+      mockDb.setResult('reminders:overdue', { data: null, error: { message: 'page 2 failed' } });
+      await act(async () => { result.current.pillSections.find((s) => s.key === 'overdue')!.loadMore!(); });
+
+      expect(recordError).toHaveBeenCalledWith('db_reminders', 'page 2 failed');
+      // القائمة تفضل كما هي (صفحة 0 بس)، من غير ما تتمسح أو تتبدّل بكاش
+      expect(result.current.pillSections.find((s) => s.key === 'overdue')!.data.map((r) => r.id)).toEqual(['over-page0']);
+    });
+  });
+
   describe('handleSave', () => {
     it('عنوان أو تاريخ فاضي → توست تحذير، من غير أي __dbWrite', async () => {
       const { result } = await renderReady();
