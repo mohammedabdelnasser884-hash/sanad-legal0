@@ -267,7 +267,20 @@ function AppModals({
         }),
         showNewSessionModal && React.createElement(NewStandaloneSessionModal, {
             onClose: () => setShowNewSessionModal(false),
-            onSaved: () => { fetchTodaySessions(); fetchUpcomingSessions(); fetchCases(0, casesFilter); onStandaloneSessionSaved(); },
+            // ⚡ FIX (تحليل لوجز E2E — 9 أغسطس 2026): لما الحفظ بيحصل أوفلاين
+            // (queued)، مفيش حاجة اتغيرت فعليًا على السيرفر — الريفريش
+            // (fetchTodaySessions/fetchUpcomingSessions/fetchCases) هيفشل
+            // برضو وهيرجع لنسخة الكاش، وكل واحدة من الدوال دي بتعرض توست
+            // "أنت أوف لاين — بتشوف آخر نسخة محفوظة من..." الخاص بيها —
+            // اللي بيكتب فوق توست "📥 الجلسة المستقلة محفوظة محلياً"
+            // (نفس عنصر #toast، آخر نداء بيكسب) خلال أجزاء من الثانية،
+            // فالمستخدم (والتست) عمره ما بيشوف توست التأكيد الصحيح.
+            // onStandaloneSessionSaved() (تحديث محلي/إشارة ريفريش للكالندر)
+            // لسه بيتنفذ عادي في الحالتين.
+            onSaved: (skipRefetch?: boolean) => {
+                if (!skipRefetch) { fetchTodaySessions(); fetchUpcomingSessions(); fetchCases(0, casesFilter); }
+                onStandaloneSessionSaved();
+            },
             onClientAdded: () => { fetchClients(0, clientSearch); },
             onNotify: sendTelegram,
             onOpenCreateClient: handleOpenCreateClientForSession,
