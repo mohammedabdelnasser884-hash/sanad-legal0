@@ -12,6 +12,10 @@ import type { ProfileRow } from '../types';
 //  ⚠️ أخطر جزء في المشروع كله (auth) — صفر تغيير في المنطق أو
 //  الترتيب، نفس الكود بالظبط بس جوه hook منفصل.
 // ─────────────────────────────────────────────────────────
+// مفتاح تخزين آخر بروفايل نجح تحميله — نفس المستخدم بس (بيتفحص عن طريق
+// userId المخزّن جنبه) — مستخدم كـfallback لما نداء الشبكة يفشل أوف لاين.
+const PROFILE_CACHE_KEY = 'sanad_cached_profile_v1';
+
 export function useAuthProfile() {
     const [profile,    setProfile]    = useState<ProfileRow | null>(null);
     const [authUser,   setAuthUser]   = useState<{ id: string; email?: string | null } | null>(null);
@@ -26,20 +30,64 @@ export function useAuthProfile() {
     // أدخل" من غير سبب واضح). استخدمنا .maybeSingle() (مبترميش error لو
     // الصف مش موجود) وبنعرض toast واضح لو حصل أي error فعلي (زي تكرار
     // بيانات أو رفض RLS).
+    //
+    // ⚡ FIX (باگ "عالق على الشعار أوف لاين للأبد" — 9 أغسطس 2026): كان
+    // فيه مسار واحد بس بيقفل authLoading (profile!==null useEffect تحت)
+    // — فلو نداء الشبكة فشل (أوف لاين تمامًا، أو حتى خطأ RLS/شبكة عادي
+    // أونلاين) authLoading كان فاضل true للأبد وشاشة الشعار (AppLoadingScreen)
+    // ما كانتش بتقفل خالص، حتى لو المستخدم عنده سيشن Auth محفوظة محليًا.
+    // الحل جزئين:
+    //   1. try/catch/finally حوالين نداء الشبكة — finally بينادي
+    //      setAuthLoading(false) دايمًا (نجاح أو فشل)، فمفيش مسار بيسيب
+    //      المستخدم عالق تاني.
+    //   2. تخزين آخر بروفايل نجح تحميله في localStorage، واستخدامه
+    //      كـfallback لو النداء فشل بسبب مفيش نت (offline) — عشان
+    //      المستخدم فعلاً يقدر يدخل التطبيق أوف لاين بدل ما يوقف عند
+    //      شاشة اللوجن/اللوجو، وده اللي بيدي لنظام الأوفلاين قيمة حقيقية.
     const loadProfile = useCallback(async (user: { id: string; email?: string | null } | null) => {
         if (!user) { setProfile(null); setAuthUser(null); return; }
         setAuthUser(user);
-        const { data, error } = await db.from('profiles').select('*').eq('user_id', user.id).maybeSingle();
-        if (error) {
-            recordError('auth_profile_load', error.message, {
-                label: 'تحميل بيانات الحساب',
-                message: 'تعذّر تحميل بيانات حسابك. أعد تحميل الصفحة. لو المشكلة استمرت، تواصل مع الدعم.',
-            });
-            toast('تعذّر تحميل بيانات حسابك. أعد تحميل الصفحة. لو المشكلة استمرت، تواصل مع الدعم.');
-        } else if (!data) {
-            toast('لا يوجد ملف شخصي مرتبط بهذا الحساب — تواصل مع مدير المكتب');
+        try {
+            const { data, error } = await db.from('profiles').select('*').eq('user_id', user.id).maybeSingle();
+            if (error) {
+                recordError('auth_profile_load', error.message, {
+                    label: 'تحميل بيانات الحساب',
+                    message: 'تعذّر تحميل بيانات حسابك. أعد تحميل الصفحة. لو المشكلة استمرت، تواصل مع الدعم.',
+                });
+                toast('تعذّر تحميل بيانات حسابك. أعد تحميل الصفحة. لو المشكلة استمرت، تواصل مع الدعم.');
+                setProfile(null);
+                return;
+            }
+            if (!data) {
+                toast('لا يوجد ملف شخصي مرتبط بهذا الحساب — تواصل مع مدير المكتب');
+                setProfile(null);
+                return;
+            }
+            setProfile(data);
+            try { localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify({ userId: user.id, profile: data })); } catch { /* localStorage غير متاح — تجاهل */ }
+        } catch (err) {
+            // نداء الشبكة نفسه فشل (أغلب الوقت: أوف لاين تمامًا) — نجرّب
+            // نرجع لآخر بروفايل محفوظ لنفس المستخدم بدل ما نوقف المستخدم
+            // بره التطبيق خالص.
+            let cached: { userId: string; profile: ProfileRow } | null = null;
+            try {
+                const raw = localStorage.getItem(PROFILE_CACHE_KEY);
+                cached = raw ? JSON.parse(raw) : null;
+            } catch { /* تجاهل */ }
+            if (cached && cached.userId === user.id) {
+                setProfile(cached.profile);
+                toast('أنت أوف لاين — بتشتغل على آخر نسخة محفوظة من بياناتك');
+            } else {
+                recordError('auth_profile_load_network', err instanceof Error ? err.message : String(err), {
+                    label: 'تحميل بيانات الحساب',
+                    message: 'تعذّر تحميل بيانات حسابك. تأكد من الاتصال بالإنترنت.',
+                });
+                toast('تعذّر تحميل بيانات حسابك. تأكد من الاتصال بالإنترنت.');
+                setProfile(null);
+            }
+        } finally {
+            setAuthLoading(false);
         }
-        setProfile(data || null);
     }, []);
 
     useEffect(() => {
@@ -62,9 +110,10 @@ export function useAuthProfile() {
         setCurrentTenantId(profile?.tenant_id ?? null);
     }, [profile]);
 
-    useEffect(() => {
-        if (profile !== null) setAuthLoading(false);
-    }, [profile]);
+    // ⚡ ملحوظة: authLoading دلوقتي بيتقفل من جوه loadProfile نفسها
+    // (finally block فوق) — مش محتاجين نعتمد على تغيّر profile هنا زي
+    // الأول، لأن ده بالظبط كان سبب باگ "عالق على الشعار للأبد" لو
+    // profile فضل null بعد فشل التحميل.
 
     return { profile, setProfile, authUser, setAuthUser, authLoading, loadProfile };
 }
