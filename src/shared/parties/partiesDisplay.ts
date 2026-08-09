@@ -1,169 +1,119 @@
 // ══════════════════════════════════════════════════════════════
-//  partyDisplay.ts — منطق عرض موحّد لملخص "طرف" (مدعي/مدعى عليه) من
-//  قائمة أشخاصه + مسماه القانوني (لو موجود) — نفس التنسيق المستخدم في
-//  PartySideCard.tsx (فورم الإدخال)، بس هنا للعرض القرائي بس (بدون أي
-//  حالة تفاعلية/أخطاء فاليديشن).
+//  partiesDisplay — طبقة العرض القرائي (خطة تفكيك الأعمدة القديمة،
+//  المرحلة B.1، 6 أغسطس 2026).
 //
-//  ⚠️ الهدف من وجود الملف ده: بند 5 من خطة "تطوير أطراف الدعوى" (نقاط
-//  العرض التفصيلية) بيشترط عدم تكرار منطق عرض منفصل في كل مكان (InfoSection،
-//  الهيدر العلوي، شاشات الجلسة المستقلة) تفاديًا لتعارض الصيغة بين موضع
-//  وتاني لاحقًا. أي موضع عرض جديد للمسمى القانوني/ملخص طرف لازم يستخدم
-//  الدالة دي بدل ما يبني تنسيقه الخاص.
-//
-//  خطة "تطوير أطراف الدعوى" — مرحلة 5 (24 يوليو 2026).
+//  دالة واحدة تبني نص "المدعي ضد المدعى عليه" لعرض مختصر (كارت الجلسة/
+//  التقويم/الداشبورد) من صفوف case_parties الفعلية بدل قراءة عمودي
+//  plaintiff/defendant القديمين مباشرة — نفس فكرة buildPartyLines في
+//  supabase/functions/session-alerts/index.ts (رسالة تيليجرام الكاملة)
+//  لكن لعرض واجهة سطر واحد مختصر. لو مفيش صفوف case_parties خالص (قضية/
+//  جلسة قديمة قبل مرحلة تعدد الأطراف)، بترجع للأعمدة القديمة تلقائيًا —
+//  صفر تغيير سلوك لأي بيانات قديمة.
 // ══════════════════════════════════════════════════════════════
 
-export interface PartyPersonLike {
+import { effectiveLegalTitleForDisplay } from './partyDisplay';
+
+export interface PartyDisplayRow {
+    side: string | null;
     name: string | null;
     capacity?: string | null;
+    client_id?: string | null;
 }
 
-export interface PartySideSummary {
-    // اسم أول شخص مسمّى في الجهة (تجاهل أي صف اسمه فاضي)
-    primaryName: string;
-    // صفته (لو موجودة) — بتتعرض بس لو مفيش أكتر من شخص (شوف formatPartySideLine)
-    primaryCapacity: string;
-    // عدد باقي الأشخاص المسمّيين تحت نفس الجهة (0 لطرف شخص واحد)
-    othersCount: number;
+export interface LegacyPartiesFallback {
+    plaintiff?: string | null;
+    defendant?: string | null;
+    plaintiffLegalTitle?: string | null;
+    defendantLegalTitle?: string | null;
 }
 
-// بيرجع null لو مفيش أي شخص مسمّى خالص في الجهة دي (فاضية بالكامل).
-export function summarizePartySide(persons: PartyPersonLike[]): PartySideSummary | null {
-    const named = persons.filter((p) => p.name && p.name.trim());
-    if (named.length === 0) return null;
-    return {
-        primaryName: named[0].name!.trim(),
-        primaryCapacity: (named[0].capacity || '').trim(),
-        othersCount: named.length - 1,
-    };
+export interface PartiesDisplayResult {
+    plaintiff: string | null;
+    defendant: string | null;
 }
 
-// بيبني نص قائمة كاملة (مش ملخص) بكل أشخاص الجهة مسمّاة بالاسم والصفة —
-// لاستخدامات محتاجة كل شخص بالاسم صراحةً (توليد مستندات قانونية بالـAI،
-// عرض تفصيلي)، عكس formatPartySideLine اللي بيختصر لعرض مضغوط.
-// بيرجع null لو مفيش أي شخص مسمّى خالص في الجهة دي.
-//   - طرف شخص واحد: "الاسم (الصفة)" أو "الاسم" لو مفيش صفة — نفس شكل
-//     العرض المفرد القديم بالحرف.
-//   - طرف متعدد الأشخاص: كل شخص على سطر مرقّم "١. الاسم (الصفة)".
-// خطة "سد فجوات عرض الأطراف" — مرحلة 3-ب (24 يوليو 2026).
-export function buildFullPartiesText(persons: PartyPersonLike[]): string | null {
-    const named = persons.filter((p) => p.name && p.name.trim());
-    if (named.length === 0) return null;
-    if (named.length === 1) {
-        const p = named[0];
-        const cap = (p.capacity || '').trim();
-        return cap ? `${p.name!.trim()} (${cap})` : p.name!.trim();
-    }
-    return named
-        .map((p, i) => {
-            const cap = (p.capacity || '').trim();
-            const name = p.name!.trim();
-            return `${i + 1}. ${cap ? `${name} (${cap})` : name}`;
-        })
-        .join('\n');
+// طرف واحد → اسمه زي ما هو. أكتر من طرف على نفس الجهة → "الاسم الأول وآخرون"
+// (نفس المبدأ المختصر المستخدم في نصوص الواجهة التانية، بدون تعداد الكل
+// عشان السطر يفضل قابل للعرض في كارت صغير).
+function buildSideLabel(names: string[]): string | null {
+    if (names.length === 0) return null;
+    if (names.length === 1) return names[0];
+    return `${names[0]} وآخرون`;
 }
 
-// ⚡ NEW (توحيد المسمى القانوني الجامع — 8 أغسطس 2026): المسمى القانوني
-// الجامع (plaintiff_legal_title/defendant_legal_title) بيُستخدم لغرضين
-// مختلفين فعليًا:
-//   1. صفة إجرائية عامة بس (زي "متهمين"، "مدعيين") — بترجّع نفس المعنى
-//      اللي هيكون موجود أصلاً في السياق (الطرف ده مدعي أو مدعى عليه)،
-//      فعرضها بدل الاسم في تركيب "فلان ضد فلان" بيطلع نتيجة شاذة زي
-//      "متهمين ضد شركة كذا" (صفة مش اسم بيتقابل بيه طرف تاني).
-//   2. مسمى مميّز فعلي (زي "ورثة المرحوم أحمد علي") — ده صح يحل محل الاسم
-//      في نفس التركيب، لأنه فعلًا بيعرّف الطرف.
-// isGenericPartyCapacityLabel بتفرّق بين الحالتين بتطابق كامل (مش جزئي)
-// مع قايمة الصفات الإجرائية المعروفة. أي نص فيه كلام زيادة (زي "ورثة
-// فلان") مش هيتطابق تمامًا، فيتعامل معه كمسمى مميّز زي ما هو دايمًا.
-// القايمة قابلة للتوسيع بسهولة لو ظهرت صفة جديدة مستقبلًا. بتغطي كل
-// الصيغ الشائعة لكل صفة: مفرد مذكر/مؤنث + جمع مذكر/مؤنث، بالـ"ال" وبدونها
-// (إملاء الياء/الألف المقصورة والتاء المربوطة/الهاء بيتوحّدوا تلقائيًا في
-// normalizeArabicSpelling تحت، فمش محتاجين نكرر كل صيغة إملائية هنا).
-const GENERIC_PARTY_CAPACITY_LABELS = new Set([
-    // مدعي (مذكر مفرد/جمع + مؤنث مفرد/جمع)
-    'مدعي', 'المدعي', 'مدعية', 'المدعية',
-    'مدعين', 'المدعين', 'مدعيين', 'المدعيين', 'مدعيات', 'المدعيات',
-    // مدعى عليه (مذكر مفرد + مؤنث مفرد + جمع مذكر/مختلط + جمع مؤنث)
-    'مدعى عليه', 'المدعى عليه', 'مدعى عليها', 'المدعى عليها',
-    'مدعى عليهم', 'المدعى عليهم', 'مدعى عليهن', 'المدعى عليهن',
-    // متهم
-    'متهم', 'المتهم', 'متهمة', 'المتهمة', 'متهمين', 'المتهمين', 'متهمات', 'المتهمات',
-    // مستأنف
-    'مستأنف', 'المستأنف', 'مستأنفة', 'المستأنفة',
-    'مستأنفين', 'المستأنفين', 'مستأنفات', 'المستأنفات',
-    // مطعون ضده
-    'مطعون ضده', 'المطعون ضده', 'مطعون ضدها', 'المطعون ضدها',
-    'مطعون ضدهم', 'المطعون ضدهم', 'مطعون ضدهن', 'المطعون ضدهن',
-    // طاعن
-    'طاعن', 'الطاعن', 'طاعنة', 'الطاعنة', 'طاعنين', 'الطاعنين', 'طاعنات', 'الطاعنات',
-    // خصم (مفرد وجمع؛ مفيش صيغة مؤنث/جمع مؤنث شائعة قانونيًا)
-    'خصم', 'الخصم', 'خصوم', 'الخصوم',
-    // مجني عليه
-    'مجني عليه', 'المجني عليه', 'مجني عليها', 'المجني عليها',
-    'مجني عليهم', 'المجني عليهم', 'مجني عليهن', 'المجني عليهن',
-    // محكوم عليه
-    'محكوم عليه', 'المحكوم عليه', 'محكوم عليها', 'المحكوم عليها',
-    'محكوم عليهم', 'المحكوم عليهم', 'محكوم عليهن', 'المحكوم عليهن',
-    // طالب
-    'طالب', 'الطالب', 'طالبة', 'الطالبة', 'طالبين', 'الطالبين', 'طالبات', 'الطالبات',
-    // مطلوب ضده
-    'مطلوب ضده', 'المطلوب ضده', 'مطلوب ضدها', 'المطلوب ضدها',
-    'مطلوب ضدهم', 'المطلوب ضدهم', 'مطلوب ضدهن', 'المطلوب ضدهن',
-    // منفذ ضده
-    'منفذ ضده', 'المنفذ ضده', 'منفذ ضدها', 'المنفذ ضدها',
-    'منفذ ضدهم', 'المنفذ ضدهم', 'منفذ ضدهن', 'المنفذ ضدهن',
-    // ⚠️ قرار صريح (8 أغسطس 2026): "ورثة"/"الورثة" لوحدها (من غير اسم
-    // بعدها) بتتعامل كصفة عامة برضو — "ورثة المرحوم فلان" (فيها اسم)
-    // مش هتتطابق تمامًا مع القايمة دي، فتفضل مسمى مميّز زي ما هي.
-    'ورثة', 'الورثة', 'وارث', 'الوارث', 'وارثة', 'الوارثة', 'وارثات', 'الوارثات',
-]);
-
-// ⚡ FIX (تطبيع الإملاء الشائع — 9 أغسطس 2026): مطابقة `GENERIC_PARTY_
-// CAPACITY_LABELS` كانت حرفية 100%، فأي اختلاف إملائي شائع (زي "مدعي
-// عليهم" بالياء العادية بدل "مدعى عليهم" بالألف المقصورة، أو "ورثه"
-// بالهاء بدل "ورثة" بالتاء المربوطة) كان بيفوّت المطابقة ويتعامل معاها
-// كمسمى مميّز حقيقي بالغلط. الحل: نوحّد الحرفين الشائع تبديلهم (ى↔ي
-// نهاية الكلمة، ة↔ه نهاية الكلمة) قبل أي مقارنة — في القايمة وفي
-// المدخل، فأي إملاء منطقي بيطابق صح.
-function normalizeArabicSpelling(text: string): string {
-    return text.replace(/ى/g, 'ي').replace(/ة/g, 'ه');
+// ⚡ NEW (كارت القضية بيعرض كل أسماء الأطراف — 8 أغسطس 2026): نسخة
+// "كاملة" من buildSideLabel فوق — بتسرد كل الأسماء (مش الأول بس + "وآخرون")،
+// مفصولة بفاصلة عربية. مُستخدمة في كارت القضية بالليستة (CasesTab.tsx)
+// اللي عايز يعرض كل الخصوم فعليًا برّه (من غير فتح القضية)، مع الاعتماد
+// على truncate/ellipsis في الـCSS لو النص طويل عن عرض الكارت — نفس ارتفاع
+// الكارت بالظبط (سطر واحد)، بس بمساحة نص أكبر بدل الاختصار الفوري.
+function buildFullSideLabel(names: string[]): string | null {
+    if (names.length === 0) return null;
+    return names.join('، ');
 }
 
-const NORMALIZED_GENERIC_LABELS = new Set(
-    Array.from(GENERIC_PARTY_CAPACITY_LABELS, (label) => normalizeArabicSpelling(label))
-);
+/**
+ * بيرجع { plaintiff, defendant } — نص واحد جاهز للعرض لكل جهة. كل جهة
+ * بتُحسب لوحدها: لو عندها صفوف case_parties فعلية بيتبنى منها نص، وإلا
+ * بترجع لنفس الجهة من legacy (المسمى القانوني أولاً، بعدين الاسم المفرد).
+ */
+export function derivePartiesDisplay(
+    parties: PartyDisplayRow[] | null | undefined,
+    fallback: LegacyPartiesFallback
+): PartiesDisplayResult {
+    const rows = (parties || []).filter((p) => !!p.name);
+    const plaintiffNames = rows.filter((p) => p.side === 'plaintiff').map((p) => p.name as string);
+    const defendantNames = rows.filter((p) => p.side === 'defendant').map((p) => p.name as string);
 
-export function isGenericPartyCapacityLabel(title: string | null | undefined): boolean {
-    const trimmed = (title || '').trim();
-    if (!trimmed) return false;
-    return NORMALIZED_GENERIC_LABELS.has(normalizeArabicSpelling(trimmed));
+    // ⚡ FIX (توحيد المسمى القانوني الجامع — 8 أغسطس 2026): بيتفعّل بس لو
+    // مفيش case_parties خالص (buildSideLabel رجعت null) — لو موجودة، الاسم
+    // الحقيقي (buildSideLabel) بياخد الأولوية دايمًا وده مش بيتأثر بالمشكلة.
+    // effectiveLegalTitleForDisplay بترجع '' لصفة عامة بس (زي "متهمين")
+    // عشان مايحلّش محل fallback.plaintiff فجأة بلا داعي.
+    const plaintiff = buildSideLabel(plaintiffNames) ?? (effectiveLegalTitleForDisplay(fallback.plaintiffLegalTitle) || fallback.plaintiff || null);
+    const defendant = buildSideLabel(defendantNames) ?? (effectiveLegalTitleForDisplay(fallback.defendantLegalTitle) || fallback.defendant || null);
+
+    return { plaintiff, defendant };
 }
 
-// المسمى القانوني الفعّال للعرض بدل الاسم — بيرجع '' (يعني "استخدم
-// الاسم الحقيقي بدل المسمى") لو النص فاضي أو صفة عامة بس (شوف
-// isGenericPartyCapacityLabel فوق)، وإلا بيرجع النص زي ما هو.
-export function effectiveLegalTitleForDisplay(title: string | null | undefined): string {
-    const trimmed = (title || '').trim();
-    if (!trimmed || isGenericPartyCapacityLabel(trimmed)) return '';
-    return trimmed;
+/** اختصار: نص سطر واحد جاهز مباشرة ("فلان ضد علان") لأماكن العرض المختصرة
+ * (فولباك عنوان الكارت في MissedTab/UpcomingWidget/UpcomingSessionsList).
+ * null لو مفيش أي طرف خالص (لا case_parties ولا legacy). */
+export function derivePartiesLine(
+    parties: PartyDisplayRow[] | null | undefined,
+    fallback: LegacyPartiesFallback
+): string | null {
+    const { plaintiff, defendant } = derivePartiesDisplay(parties, fallback);
+    if (plaintiff && defendant) return `${plaintiff} ضد ${defendant}`;
+    return plaintiff || defendant || null;
 }
 
-// بيبني نص سطر واحد جاهز للعرض المختصر (بطاقة/هيدر) من ملخص الجهة + مسماها
-// القانوني (لو موجود ومتعدد الأشخاص):
-//   - طرف شخص واحد (الحالة الغالبة): "الاسم" — بلا أي تغيير عن الشكل القديم.
-//   - طرف متعدد الأشخاص وله مسمى قانوني: "المسمى القانوني (+٢ آخرين)".
-//   - طرف متعدد الأشخاص بلا مسمى قانوني بعد (حالة انتقالية نادرة، الفاليديشن
-//     بتمنعها عند الحفظ لكن ممكن تظهر في بيانات قديمة قبل تفعيل القاعدة):
-//     نفس فولباك PartySideCard — اسم أول شخص + "+N آخرين".
-export function formatPartySideLine(persons: PartyPersonLike[], legalTitle?: string | null): string | null {
-    const summary = summarizePartySide(persons);
-    if (!summary) return null;
-    if (summary.othersCount === 0) {
-        return summary.primaryCapacity ? `${summary.primaryName} (${summary.primaryCapacity})` : summary.primaryName;
-    }
-    const trimmedTitle = effectiveLegalTitleForDisplay(legalTitle);
-    const suffix = `+${summary.othersCount} ${summary.othersCount === 1 ? 'آخر' : 'آخرين'}`;
-    if (trimmedTitle) return `${trimmedTitle} (${suffix})`;
-    const fallbackName = summary.primaryCapacity ? `${summary.primaryName} (${summary.primaryCapacity})` : summary.primaryName;
-    return `${fallbackName} ${suffix}`;
+// ⚡ NEW (كارت القضية بيعرض كل أسماء الأطراف — 8 أغسطس 2026): زي
+// derivePartiesDisplay بالظبط، بس بتستخدم buildFullSideLabel (كل الأسماء،
+// مش الأول بس + "وآخرون") لو فيه case_parties فعلية. الفولباك (مفيش
+// case_parties خالص) زي ما هو بالظبط — مفيش أكتر من اسم مفرد أصلاً في
+// الحالة دي فمفيش فرق.
+export function deriveFullPartiesDisplay(
+    parties: PartyDisplayRow[] | null | undefined,
+    fallback: LegacyPartiesFallback
+): PartiesDisplayResult {
+    const rows = (parties || []).filter((p) => !!p.name);
+    const plaintiffNames = rows.filter((p) => p.side === 'plaintiff').map((p) => p.name as string);
+    const defendantNames = rows.filter((p) => p.side === 'defendant').map((p) => p.name as string);
+
+    const plaintiff = buildFullSideLabel(plaintiffNames) ?? (effectiveLegalTitleForDisplay(fallback.plaintiffLegalTitle) || fallback.plaintiff || null);
+    const defendant = buildFullSideLabel(defendantNames) ?? (effectiveLegalTitleForDisplay(fallback.defendantLegalTitle) || fallback.defendant || null);
+
+    return { plaintiff, defendant };
+}
+
+/** زي derivePartiesLine بالظبط، بس بأسماء كاملة (شوف deriveFullPartiesDisplay
+ * فوق) — لكارت القضية بالليستة (CasesTab.tsx). */
+export function deriveFullPartiesLine(
+    parties: PartyDisplayRow[] | null | undefined,
+    fallback: LegacyPartiesFallback
+): string | null {
+    const { plaintiff, defendant } = deriveFullPartiesDisplay(parties, fallback);
+    if (plaintiff && defendant) return `${plaintiff} ضد ${defendant}`;
+    return plaintiff || defendant || null;
 }
