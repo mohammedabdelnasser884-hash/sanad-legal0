@@ -973,14 +973,30 @@ window.__dbWrite = async function <T extends DbWriteTable>({ type, table, data, 
 
 // ══════════════════════════════════════════════════════════
 //  إشعارات حالة الشبكة (أونلاين/أوفلاين) — بانر + مؤشر مزامنة
+//  🐛 FIX (البانر البرتقالي بيفضل ثابت حتى بعد رجوع النت — 9 أغسطس
+//  2026): المستمعين على 'network-offline'/'network-online' تحت
+//  كانوا بيعتمدوا على CustomEvent بنفس الاسمين — بس مفيش أي كود في
+//  المشروع كله كان بيعمل dispatchEvent لهم فعليًا. النتيجة: البانر
+//  كان بيظهر (من showOfflineBanner المستدعاة من IIFE تحت أو من
+//  __dbWrite وقت محاولة كتابة أوفلاين)، بس مفيش أي مسار حقيقي كان
+//  بيقفله (hideOfflineBanner) لما النت يرجع تاني — المستخدم يفضل شايف
+//  البانر البرتقالي "أنت الآن offline" للأبد لحد ما يعمل refresh
+//  للصفحة بنفسه. الفيكس: نربط المستمعين دول بأحداث المتصفح الحقيقية
+//  'online'/'offline' مباشرة (بدل الأحداث المخصصة اللي محدش بيبعتها).
 // ══════════════════════════════════════════════════════════
-window.addEventListener('network-offline', async () => {
+window.addEventListener('offline', async () => {
     const count = await window.__getOfflineQueueCount?.() || 0;
     showOfflineBanner(count);
 });
-window.addEventListener('network-online', () => {
+window.addEventListener('online', async () => {
     hideOfflineBanner();
-    showSyncIndicator('جاري المزامنة...');
+    // 🐛 FIX (جزء من فيكس البانر فوق): showSyncIndicator منعرضهاش إلا لو
+    // فيه فعليًا عمليات معلّقة (count > 0) — لأن __syncOfflineQueue بترجع
+    // فورًا من غير ما تقفل المؤشر لو الطابور فاضي، فكان ممكن مؤشر
+    // "جاري المزامنة..." يفضل ظاهر للأبد في أكتر الحالات (رجوع نت عادي
+    // من غير أي عملية معلّقة أصلاً).
+    const count = await window.__getOfflineQueueCount?.() || 0;
+    if (count > 0) showSyncIndicator('جاري المزامنة...');
 });
 (async () => {
     if (!navigator.onLine) {
