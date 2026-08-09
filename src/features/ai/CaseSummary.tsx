@@ -8,7 +8,7 @@ import {
 import type { MappedCase, MappedClient } from '../../hooks/useAppData';
 import type { LegalArticle, AIMessage } from './hooks/aiAssistantTypes';
 import type { CasePartyRow } from '../cases/hooks/useCaseDetailActions';
-import { buildFullPartiesText } from '../../shared/parties/partyDisplay';
+import { buildFullPartiesText, effectiveLegalTitleForDisplay } from '../../shared/parties/partyDisplay';
 
 // ─────────────────────────────────────────────────────────
 //  CaseSummary — أول بند في المرحلة 3 من خطة المساعد الذكي
@@ -47,10 +47,10 @@ function buildCaseContextText(c: MappedCase, client: MappedClient | null, counts
   const defendantParties = caseParties.filter((p) => p.side === 'defendant');
   const plaintiffLine = plaintiffParties.length >= 2
     ? `الطرف الأول (${plaintiffParties.length} أشخاص):\n${buildFullPartiesText(plaintiffParties)}`
-    : `الطرف الأول: ${c.plaintiff_legal_title || c.plaintiff || '—'}${c.plaintiff_role ? ' (' + c.plaintiff_role + ')' : ''}`;
+    : `الطرف الأول: ${effectiveLegalTitleForDisplay(c.plaintiff_legal_title) || c.plaintiff || '—'}${c.plaintiff_role ? ' (' + c.plaintiff_role + ')' : ''}`;
   const defendantLine = defendantParties.length >= 2
     ? `الطرف الثاني (${defendantParties.length} أشخاص):\n${buildFullPartiesText(defendantParties)}`
-    : `الطرف الثاني: ${c.defendant_legal_title || c.defendant || '—'}${c.defendant_role ? ' (' + c.defendant_role + ')' : ''}`;
+    : `الطرف الثاني: ${effectiveLegalTitleForDisplay(c.defendant_legal_title) || c.defendant || '—'}${c.defendant_role ? ' (' + c.defendant_role + ')' : ''}`;
   const lines = [
     `عنوان القضية: ${c.title || '—'}`,
     `رقم القيد: ${c.number || '—'} / ${c.year || '—'}`,
