@@ -3,6 +3,7 @@ import { toast } from '../../../shared/lib/notifications';
 import { safeUpdate, logActivity } from '../../../shared/lib/dataAccess';
 import { recordError, recordSuccess } from '../../../systemHealth';
 import { db } from '../../../supabaseClient';
+import { normalizeArabicDigits } from '../../../shared/lib/sanitize';
 import type { ReminderRow, ProfileRow } from '../../../types';
 
 export interface ReminderForm {
@@ -269,7 +270,7 @@ export function useRemindersTab(initialFilter?: string | null, profile: ProfileR
     // البحث ماتكسرش صياغة فلتر PostgREST. بندمج النتيجتين ونشيل المكرر بالـ id.
     const latestSearchTermRef = useRef('');
     const searchReminders = useCallback(async (term: string) => {
-        const s = term.trim();
+        const s = normalizeArabicDigits(term.trim());
         if (!s) { setSearchResults([]); return; }
         setSearchLoading(true);
         const [titleRes, notesRes] = await Promise.all([
