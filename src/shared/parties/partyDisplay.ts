@@ -63,6 +63,53 @@ export function buildFullPartiesText(persons: PartyPersonLike[]): string | null 
         .join('\n');
 }
 
+// ⚡ NEW (توحيد المسمى القانوني الجامع — 8 أغسطس 2026): المسمى القانوني
+// الجامع (plaintiff_legal_title/defendant_legal_title) بيُستخدم لغرضين
+// مختلفين فعليًا:
+//   1. صفة إجرائية عامة بس (زي "متهمين"، "مدعيين") — بترجّع نفس المعنى
+//      اللي هيكون موجود أصلاً في السياق (الطرف ده مدعي أو مدعى عليه)،
+//      فعرضها بدل الاسم في تركيب "فلان ضد فلان" بيطلع نتيجة شاذة زي
+//      "متهمين ضد شركة كذا" (صفة مش اسم بيتقابل بيه طرف تاني).
+//   2. مسمى مميّز فعلي (زي "ورثة المرحوم أحمد علي") — ده صح يحل محل الاسم
+//      في نفس التركيب، لأنه فعلًا بيعرّف الطرف.
+// isGenericPartyCapacityLabel بتفرّق بين الحالتين بتطابق كامل (مش جزئي)
+// مع قايمة الصفات الإجرائية المعروفة. أي نص فيه كلام زيادة (زي "ورثة
+// فلان") مش هيتطابق تمامًا، فيتعامل معه كمسمى مميّز زي ما هو دايمًا.
+// القايمة قابلة للتوسيع بسهولة لو ظهرت صفة جديدة مستقبلًا.
+const GENERIC_PARTY_CAPACITY_LABELS = new Set([
+    'مدعي', 'المدعي', 'مدعية', 'المدعية', 'مدعين', 'المدعين', 'مدعيين', 'المدعيين',
+    'مدعى عليه', 'المدعى عليه', 'مدعى عليها', 'المدعى عليها', 'مدعى عليهم', 'المدعى عليهم',
+    'متهم', 'المتهم', 'متهمة', 'المتهمة', 'متهمين', 'المتهمين',
+    'مستأنف', 'المستأنف', 'مستأنفة', 'المستأنفة', 'مستأنفين', 'المستأنفين',
+    'مطعون ضده', 'المطعون ضده', 'مطعون ضدها', 'المطعون ضدها', 'مطعون ضدهم', 'المطعون ضدهم',
+    'طاعن', 'الطاعن', 'طاعنة', 'الطاعنة', 'طاعنين', 'الطاعنين',
+    'خصم', 'الخصم', 'خصوم', 'الخصوم',
+    'مجني عليه', 'المجني عليه', 'مجني عليها', 'المجني عليها', 'مجني عليهم', 'المجني عليهم',
+    'محكوم عليه', 'المحكوم عليه', 'محكوم عليها', 'المحكوم عليها', 'محكوم عليهم', 'المحكوم عليهم',
+    'طالب', 'الطالب', 'طالبين', 'الطالبين',
+    'مطلوب ضده', 'المطلوب ضده', 'مطلوب ضدهم', 'المطلوب ضدهم',
+    'منفذ ضده', 'المنفذ ضده', 'منفذ ضدهم', 'المنفذ ضدهم',
+    // ⚠️ قرار صريح (8 أغسطس 2026): "ورثة"/"الورثة" لوحدها (من غير اسم
+    // بعدها) بتتعامل كصفة عامة برضو — "ورثة المرحوم فلان" (فيها اسم)
+    // مش هتتطابق تمامًا مع القايمة دي، فتفضل مسمى مميّز زي ما هي.
+    'ورثة', 'الورثة', 'وارث', 'الوارث',
+]);
+
+export function isGenericPartyCapacityLabel(title: string | null | undefined): boolean {
+    const trimmed = (title || '').trim();
+    if (!trimmed) return false;
+    return GENERIC_PARTY_CAPACITY_LABELS.has(trimmed);
+}
+
+// المسمى القانوني الفعّال للعرض بدل الاسم — بيرجع '' (يعني "استخدم
+// الاسم الحقيقي بدل المسمى") لو النص فاضي أو صفة عامة بس (شوف
+// isGenericPartyCapacityLabel فوق)، وإلا بيرجع النص زي ما هو.
+export function effectiveLegalTitleForDisplay(title: string | null | undefined): string {
+    const trimmed = (title || '').trim();
+    if (!trimmed || isGenericPartyCapacityLabel(trimmed)) return '';
+    return trimmed;
+}
+
 // بيبني نص سطر واحد جاهز للعرض المختصر (بطاقة/هيدر) من ملخص الجهة + مسماها
 // القانوني (لو موجود ومتعدد الأشخاص):
 //   - طرف شخص واحد (الحالة الغالبة): "الاسم" — بلا أي تغيير عن الشكل القديم.
@@ -76,7 +123,7 @@ export function formatPartySideLine(persons: PartyPersonLike[], legalTitle?: str
     if (summary.othersCount === 0) {
         return summary.primaryCapacity ? `${summary.primaryName} (${summary.primaryCapacity})` : summary.primaryName;
     }
-    const trimmedTitle = (legalTitle || '').trim();
+    const trimmedTitle = effectiveLegalTitleForDisplay(legalTitle);
     const suffix = `+${summary.othersCount} ${summary.othersCount === 1 ? 'آخر' : 'آخرين'}`;
     if (trimmedTitle) return `${trimmedTitle} (${suffix})`;
     const fallbackName = summary.primaryCapacity ? `${summary.primaryName} (${summary.primaryCapacity})` : summary.primaryName;
