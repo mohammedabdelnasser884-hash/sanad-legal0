@@ -143,7 +143,12 @@ describe('useAdminActivity', () => {
     await act(async () => { await result.current.fetchActivity(); });
 
     const calledClause = mockDb.orSpy.mock.calls[0][0] as string;
-    expect(calledClause).toContain('action.ilike."%قضية (١), رقم%"');
+    // 🔢 FIX (تطبيع الأرقام العربية في البحث — 8 أغسطس 2026): ilikeOrClause
+    // بقت بتطبّع الأرقام العربية الشرقية (١) لإنجليزية عادية (1) قبل بناء
+    // الشرط — القيمة المخزّنة فعليًا في الداتابيز دايمًا أرقام إنجليزية.
+    // النص المدخل هنا فيه "١" عمدًا عشان نتأكد إن التطبيع شغال جنب فحص
+    // الفاصلة/القوس الأصلي في نفس الوقت من غير ما يتعارضوا.
+    expect(calledClause).toContain('action.ilike."%قضية (1), رقم%"');
   });
 
   it('فلتر user_id → .eq("user_id", القيمة بعد trim)', async () => {
