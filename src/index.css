@@ -20,7 +20,14 @@
         .slide-up{animation:slideUp .4s ease forwards;}
         @keyframes slideUpFull{from{transform:translateY(100%);}to{transform:translateY(0);}}
         .slide-up-full{animation:slideUpFull .38s cubic-bezier(0.32,0.72,0,1) forwards;}
-        .toast{position:fixed;top:70px;left:50%;transform:translateX(-50%);background:#0d1a2e;border:1px solid #D4AF37;color:#D4AF37;padding:10px 22px;border-radius:12px;font-size:12px;font-weight:700;z-index:9999;opacity:0;transition:opacity .3s;white-space:nowrap;pointer-events:none;}
+        /* ⚡ FIX (توست بيتقطع من اليمين والشمال في الرسائل الطويلة — 9
+           أغسطس 2026): white-space:nowrap كانت بتخلي عرض التوست يتمدد
+           بعرض النص كامل على سطر واحد، وبما إنه متمركز بـleft:50% +
+           translateX(-50%)، أي رسالة أوسع من الشاشة كانت بتتمدد بالتساوي
+           برّه حدود الشاشة يمين وشمال وتتقطع فعليًا هناك. دلوقتي:
+           max-width محدودة + white-space:normal + text-align:center عشان
+           يلف على أكتر من سطر بدل ما يتقطع. */
+        .toast{position:fixed;top:70px;left:50%;transform:translateX(-50%);background:#0d1a2e;border:1px solid #D4AF37;color:#D4AF37;padding:10px 22px;border-radius:12px;font-size:12px;font-weight:700;z-index:9999;opacity:0;transition:opacity .3s;max-width:min(90vw,380px);white-space:normal;text-align:center;line-height:1.5;pointer-events:none;}
         .toast.show{opacity:1;}
         input,select{outline:none;}
         input:focus,select:focus{border-color:#D4AF37!important;}
