@@ -7,7 +7,6 @@ import { createFetchGuard } from '../../../shared/lib/offlineGuard';
 import { exportSessionToGoogleCalendar } from '@/shared/ui/calendarExport';
 import { MONTHS_AR2, DAYS_FULL, toDateStr } from './constants';
 import SessionCard from './SessionCard';
-import UpcomingWidget from './UpcomingWidget';
 import { useSessionsPartiesMap, lookupParties } from '@/shared/parties/useSessionsPartiesMap';
 import type { MappedCase, MappedClient } from '../../../hooks/useAppData';
 import type { SessionCaseEmbed } from '@/shared/hooks/useDashboardFeed';
