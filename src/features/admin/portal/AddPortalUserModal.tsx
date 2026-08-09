@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { I } from '../../../constants';
 import type { ClientRow } from '../../../types';
 import type { PortalAccessRow, PortalSaveForm } from './hooks/useAdminPortal';
+import { normalizeArabicDigits } from '../../../shared/lib/sanitize';
 
 interface AddPortalUserModalProps {
   clients: ClientRow[];
@@ -18,9 +19,13 @@ function AddPortalUserModal({ clients, portalAccess, onSave, onClose, saving }: 
 
   const genPin = () => setPin(String(Math.floor(1000 + Math.random() * 9000)));
 
+  // 🔢 FIX (تطبيع الأرقام العربية في البحث — 8 أغسطس 2026): بحث محلي
+  // بـ.includes() مباشرة (مش عن طريق DB/ilikeOrClause) — لازم نطبّع
+  // الأرقام هنا يدويًا برضو، نفس السبب زي ilikeOrClause بالظبط.
+  const normalizedSearch = normalizeArabicDigits(search);
   const filtered = clients.filter((c) =>
-    c.full_name?.toLowerCase().includes(search.toLowerCase()) ||
-    c.phone?.includes(search)
+    c.full_name?.toLowerCase().includes(normalizedSearch.toLowerCase()) ||
+    c.phone?.includes(normalizedSearch)
   );
 
   const hasAccess = (clientId: string) => portalAccess.some((p) => p.client_id === clientId && p.is_active !== false);
