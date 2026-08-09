@@ -5,22 +5,16 @@ import { showErrorToast } from '../../../shared/lib/errorReporting';
 import { I } from '../../../constants';
 import { Inp } from '@/shared/ui/Inp';
 import { Sel } from '@/shared/ui/Sel';
-import { ClientSearchSelect, type ClientSearchResult } from '@/shared/ui/ClientSearchSelect';
 import SessionUpdateModal from './SessionUpdateModal';
 import DeleteConfirmModal from '@/shared/modals/DeleteConfirmModal';
-import { useSessionLinking } from '../hooks/useSessionLinking';
-import type { SessionWithLegacyFields } from '../hooks/useSessionLinking';
-// ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): نوع الكول-باك
-// بتاع فتح NewClientModal الموحّد لطرف بعينه — نفس النوع المستخدم في
-// NewStandaloneSessionModal.tsx.
-import type { OpenCreateClientForSessionParty } from '../hooks/useClientLinking';
-// 🆕 (بند 2.3 — "إنشاء موكل جديد" جنب دروب-داون ربط الجلسة المستقلة، 6
-// أغسطس 2026): نفس النمط المستخدم في EditCaseModal.tsx بالحرف — موديل
-// إنشاء الموكل الموحّد + فحص إمكانية الإنشاء لحالة الطرف الحالية.
-import type { ClientModalContext } from '../../clients/hooks/useClientActions';
+// ⚡ CHANGED (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة، المرحلة 6 — 9
+// أغسطس 2026): useSessionLinking.ts بالكامل اتحذف (كان كود ميت 100% منذ
+// المرحلة 2 — آخر مستهلك ليه كان LinkSessionModal). SessionWithLegacyFields
+// بس هو اللي كان مستخدم فعليًا من الملف ده — اتنقل لـ types.ts.
+import type { SessionWithLegacyFields } from '../../../types';
 // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 6): كشف التعارض بين البيانات
 // الحرة في الجلسة وملف الموكل المختار وقت الربط اليدوي اللاحق.
-import { findClientDataMismatches, findPartyDataMismatches, syncSessionIdentityToGroupSiblings, fetchSessionClientParties, unlinkClientFromSessionParty, type FieldMismatch } from '../hooks/caseSessionLinkingShared';
+import { findClientDataMismatches, syncSessionIdentityToGroupSiblings, fetchSessionClientParties, unlinkClientFromSessionParty } from '../hooks/caseSessionLinkingShared';
 // ⚡ NEW (خطة تعدد الأطراف، مرحلة 6.4، 23 يوليو 2026): نفس Component/هوك
 // مشترك مرحلة 5.1 (EditCaseModal.tsx) و6.1 (NewStandaloneSessionModal.tsx)
 // بالحرف — بدل حقلي "الموكل"/"الخصم" المفردين هنا كمان. استيراد
@@ -45,7 +39,6 @@ import {
     isOrphanState,
     isOrphanedLink,
     canUnlinkParty,
-    canCreateNewClientFromParty,
     getPartyStateMessage,
     getPartyStateBadge,
     type PartyDomainContext,
@@ -102,10 +95,13 @@ interface EditStandaloneModalProps {
     // ⚡ NEW: لازمة عشان نلاقي بيانات أي موكل مربوط بطرف *غير* الأساسي
     // (client_id بتاعه بيتحط وقت إنشاء الجلسة عن طريق الربط لكل طرف على حدة).
     clients?: ClientRow[];
-    // 🆕 (بند 2.3 — 6 أغسطس 2026): زرار "➕ إنشاء موكل جديد من هذه البيانات"
-    // جنب دروب-داون "ربط بموكل من النظام" لطرف غير مربوط — نفس
-    // EditCaseModal.tsx بالحرف. اختيارية عشان أي استدعاء قديم ميتكسرش.
-    openNewClientModal?: (ctx: ClientModalContext) => void;
+    // ⚡ REMOVED (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة، المرحلة 6 — 9
+    // أغسطس 2026): openNewClientModal كانت هنا لزرار "➕ إنشاء موكل جديد"
+    // جنب دروب-داون ربط طرف غير مربوط في EditStandaloneModalForm — الدروب-
+    // داون والزرار اتشالوا بالكامل في المرحلة 3، فبقت prop بلا استخدام
+    // داخلي من وقتها. اتشالت السلسلة كلها لحد المصدر (DashboardTab.tsx/
+    // SessionsCalendar.tsx) — openNewClientModal نفسها في App.tsx لسه حية
+    // (بتتستخدم في أماكن تانية زي NewCaseModal/EditCaseModal).
 }
 
 interface StandaloneEditForm {
@@ -178,7 +174,7 @@ interface EditStandaloneModalFormProps extends EditStandaloneModalProps {
     existingPartyRows: CasePartyRow[];
 }
 
-function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient = null, onOpenClientProfile, existingPartyRows, clients = [], openNewClientModal }: EditStandaloneModalFormProps) {
+function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient = null, onOpenClientProfile, existingPartyRows, clients = [] }: EditStandaloneModalFormProps) {
     // ⚡ NEW: الجلسة مربوطة فعليًا بموكل حي لو linkedClient موصول (مش null).
     const isLinked = !!linkedClient;
     // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 7 — fallback الموكل
@@ -310,47 +306,12 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
     // مفيش حاجة تستاهل preview لموكل اتمسح بالفعل.
     const [unlinkConfirmPartyId, setUnlinkConfirmPartyId] = useState<string | null>(null);
 
-    // ⚡ NEW (مرحلة 3 — توحيد فورم "تعديل جلسة مستقلة" مع "تعديل قضية"، 6
-    // أغسطس 2026): دروب-داون "ربط بموكل من النظام" لطرف عليه ⭐ لسه مش
-    // مربوط — نفس فكرة linkClientToParty/requestLinkClientToParty في
-    // EditCaseModal.tsx بالحرف (بما فيها فحص findPartyDataMismatches قبل
-    // الاستبدال). قبل كده الملف ده معندوش أي طريقة تربط طرف غير مربوط
-    // غير قفل الفورم وفتح "🔗 ربط" المنفصل (LinkSessionModal).
-    // ⚡ CHANGED (8 أغسطس 2026 — البند 6، الجزء الثاني): بياخد الصف الكامل
-    // (ClientSearchResult | null) اللي ClientSearchSelect.onSelect بيرجّعه
-    // مباشرة، بدل clientId + `clients.find()` محلي — راجع تقرير حالة
-    // التنفيذ 8-8-v3.
-    const linkClientToParty = (partyId: string, picked: ClientSearchResult | null) => {
-        if (!picked) { partyFields.updateParty(partyId, 'client_id', null); return; }
-        partyFields.updateParty(partyId, 'client_id', picked.id);
-        partyFields.updateParty(partyId, 'name', picked.full_name || '');
-        partyFields.updateParty(partyId, 'national_id', picked.national_id || '');
-        partyFields.updateParty(partyId, 'power_of_attorney', picked.cr_number || '');
-        partyFields.updateParty(partyId, 'address', picked.address || '');
-    };
-    const [linkMismatchState, setLinkMismatchState] = useState<{ partyId: string; picked: ClientSearchResult; mismatches: FieldMismatch[] } | null>(null);
-    const requestLinkClientToParty = (party: PartyFieldValue, picked: ClientSearchResult | null) => {
-        if (!picked) return;
-        const mismatches = findPartyDataMismatches(
-            { name: party.name, national_id: party.national_id, power_of_attorney: party.power_of_attorney, address: party.address },
-            picked,
-        );
-        if (mismatches.length > 0) { setLinkMismatchState({ partyId: party.id, picked, mismatches }); return; }
-        linkClientToParty(party.id, picked);
-    };
-
-    // 🆕 (بند 2.3 — 6 أغسطس 2026): بعد حفظ موكل جديد عبر الموديل الموحّد
-    // (هدف 'localParty' — الطرف هنا لسه صف محلي في partyFields)، بنطبّق
-    // بياناته فورًا من onLinked — نفس EditCaseModal.tsx بالحرف.
-    const applyCreatedClientToParty = (partyId: string, clientId: string, form?: { full_name: string; national_id: string; cr_number: string; address: string }) => {
-        partyFields.updateParty(partyId, 'client_id', clientId);
-        if (form) {
-            partyFields.updateParty(partyId, 'name', form.full_name || '');
-            partyFields.updateParty(partyId, 'national_id', form.national_id || '');
-            partyFields.updateParty(partyId, 'power_of_attorney', form.cr_number || '');
-            partyFields.updateParty(partyId, 'address', form.address || '');
-        }
-    };
+    // ⚡ REMOVED (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة، Phase 3 — 9
+    // أغسطس 2026): linkClientToParty/requestLinkClientToParty/
+    // applyCreatedClientToParty (دروب-داون "ربط بموكل من النظام" + زرار
+    // "➕ إنشاء موكل جديد" لطرف غير مربوط) اتشالوا بالكامل. طرف غير مربوط
+    // في الجلسة المستقلة دلوقتي بيفضل حر بلا أي طريق ربط/إنشاء موكل —
+    // ده بيحصل بس بعد التحويل لقضية.
 
     const renderPartyExtra = (party: PartyFieldValue) => {
         if (party.id === linkedPartyId || !party.is_client) return null;
@@ -358,55 +319,11 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
         const linkedPartyClient = clients.find((c) => c.id === party.client_id) || null;
         const confirmingUnlink = unlinkConfirmPartyId === party.id;
         if (!party.client_id) {
-            // طرف غير مربوط أصلًا — الدروب-داون الجديد بس، من غير أي
-            // زرار unlink (مفيش حاجة تتفك أصلًا).
-            return React.createElement('div', { className: 'space-y-2' },
-                // ⚡ CHANGED (8 أغسطس 2026 — البند 6، الجزء الثاني): `Sel`
-                // القديم اتحول لـ`ClientSearchSelect` (بحث حقيقي في
-                // الداتابيز بدل قايمة `clients` أول 15 محمّلين). الطرف هنا
-                // مالوش موكل مربوط أصلًا (الفرع ده بس لما !party.client_id)،
-                // فمفيش حاجة تتفك — مفيش manualOption هنا زي القديم بالظبط.
-                linkMismatchState?.partyId !== party.id && React.createElement(ClientSearchSelect, {
-                    label: 'ربط بموكل من النظام (اختياري)',
-                    selectedLabel: '',
-                    onSelect: (picked: ClientSearchResult) => requestLinkClientToParty(party, picked),
-                    testId: `edit-standalone-session-party-client-search-${party.id}`,
-                }),
-                linkMismatchState?.partyId === party.id && React.createElement('div', { className: 'bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5 space-y-2', 'data-testid': `edit-standalone-session-link-mismatch-${party.id}` },
-                    React.createElement('p', { className: 'text-[9px] text-amber-400 font-black' }, '⚠️ القيم دي مختلفة عن ملف الموكل:'),
-                    linkMismatchState.mismatches.map((m: FieldMismatch) => React.createElement('p', { key: m.field, className: 'text-[9px] text-slate-300' },
-                        `${m.label}: في الطرف "${m.freeTextValue}" ← في ملف الموكل "${m.clientValue}"`
-                    )),
-                    React.createElement('div', { className: 'flex gap-2' },
-                        React.createElement('button', {
-                            type: 'button',
-                            onClick: () => { linkClientToParty(party.id, linkMismatchState.picked); setLinkMismatchState(null); },
-                            className: 'flex-1 py-2 rounded-lg bg-premium-gold text-premium-bg text-[10px] font-black',
-                            'data-testid': `edit-standalone-session-link-mismatch-confirm-${party.id}`,
-                        }, 'استخدم بيانات الموكل'),
-                        React.createElement('button', {
-                            type: 'button',
-                            onClick: () => setLinkMismatchState(null),
-                            className: 'flex-1 py-2 rounded-lg bg-white/5 border border-white/10 text-slate-300 text-[10px] font-black',
-                            'data-testid': `edit-standalone-session-link-mismatch-cancel-${party.id}`,
-                        }, 'إلغاء')
-                    )
-                ),
-                // 🆕 (بند 2.3 — 6 أغسطس 2026): نفس شرط EditCaseModal.tsx
-                // بالحرف — بيظهر بس لو حالة الطرف بتسمح بإنشاء موكل جديد
-                // منها (زي: طرف حر بلا موكل مربوط).
-                canCreateNewClientFromParty(state) && openNewClientModal && React.createElement('button', {
-                    type: 'button',
-                    onClick: () => openNewClientModal({
-                        initialData: { full_name: party.name || '', national_id: party.national_id || '', cr_number: party.power_of_attorney || '', address: party.address || '' },
-                        linkTarget: { type: 'localParty' },
-                        contextLabel: 'سيتم ربطه بهذا الطرف تلقائيًا بعد الحفظ',
-                        onLinked: (_target, clientId, form) => applyCreatedClientToParty(party.id, clientId, form),
-                    }),
-                    className: 'text-[10px] font-bold text-emerald-400 mt-1',
-                    'data-testid': 'edit-standalone-session-create-client-' + party.id,
-                }, '➕ إنشاء موكل جديد من هذه البيانات'),
-            );
+            // ⚡ REMOVED (Phase 3، 9 أغسطس 2026): طرف غير مربوط أصلًا —
+            // مفيش دروب-داون ربط ولا زرار إنشاء موكل هنا تاني (كانا هنا
+            // قبل كده). الطرف بيفضل بيانات حرة قابلة للتعديل، والربط/
+            // الإنشاء بيبقى متاح بس بعد تحويل الجلسة لقضية.
+            return null;
         }
         return React.createElement('div', { className: 'space-y-2' },
             isOrphanState(state) && React.createElement('div', { className: 'bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2', 'data-testid': `edit-standalone-session-party-orphaned-warning-${party.id}` },
@@ -486,7 +403,7 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
 
     // تحذير قبل الإغلاق لو فيه بيانات مكتوبة لسه ما اتحفظتش (الـbaseline
     // هنا هو بيانات الجلسة المحمّلة فعليًا، مش فورم فاضي)
-    const { guardedClose, confirmModal } = useUnsavedChangesGuard(draftData, { form, parties: partyFields.parties, legalTitles: partyFields.legalTitles }, onClose);
+    const { guardedClose, confirmModal } = useUnsavedChangesGuard(draftData, { form, parties: partyFields.parties, legalTitles: partyFields.legalTitles }, onClose, draft.clearDraft);
 
     // ⚡ NEW (مرحلة 6.4): مزامنة الحفظ الفعلي في case_parties — نفس فلسفة
     // syncCaseParties في useCaseActions.ts (مرحلة 5.2) بالحرف، بس بـ
@@ -736,412 +653,6 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
     return React.createElement(React.Fragment, null, modalTree, confirmModal);
 }
 
-// ══════════════════════════════════════════
-//  موديل "🔗 ربط" — متاح في أي وقت على جلسة مستقلة محفوظة بالفعل
-//  (نفس خيارات البوب أب اللي بيظهر أول مرة بعد الحفظ + خيار جديد:
-//  ربط بموكل موجود بالفعل من غير إنشاء قضية)
-// ══════════════════════════════════════════
-interface LinkSessionModalProps {
-    session: SessionWithLegacyFields;
-    db: SupabaseClient<Database>;
-    onClose: () => void;
-    onDone: () => void;
-    // ⚠️ [مهم] لازم يتنادى (مش onClose بس) في أي خطوة بعد ما قضية جديدة
-    // اتعملت فعلاً (found/notfound/done) — عشان يقفل StandaloneSessionDetailModal
-    // بالكامل وراه، مش موديل الربط بس. لو سبناه مفتوح، هيفضل شايل نسخة
-    // قديمة من الجلسة (case_id: null) في الذاكرة رغم إنها بقت مربوطة
-    // فعليًا في الداتابيز — ولو المستخدم دوس "🗑 حذف" من هنا هيحذف جلسة
-    // بقت جزء من قضية حقيقية من غير ما ياخد باله.
-    onFullClose: () => void;
-    // ⚡ [جديد] بينادى بس لما موكل جديد فعليًا يتضاف (مش أي إجراء ربط
-    // عادي) — عشان قائمة الموكلين في التطبيق كله تتحدّث فورًا، بدل ما
-    // الموكل الجديد يفضل مخفي لحد ما المستخدم يدخل تاب الموكلين يدويًا.
-    onClientAdded?: () => void;
-    // ⚡ FIX: الموكل ممكن يكون اتربط بالجلسة بالفعل من غير ما القضية
-    // تتعمل (LinkSessionModal بقى بيتفتح طول ما !hasCase بس) — الفلاج ده
-    // بيخفي اختيارات "إضافة/ربط موكل" بس، ويسيب "إنشاء ملف قضية" ظاهرة.
-    hasClient?: boolean;
-    // 🔧 FIX (خطة توحيد مصدر بيانات الموكل، مرحلة 6): البروب ده كان
-    // مفقود من الـ interface والاستدعاء في StandaloneSessionDetailModal
-    // خالص، رغم إن جسم الدالة تحت بيستخدمه (بيتبعت لـ useSessionLinking)
-    // — متغيّر حر مش معرّف في أي scope، كان المفروض يطلع TS error فعلي
-    // (tsc --noEmit) لو اتشغل. المعنى العملي: فيكس فاز 5 (handleLinkCase
-    // بياخد بيانات الموكل الحي بدل نسخة الجلسة) ما كانش بيشتغل خالص لما
-    // اللينك مودال ده هو نقطة الدخول (كان دايمًا undefined، فبيرجع
-    // لنسخة الجلسة تلقائيًا). دلوقتي بيتوصل من الأب زي EditStandaloneModal
-    // وSessionUpdateModal بالظبط.
-    linkedClient?: ClientRow | null;
-    // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): مرّرة من
-    // StandaloneSessionDetailModal — شوف تعليق البروب المقابلة هناك.
-    onOpenCreateClientForSessionParty?: OpenCreateClientForSessionParty;
-}
-
-function LinkSessionModal({ session, db, onClose, onDone, onFullClose, onClientAdded, hasClient, linkedClient, onOpenCreateClientForSessionParty }: LinkSessionModalProps) {
-    const {
-        linkingCase, linkingClient, linkingToCase, linkingExisting,
-        // ⚡ CHANGED (Phase 3 — 4 أغسطس 2026): setClientStep المباشر بقى مش
-        // مستخدم هنا خالص — startExistingClientSearch/cancelExistingClientSearch
-        // بيتولوا الانتقال idle↔searching بدل ما نناديه إحنا مباشرة (باقي
-        // الخطوات found/notfound/done لسه بتستخدمه جوه الهوك نفسه، مش هنا).
-        clientStep, foundClient, foundClientMatchType,
-        clientSearch, searchResults, searching, selectedExistingClient, setSelectedExistingClient,
-        // ⚡ NEW (7.2 جزء 2 — بند 2.4): partyList/partyIndex لعرض "طرف X من Y"،
-        // وhandleSkipParty لتخطي الطرف الحالي بس وقت الـ wizard (بدل onFullClose
-        // اللي بيقفل الموديل كله — مسار الجلسات القديمة قبل مرحلة 6).
-        partyList, partyIndex, handleSkipParty,
-        // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): idlePartyList/
-        // linkedIdlePartyIds لعرض زرار مستقل لكل طرف في خطوة "idle"،
-        // وhandleAddClientOnlyForParty لفتح NewClientModal الموحّد لطرف
-        // بعينه بدل INSERT مباشر.
-        idlePartyList, linkedIdlePartyIds, handleAddClientOnlyForParty, idlePartyListLoaded,
-        // ⚡ NEW (Phase 3 — 4 أغسطس 2026): existingClientTargetPartyId (null =
-        // مسار الجلسة كلها القديم) + startExistingClientSearch/
-        // cancelExistingClientSearch لفتح/إغلاق خطوة "searching" مخصصة لطرف
-        // بعينه — بدل setClientStep('searching')/('idle') المباشرين.
-        existingClientTargetPartyId, startExistingClientSearch, cancelExistingClientSearch,
-        handleLinkCase, handleLinkExistingClient, handleAddAndLinkClient, handleAddClientOnly,
-        searchExistingClients, confirmLinkToExistingClient,
-        // 🆕 (زرار "أعد المحاولة" — 5 أغسطس 2026): لعرض تحذير + زرار في خطوة
-        // 'done' لو صف تاريخي في السلسلة فشل ربطه بالقضية.
-        groupLinkRetryContext, retryingGroupLink, handleRetryGroupLink,
-    } = useSessionLinking(session, db, onDone, onClientAdded, linkedClient, onOpenCreateClientForSessionParty);
-
-    const hasPlaintiff = !!session.plaintiff?.trim();
-    // ⚡ NEW (7.2 جزء 2 — بند 2.4): في وضع الـ wizard (partyList فيها أطراف)،
-    // اسم الطرف الحالي بيحل محل session.plaintiff — غير كده (جلسة قديمة، صفر
-    // تغيير سلوك) بنفضل نستخدم session.plaintiff زي ما هو.
-    const currentPartyName = partyList.length > 0 ? (partyList[partyIndex]?.name || null) : (session.plaintiff || null);
-    const onSkipOrFullClose = partyList.length > 0 ? handleSkipParty : onFullClose;
-    // ⚡ NEW (مرحلة 6): الحقول المتعارضة بين بيانات الجلسة الحرة وملف
-    // الموكل المختار من البحث اليدوي — بتتحسب لما يدوس "تأكيد الربط".
-    const [pendingMismatches, setPendingMismatches] = useState<FieldMismatch[]>([]);
-    const [showMismatchConfirm, setShowMismatchConfirm] = useState(false);
-
-    return createPortal(
-        React.createElement('div', {
-            className: 'fixed inset-0 z-[60] flex items-center justify-center px-4',
-            style: { background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)' }
-        },
-            React.createElement('div', {
-                className: 'w-full max-w-sm rounded-3xl p-6 space-y-4 bg-premium-card border border-white/8',
-                'data-testid': 'link-session-modal'
-            },
-
-                // ── Step: idle — الخيارات الأساسية ──
-                clientStep === 'idle' && React.createElement(React.Fragment, null,
-                    React.createElement('div', { className: 'text-center space-y-1' },
-                        React.createElement('div', { className: 'text-2xl' }, '🔗'),
-                        React.createElement('h3', { className: 'text-sm font-black text-white' }, 'ربط الجلسة'),
-                        React.createElement('p', { className: 'text-[11px] text-slate-400' }, 'اختر الإجراء المطلوب')
-                    ),
-                    React.createElement('div', { className: 'space-y-2 pt-1' },
-                        React.createElement('button', {
-                            onClick: handleLinkCase,
-                            disabled: linkingCase,
-                            className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2',
-                            'data-testid': 'link-session-create-case'
-                        },
-                            React.createElement('span', null, '⚖️'),
-                            React.createElement('span', null, linkingCase ? '⏳ جاري الإنشاء...' : 'إنشاء ملف قضية من هذه البيانات')
-                        ),
-                        // 🔒 FIX (تحليل لوجز CI — 4 أغسطس 2026): idlePartyList بيتجاب
-                        // async، وقبل ما يخلص كانت [] بتتفسّر غلط كـ"جلسة قديمة من غير
-                        // أطراف" فتظهر الأزرار legacy (startExistingClientSearch(null))
-                        // بدل زرار الطرف الفعلي — existingClientTargetPartyId كان بيفضل
-                        // عالق على null حتى بعد ما الأطراف توصل. دلوقتي بنستنى
-                        // idlePartyListLoaded قبل ما نعرض أي زرار من الاتنين دول.
-                        ...(!hasClient && !idlePartyListLoaded ? [React.createElement('p', {
-                            key: 'link-session-loading',
-                            className: 'text-[10px] text-slate-500 text-center py-2'
-                        }, '⏳ جاري تحميل بيانات الجلسة...')] : []),
-                        // ⚡ CHANGED (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): زرار
-                        // مستقل لكل طرف is_client=true في idlePartyList (بدل زرار واحد
-                        // مبني على session.plaintiff بس، بينشئ أول طرف ويتجاهل الباقيين) —
-                        // نفس نمط "postSave" في NewStandaloneSessionModal.tsx بالحرف. جلسة
-                        // قديمة/بلا case_parties (idlePartyList فاضية) → فولباك كامل
-                        // للزرار الواحد القديم، صفر تغيير سلوك.
-                        ...(!hasClient && idlePartyListLoaded ? (idlePartyList.length === 0
-                            ? [hasPlaintiff && React.createElement('button', {
-                                key: 'link-session-add-client-only-legacy',
-                                onClick: handleAddClientOnly,
-                                disabled: linkingClient,
-                                className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2',
-                                'data-testid': 'link-session-add-client-only'
-                            },
-                                React.createElement('span', null, '👤'),
-                                React.createElement('span', null, linkingClient ? '⏳ جاري الإضافة...' : 'إضافة الموكل لقائمة الموكلين فقط')
-                            )]
-                            : idlePartyList.filter((p) => !linkedIdlePartyIds.has(p.id)).map((p) => {
-                                const single = idlePartyList.length === 1;
-                                return React.createElement('button', {
-                                    key: `link-session-add-client-only-${p.id}`,
-                                    onClick: () => handleAddClientOnlyForParty(p),
-                                    disabled: linkingClient,
-                                    className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2',
-                                    'data-testid': 'link-session-add-client-only-' + p.id
-                                },
-                                    React.createElement('span', null, '👤'),
-                                    React.createElement('span', null, linkingClient
-                                        ? '⏳ جاري الإضافة...'
-                                        : (single ? `إضافة ${p.name} لقائمة الموكلين` : `إضافة "${p.name}" لقائمة الموكلين`))
-                                );
-                            })) : []),
-                        // ⚡ CHANGED (Phase 3 — 4 أغسطس 2026): "ربط بموكل موجود بالفعل" كان
-                        // زرار واحد بيفتح خطوة searching للجلسة كلها. بقى زرار مستقل لكل
-                        // طرف is_client=true غير مربوط في idlePartyList (نفس نمط زرار
-                        // "إضافة موكل" المجاور بالظبط) — بيفتح searching مخصص للطرف ده عبر
-                        // startExistingClientSearch(party). جلسة قديمة/بلا case_parties
-                        // (idlePartyList فاضية) → فولباك كامل للزرار الواحد القديم
-                        // (startExistingClientSearch(null) = المسار القديم)، صفر تغيير سلوك.
-                        ...(!hasClient && idlePartyListLoaded ? (idlePartyList.length === 0
-                            ? [React.createElement('button', {
-                                key: 'link-session-search-existing-legacy',
-                                onClick: () => startExistingClientSearch(null),
-                                className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2',
-                                'data-testid': 'link-session-search-existing'
-                            },
-                                React.createElement('span', null, '🔗'),
-                                React.createElement('span', null, 'ربط بموكل موجود بالفعل')
-                            )]
-                            : idlePartyList.filter((p) => !linkedIdlePartyIds.has(p.id)).map((p) => {
-                                const single = idlePartyList.length === 1;
-                                return React.createElement('button', {
-                                    key: `link-session-search-existing-${p.id}`,
-                                    onClick: () => startExistingClientSearch(p),
-                                    className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2',
-                                    'data-testid': 'link-session-search-existing-' + p.id
-                                },
-                                    React.createElement('span', null, '🔗'),
-                                    React.createElement('span', null, single ? 'ربط بموكل موجود بالفعل' : `ربط "${p.name}" بموكل موجود`)
-                                );
-                            })) : [])
-                    ),
-                    React.createElement('button', {
-                        onClick: onClose,
-                        className: 'w-full py-2.5 rounded-2xl text-xs font-bold text-slate-500 hover:text-slate-300 transition-all',
-                        'data-testid': 'link-session-idle-close'
-                    }, 'إغلاق')
-                ),
-
-                // ── Step: searching — بحث يدوي في الموكلين الموجودين ──
-                clientStep === 'searching' && React.createElement(React.Fragment, null,
-                    React.createElement('div', { className: 'text-center space-y-1' },
-                        React.createElement('div', { className: 'text-2xl' }, '🔍'),
-                        // ⚡ CHANGED (Phase 3 — 4 أغسطس 2026): العنوان بيعرض اسم الطرف
-                        // المستهدف (existingClientTargetPartyId) لو محدد — نفس نمط
-                        // "— اختر موكلاً لـ ... —" في InfoSection.tsx. target=null (المسار
-                        // القديم) → نفس العنوان القديم بالظبط.
-                        React.createElement('h3', { className: 'text-sm font-black text-white' },
-                            existingClientTargetPartyId
-                                ? `ابحث عن موكل لـ "${idlePartyList.find((p) => p.id === existingClientTargetPartyId)?.name || ''}"`
-                                : 'ابحث عن موكل موجود'),
-                        React.createElement('p', { className: 'text-[11px] text-slate-400' }, 'بالاسم أو الرقم القومي أو الهاتف')
-                    ),
-                    React.createElement('input', {
-                        value: clientSearch,
-                        onChange: (e: React.ChangeEvent<HTMLInputElement>) => searchExistingClients(e.target.value),
-                        placeholder: 'اكتب اسم الموكل...',
-                        className: inputCls,
-                        style: inputStyle,
-                        'data-testid': 'link-session-client-search'
-                    }),
-                    React.createElement('div', { className: 'max-h-48 overflow-y-auto space-y-1.5', 'data-testid': 'link-session-client-results' },
-                        searching && React.createElement('p', { className: 'text-[10px] text-slate-500 text-center py-2' }, '⏳ جاري البحث...'),
-                        !searching && clientSearch.trim() && searchResults.length === 0 && React.createElement('p', { className: 'text-[10px] text-slate-500 text-center py-2' }, 'لا توجد نتائج'),
-                        !searching && searchResults.map((c) => React.createElement('button', {
-                            key: c.id,
-                            onClick: () => { setSelectedExistingClient(c); setShowMismatchConfirm(false); setPendingMismatches([]); },
-                            className: `w-full text-right p-2.5 rounded-xl text-[11px] border transition-all ${selectedExistingClient?.id === c.id ? 'border-premium-gold bg-premium-gold/10 text-premium-gold' : 'border-white/10 bg-white/5 text-slate-300'}`,
-                            'data-testid': 'link-session-client-option-' + c.id
-                        }, (c.client_name || c.full_name || 'بدون اسم') + (c.national_id ? ' — ' + c.national_id : '')))
-                    ),
-                    selectedExistingClient && React.createElement('div', { className: 'p-2.5 rounded-xl bg-premium-gold/10 border border-premium-gold/20 text-[11px] text-premium-gold' },
-                        '✓ الموكل المختار: ' + (selectedExistingClient.client_name || selectedExistingClient.full_name || '—')
-                    ),
-                    // ⚡ NEW (مرحلة 6): تنبيه تعارض بدل استبدال صامت — بيظهر بس لو فيه
-                    // فرق حقيقي بين بيانات الجلسة الحرة وملف الموكل المختار.
-                    showMismatchConfirm && pendingMismatches.length > 0 && React.createElement('div', { className: 'p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-2' },
-                        React.createElement('p', { className: 'text-[11px] font-black text-amber-400' }, '⚠️ القيم دي مختلفة عن ملف الموكل:'),
-                        pendingMismatches.map((m: FieldMismatch) => React.createElement('div', { key: m.field, className: 'text-[10px]' },
-                            React.createElement('span', { className: 'text-slate-400 font-bold' }, m.label + ': '),
-                            React.createElement('span', { className: 'text-slate-300' }, `في الجلسة "${m.freeTextValue}"`),
-                            React.createElement('span', { className: 'text-slate-500' }, ' ← '),
-                            React.createElement('span', { className: 'text-premium-gold' }, `في ملف الموكل "${m.clientValue}"`)
-                        )),
-                        React.createElement('p', { className: 'text-[10px] text-slate-400' }, 'هل تحفظ باستخدام بيانات الموكل؟')
-                    ),
-                    selectedExistingClient && React.createElement('button', {
-                        onClick: () => {
-                            // ⚡ CHANGED (خطة توحيد "ربط طرف بموكل موجود" — مرحلة 1، فقرة 6 من
-                            // التقرير): كان بيتخطى فحص التعارض تمامًا لو فيه طرف محدد
-                            // (existingClientTargetPartyId) على افتراض إن case_parties بيحتفظ
-                            // ببياناته لكل طرف على حدة — الافتراض ده غير دقيق فعليًا. دلوقتي
-                            // بنفحص تعارض بيانات الطرف المحدد نفسه (لو موجود)، أو بيانات
-                            // الجلسة الحرة زي ما كان (المسار القديم، target=null).
-                            if (!showMismatchConfirm) {
-                                const targetParty = existingClientTargetPartyId
-                                    ? idlePartyList.find((p) => p.id === existingClientTargetPartyId)
-                                    : undefined;
-                                const mismatches = targetParty
-                                    ? findPartyDataMismatches(
-                                        {
-                                            name: targetParty.name,
-                                            national_id: targetParty.national_id,
-                                            power_of_attorney: targetParty.power_of_attorney,
-                                            address: targetParty.address,
-                                        },
-                                        selectedExistingClient,
-                                      )
-                                    : findClientDataMismatches(
-                                        {
-                                            plaintiff: session.plaintiff,
-                                            plaintiff_national_id: session.plaintiff_national_id,
-                                            plaintiff_power_of_attorney: session.plaintiff_power_of_attorney,
-                                            // case_sessions مفيهاش عمود عنوان أصلاً (فاز 3) — undefined
-                                            // يخلي findClientDataMismatches يتجاهل مقارنة العنوان تلقائيًا.
-                                        },
-                                        selectedExistingClient,
-                                      );
-                                if (mismatches.length > 0) { setPendingMismatches(mismatches); setShowMismatchConfirm(true); return; }
-                            }
-                            confirmLinkToExistingClient();
-                        },
-                        disabled: linkingExisting,
-                        'data-testid': 'link-existing-client-confirm',
-                        className: 'w-full py-3 rounded-2xl text-xs font-black text-premium-bg transition-all disabled:opacity-40',
-                        style: { background: linkingExisting ? '#888' : 'linear-gradient(135deg,#d4af37,#f0c040)' }
-                    }, linkingExisting ? '⏳ جاري الربط...' : (showMismatchConfirm ? '✅ نعم، استخدم بيانات الموكل' : '🔗 تأكيد الربط')),
-                    React.createElement('button', {
-                        // ⚡ CHANGED (Phase 3 — 4 أغسطس 2026): رجوع بيستخدم
-                        // cancelExistingClientSearch (بدل setClientStep('idle') المباشر)
-                        // عشان يصفّر existingClientTargetPartyId كمان — غير كده لو المستخدم
-                        // فتح searching تاني لطرف مختلف هيلاقي حالة البحث/الطرف القديم
-                        // عالقة. showMismatchConfirm فاضل زي ما هو (إلغاء بس بيرجع لخطوة
-                        // البحث نفسها، مش idle).
-                        onClick: () => { if (showMismatchConfirm) { setShowMismatchConfirm(false); setPendingMismatches([]); } else cancelExistingClientSearch(); },
-                        className: 'w-full py-2.5 rounded-2xl text-xs font-bold text-slate-500 hover:text-slate-300 transition-all',
-                        'data-testid': 'link-session-searching-back'
-                    }, showMismatchConfirm ? 'إلغاء' : 'رجوع')
-                ),
-
-                // ── Step: found — بعد إنشاء القضية، لقينا موكل مطابق ──
-                clientStep === 'found' && React.createElement(React.Fragment, null,
-                    // ⚡ NEW (7.2 جزء 2 — بند 2.4): عرض تقدّم الـ wizard "طرف X من Y".
-                    partyList.length > 0 && React.createElement('p', {
-                        className: 'text-[10px] font-bold text-premium-gold text-center'
-                    }, `طرف ${partyIndex + 1} من ${partyList.length}`),
-                    React.createElement('div', { className: 'text-center space-y-1' },
-                        React.createElement('div', { className: 'text-2xl' }, '👤'),
-                        React.createElement('h3', { className: 'text-sm font-black text-white' },
-                            partyList.length > 0 ? `وجدنا موكلاً مطابقاً لـ"${currentPartyName}"` : 'وجدنا موكلاً مطابقاً'),
-                        React.createElement('p', { className: 'text-[11px] text-slate-400' }, 'هل تريد ربط القضية الجديدة بـ'),
-                        React.createElement('p', { className: 'text-xs font-bold text-premium-gold mt-1' }, foundClient?.full_name)
-                    ),
-                    React.createElement('div', { className: 'space-y-2 pt-1' },
-                        React.createElement('button', {
-                            onClick: handleLinkExistingClient,
-                            disabled: linkingToCase,
-                            className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2',
-                            'data-testid': 'link-session-found-link-existing'
-                        },
-                            React.createElement('span', null, '🔗'),
-                            React.createElement('span', null, linkingToCase ? '⏳ جاري الربط...' : 'نعم، ربط بهذا الموكل')
-                        ),
-                        // ⚡ FIX: زي NewStandaloneSessionModal.tsx بالظبط — لو التطابق
-                        // مؤكد (نفس الاسم بالظبط أو نفس الرقم القومي/التوكيل)، زرار
-                        // "إضافة موكل جديد" كان بيوصل لطريق مسدود صامت: handleAddAndLinkClient
-                        // بينده checkClientDuplicate بنفس البيانات فيرفضه ويرجّع نفس
-                        // خطوة 'found' من غير أي رد فعل ظاهر للمستخدم. نعرضه بس لما
-                        // يكون التطابق تخمين بالاسم فقط (fuzzy).
-                        foundClientMatchType !== 'exact' && React.createElement('button', {
-                            onClick: handleAddAndLinkClient,
-                            disabled: linkingToCase,
-                            className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2',
-                            'data-testid': 'link-session-found-add-and-link'
-                        },
-                            React.createElement('span', null, '➕'),
-                            React.createElement('span', null, 'إضافة موكل جديد وربطه')
-                        ),
-                        foundClientMatchType === 'exact' && React.createElement('p', {
-                            className: 'text-[10px] text-slate-500 text-center px-2'
-                        }, 'الاسم أو الرقم القومي أو رقم التوكيل مطابق تمامًا لموكل مسجل بالفعل — لو ده شخص مختلف فعلاً، عدّل بياناته من صفحة الموكلين مباشرة.')
-                    ),
-                    React.createElement('button', {
-                        onClick: onSkipOrFullClose,
-                        className: 'w-full py-2.5 rounded-2xl text-xs font-bold text-slate-500 hover:text-slate-300 transition-all',
-                        'data-testid': 'link-session-found-skip'
-                    }, 'تخطي')
-                ),
-
-                // ── Step: notfound — بعد إنشاء القضية، مفيش موكل مطابق ──
-                clientStep === 'notfound' && React.createElement(React.Fragment, null,
-                    // ⚡ NEW (7.2 جزء 2 — بند 2.4): عرض تقدّم "طرف X من Y".
-                    partyList.length > 0 && React.createElement('p', {
-                        className: 'text-[10px] font-bold text-premium-gold text-center'
-                    }, `طرف ${partyIndex + 1} من ${partyList.length}`),
-                    React.createElement('div', { className: 'text-center space-y-1' },
-                        React.createElement('div', { className: 'text-2xl' }, '👤'),
-                        React.createElement('h3', { className: 'text-sm font-black text-white' }, 'ربط الموكل بالقضية'),
-                        React.createElement('p', { className: 'text-[11px] text-slate-400' }, currentPartyName
-                            ? `"${currentPartyName}" غير موجود في الموكلين`
-                            : 'لا يوجد اسم موكل في البيانات')
-                    ),
-                    !!currentPartyName?.trim() && React.createElement('div', { className: 'space-y-2 pt-1' },
-                        React.createElement('button', {
-                            onClick: handleAddAndLinkClient,
-                            disabled: linkingToCase,
-                            className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2',
-                            'data-testid': 'link-session-notfound-add-and-link'
-                        },
-                            React.createElement('span', null, '➕'),
-                            React.createElement('span', null, linkingToCase ? '⏳ جاري الإضافة...' : 'إضافة الموكل وربطه بالقضية')
-                        )
-                    ),
-                    React.createElement('button', {
-                        onClick: onSkipOrFullClose,
-                        className: 'w-full py-2.5 rounded-2xl text-xs font-bold text-slate-500 hover:text-slate-300 transition-all',
-                        'data-testid': 'link-session-notfound-skip'
-                    }, 'تخطي')
-                ),
-
-                // ── Step: done ──
-                clientStep === 'done' && React.createElement(React.Fragment, null,
-                    React.createElement('div', { className: 'text-center space-y-2 py-2' },
-                        React.createElement('div', { className: 'text-3xl' }, '🎉'),
-                        React.createElement('h3', { className: 'text-sm font-black text-white' }, 'تم بنجاح'),
-                        React.createElement('p', { className: 'text-[11px] text-slate-400' }, 'تم تنفيذ الربط بنجاح')
-                    ),
-                    // 🆕 (زرار "أعد المحاولة" — 5 أغسطس 2026): بيظهر بس لو فيه
-                    // جلسات تاريخية في نفس السلسلة فشل ربطها بالقضية رغم نجاح
-                    // الجلسة الأساسية — بدل ما المستخدم يعتمد على توست بيختفي
-                    // ويرجع لاحقًا يعمل قضية جديدة مكررة بالغلط.
-                    groupLinkRetryContext && React.createElement('div', {
-                        className: 'rounded-2xl p-3 space-y-2 border border-amber-500/30 bg-amber-500/10',
-                        'data-testid': 'group-link-retry-warning'
-                    },
-                        React.createElement('p', { className: 'text-[11px] text-amber-300 leading-relaxed' },
-                            `⚠️ فشل ربط ${groupLinkRetryContext.failedIds.length} من جلسات السلسلة التاريخية بالقضية — القضية اتعملت بالفعل، فمتضغطش "تحويل لقضية" من الجلسة دي تاني، استخدم الزرار ده بدل كده.`
-                        ),
-                        React.createElement('button', {
-                            onClick: handleRetryGroupLink,
-                            disabled: retryingGroupLink,
-                            className: 'w-full py-2.5 rounded-xl text-[11px] font-black text-amber-300 border border-amber-500/40 disabled:opacity-50',
-                            'data-testid': 'group-link-retry-button'
-                        }, retryingGroupLink ? 'جاري إعادة المحاولة...' : '🔄 أعد المحاولة')
-                    ),
-                    React.createElement('button', {
-                        onClick: onFullClose,
-                        className: 'w-full py-3 rounded-2xl text-xs font-black text-premium-bg transition-all',
-                        style: { background: 'linear-gradient(135deg,#d4af37,#f0c040)' },
-                        'data-testid': 'link-session-done-close'
-                    }, 'إغلاق')
-                )
-            )
-        ),
-        document.body
-    );
-}
-
 interface StandaloneSessionDetailModalProps {
     session: SessionWithLegacyFields;
     db: SupabaseClient<Database>;
@@ -1154,26 +665,21 @@ interface StandaloneSessionDetailModalProps {
     // EditStandaloneModal، ونفتح تفاصيل الموكل من زرار "✏️ عدّل من ملف الموكل".
     clients?: ClientRow[];
     onOpenClientProfile?: (client: ClientRow) => void;
-    // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): بتتوصّل لحد
-    // LinkSessionModal تحت — نفس handleOpenCreateClientForSessionPartyOnly
-    // في App.tsx المستخدمة أصلاً في NewStandaloneSessionModal.tsx. اختيارية
-    // عشان أي استدعاء قديم للموديل ده من غيرها ميتكسرش (فولباك تلقائي
-    // لزرار "إضافة الموكل لقائمة الموكلين فقط" القديم).
-    onOpenCreateClientForSessionParty?: OpenCreateClientForSessionParty;
-    // 🆕 (بند 2.3 — 6 أغسطس 2026): بتتوصّل لـ EditStandaloneModal — زرار
-    // "➕ إنشاء موكل جديد من هذه البيانات" جنب دروب-داون ربط طرف غير مربوط.
-    openNewClientModal?: (ctx: ClientModalContext) => void;
+    // ⚡ REMOVED (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة، المرحلة 6 — 9
+    // أغسطس 2026): onOpenCreateClientForSessionParty وopenNewClientModal
+    // كانوا هنا خدمة لـ LinkSessionModal (اتشال Phase 2) وزرار "➕ إنشاء
+    // موكل جديد" جوه EditStandaloneModalForm (اتشال Phase 3) — الاتنين
+    // بقوا بلا مستهلك حقيقي من وقتها. اتشالت السلسلة كلها من DashboardTab.tsx
+    // وSessionsCalendar.tsx كمان.
 }
 
-function StandaloneSessionDetailModal({ session: partialSession, db, onClose, onDone, onNotify, onClientAdded, clients = [], onOpenClientProfile, onOpenCreateClientForSessionParty, openNewClientModal }: StandaloneSessionDetailModalProps) {
+function StandaloneSessionDetailModal({ session: partialSession, db, onClose, onDone, onNotify, onClientAdded, clients = [], onOpenClientProfile }: StandaloneSessionDetailModalProps) {
     const [showUpdate, setShowUpdate] = useState(false);
     const [showEdit, setShowEdit] = useState(false);
-    const [showLink, setShowLink] = useState(false);
     const [showConfirmDelete, setShowConfirmDelete] = useState(false);
     const [deleting, setDeleting] = useState(false);
     // ⚡ NEW (نقل زرار فك الربط من EditStandaloneModal لجنب سطر "👤 الموكل"
-    // هنا مباشرة — منفصل تمامًا عن زرار "🔗 ربط" اللي وظيفته تحويل الجلسة
-    // لقضية، مش ربط الموكل).
+    // هنا مباشرة).
     const [showUnlinkConfirm, setShowUnlinkConfirm] = useState(false);
     const [unlinkingClient, setUnlinkingClient] = useState(false);
 
@@ -1242,10 +748,9 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
     }, [fullSession.session_group_id, db]);
 
     const session = fullSession;
-    // زرار "🔗 ربط" بيتاح طول ما لسه مفيش قضية اتعملت من الجلسة دي —
-    // مش شرطه إن الموكل يكون لسه مش مربوط. ربط/إضافة الموكل حاجة مستقلة
-    // تمامًا عن إنشاء القضية، فمينفعش اختفاء واحد يخفي التاني.
-    const hasCase = !!session.case_id;
+    // ⚡ REMOVED (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة، Phase 2 — 9
+    // أغسطس 2026): hasCase كان بيتحكم بس في ظهور زرار "🔗 ربط" (اتشال
+    // بالكامل). لو احتجناه تاني مستقبلاً لغرض تاني، يترجع بسهولة.
     const hasClient = !!session.client_id;
     // ⚡ FIX (8 أغسطس 2026 — نفس باگ "الموكل محذوف" غلط اللي اتصلح في
     // CasesTab.tsx/CaseDetailView.tsx): كان بيعتمد على session.client_id
@@ -1460,10 +965,8 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
                 style: { maxHeight: 'calc(90vh - 160px)' }
             },
                 ...rows.map(({ label, value, key }) => {
-                    // ⚡ NEW: سطر "👤 الموكل" بس — لو الجلسة مربوطة بموكل حي
-                    // (hasClient)، بيظهر تحته زرار "🔓 فك الربط" (منفصل تمامًا
-                    // عن زرار "🔗 ربط" في الفوتر، اللي وظيفته تحويل الجلسة
-                    // لقضية مش ربط الموكل).
+                    // ⚡ سطر "👤 الموكل" بس — لو الجلسة مربوطة بموكل حي
+                    // (hasClient)، بيظهر تحته زرار "🔓 فك الربط".
                     if (key === 'primaryParty' && hasClient) {
                         return React.createElement('div', {
                             key: label,
@@ -1563,12 +1066,6 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
                         className: 'flex-1 py-2.5 rounded-2xl text-xs font-bold text-slate-400 bg-white/5 hover:bg-white/10 transition-all',
                         'data-testid': 'standalone-session-footer-close'
                     }, 'إغلاق'),
-                    !hasCase && React.createElement('button', {
-                        onClick: () => setShowLink(true),
-                        disabled: loadingFull,
-                        className: 'flex-1 py-2.5 rounded-2xl text-xs font-bold text-slate-300 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-50',
-                        'data-testid': 'standalone-session-link-trigger'
-                    }, '🔗 ربط'),
                     React.createElement('button', {
                         onClick: () => setShowEdit(true),
                         disabled: loadingFull,
@@ -1607,7 +1104,6 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
             linkedClient,
             clients,
             onOpenClientProfile: onOpenClientProfile ? (c: ClientRow) => { setShowEdit(false); onOpenClientProfile(c); } : undefined,
-            openNewClientModal,
         }),
         showUpdate && React.createElement(SessionUpdateModal, {
             session, caseData, db,
@@ -1615,15 +1111,6 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
             onDone: () => { onDone(); onClose(); },
             onNotify,
             linkedClient,
-        }),
-        showLink && React.createElement(LinkSessionModal, {
-            session, db, hasClient,
-            onClose: () => setShowLink(false),
-            onDone,
-            onFullClose: () => { setShowLink(false); onDone(); onClose(); },
-            onClientAdded,
-            linkedClient,
-            onOpenCreateClientForSessionParty,
         })
     );
 }
