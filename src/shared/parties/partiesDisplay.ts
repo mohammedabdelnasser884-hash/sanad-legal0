@@ -11,6 +11,8 @@
 //  صفر تغيير سلوك لأي بيانات قديمة.
 // ══════════════════════════════════════════════════════════════
 
+import { effectiveLegalTitleForDisplay } from './partyDisplay';
+
 export interface PartyDisplayRow {
     side: string | null;
     name: string | null;
@@ -52,8 +54,13 @@ export function derivePartiesDisplay(
     const plaintiffNames = rows.filter((p) => p.side === 'plaintiff').map((p) => p.name as string);
     const defendantNames = rows.filter((p) => p.side === 'defendant').map((p) => p.name as string);
 
-    const plaintiff = buildSideLabel(plaintiffNames) ?? (fallback.plaintiffLegalTitle || fallback.plaintiff || null);
-    const defendant = buildSideLabel(defendantNames) ?? (fallback.defendantLegalTitle || fallback.defendant || null);
+    // ⚡ FIX (توحيد المسمى القانوني الجامع — 8 أغسطس 2026): بيتفعّل بس لو
+    // مفيش case_parties خالص (buildSideLabel رجعت null) — لو موجودة، الاسم
+    // الحقيقي (buildSideLabel) بياخد الأولوية دايمًا وده مش بيتأثر بالمشكلة.
+    // effectiveLegalTitleForDisplay بترجع '' لصفة عامة بس (زي "متهمين")
+    // عشان مايحلّش محل fallback.plaintiff فجأة بلا داعي.
+    const plaintiff = buildSideLabel(plaintiffNames) ?? (effectiveLegalTitleForDisplay(fallback.plaintiffLegalTitle) || fallback.plaintiff || null);
+    const defendant = buildSideLabel(defendantNames) ?? (effectiveLegalTitleForDisplay(fallback.defendantLegalTitle) || fallback.defendant || null);
 
     return { plaintiff, defendant };
 }
