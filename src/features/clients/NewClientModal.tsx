@@ -87,7 +87,7 @@ function NewClientModal({onClose,onSave,loading,initialData,contextLabel}: NewCl
     // نفعّله (الفورم ممكن يبقى فيه بيانات مكتوبة/مُحمّلة مسبقًا)، حتى لو
     // الحفظ التلقائي نفسه معطّل ليه. useUnsavedChangesGuard بياخد أول قيمة
     // لـform (وقت الفتح) كـbaseline تلقائيًا، مفيش داعي لـstate إضافي.
-    const { guardedClose, confirmModal } = useUnsavedChangesGuard(form, form, onClose);
+    const { guardedClose, confirmModal } = useUnsavedChangesGuard(form, form, onClose, draft.clearDraft);
 
     const phoneWarn = useMemo(()=>validatePhone(form.phone), [form.phone]);
     const phoneWarn2 = useMemo(()=>validatePhone(form.phone2), [form.phone2]);
