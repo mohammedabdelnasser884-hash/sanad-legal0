@@ -2,6 +2,7 @@ import React, { useState, useCallback, useMemo } from 'react';
 import { db } from '../supabaseClient';
 import { recordError, recordSuccess } from '../systemHealth';
 import { ilikeOrClause } from '../shared/lib/sanitize';
+import { toast } from '../shared/lib/notifications';
 import type { CaseRow, ClientRow, ProfileRow } from '../types';
 // ⚡ NEW (خطة تفكيك الأعمدة القديمة، المرحلة B.4 — 6 أغسطس 2026): نفس
 // شكل صف الطرف المستخدم في B.1/B.2/B.3 (`PartyDisplayRow`) — بيتاح دلوقتي
@@ -179,6 +180,35 @@ function mapCaseRow(
     };
 }
 
+// ─────────────────────────────────────────────────────────
+//  ⚡ NEW (فيكس "نظام الأوفلاين ملوش قيمة" — 9 أغسطس 2026): بعد فيكس
+//  useAuthProfile.ts (المستخدم بقى يقدر يدخل التطبيق أوف لاين)، لسه
+//  فيه فجوة تانية — fetchCases/fetchClients كانوا بيسيبوا القايمة
+//  فاضية (أو زي ما هي من الجلسة قبل كده بس مفيش تحديث) لو نداء الشبكة
+//  فشل، من غير أي fallback لآخر بيانات اتحمّلت فعليًا. هنا بنخزّن أول
+//  صفحة بس (اللي فعليًا بتظهر في الداشبورد/التابات الرئيسية) في
+//  localStorage بعد كل تحميل ناجح، ونرجعلها لو النداء التالي فشل بسبب
+//  مفيش نت — مقيّدة بـtenant_id عشان مفيش تسريب بيانات مكتب لمكتب تاني
+//  على نفس الجهاز.
+const CASES_CACHE_KEY   = 'sanad_cached_cases_page0_v1';
+const CLIENTS_CACHE_KEY = 'sanad_cached_clients_page0_v1';
+
+function saveOfflineCache<T>(key: string, tenantId: string | null | undefined, items: T[]) {
+    try { localStorage.setItem(key, JSON.stringify({ tenantId: tenantId ?? null, items })); } catch { /* localStorage غير متاح — تجاهل */ }
+}
+
+function loadOfflineCache<T>(key: string, tenantId: string | null | undefined): T[] | null {
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as { tenantId: string | null; items: T[] };
+        if (parsed.tenantId !== (tenantId ?? null)) return null;
+        return parsed.items;
+    } catch {
+        return null;
+    }
+}
+
 export function useAppData(profile: ProfileRow | null) {
     const isAdmin = profile?.role === 'admin';
     const PAGE_SIZE = 15;
@@ -320,6 +350,19 @@ export function useAppData(profile: ProfileRow | null) {
             .range(from, to);
 
         if (error) {
+            // ⚡ NEW: لو الصفحة الأولى (اللي بتظهر فعليًا في الشاشة
+            // الرئيسية) وفيه نسخة محفوظة من قبل لنفس المكتب، بنعرضها
+            // بدل ما نسيب الشاشة فاضية/فيها رسالة خطأ بس — أوف لاين
+            // فعليًا المستخدم يقدر يشوف آخر قضايا اتحمّلت.
+            if (page === 0) {
+                const cached = loadOfflineCache<MappedCase>(CASES_CACHE_KEY, profile.tenant_id);
+                if (cached && cached.length > 0) {
+                    setCases(cached);
+                    setCasesLoading(false);
+                    toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من القضايا');
+                    return;
+                }
+            }
             setDbError('فشل تحميل القضايا — تحقق من الاتصال وأعد المحاولة');
             setCasesLoading(false);
             recordError('db_cases', error.message);
@@ -351,6 +394,8 @@ export function useAppData(profile: ProfileRow | null) {
 
         if (page === 0) setCases(mapped);
         else setCases((prev: MappedCase[]) => [...prev, ...mapped]);
+
+        if (page === 0) saveOfflineCache(CASES_CACHE_KEY, profile.tenant_id, mapped);
 
         setCasesTotal(count || 0);
         setCasesPage(page);
@@ -468,6 +513,15 @@ export function useAppData(profile: ProfileRow | null) {
 
         if (error) {
             recordError('db_clients', error.message);
+            // ⚡ NEW: نفس فكرة fetchCases فوق — fallback لآخر نسخة محفوظة
+            // من الصفحة الأولى (بلا بحث) لو الفشل بسبب مفيش نت.
+            if (page === 0 && !search.trim()) {
+                const cached = loadOfflineCache<MappedClient>(CLIENTS_CACHE_KEY, profile.tenant_id);
+                if (cached && cached.length > 0) {
+                    setClients(cached);
+                    toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من الموكلين');
+                }
+            }
         } else {
             const mapped: MappedClient[] = (data || []).map((c: ClientRow) => ({
                 ...c,
@@ -476,6 +530,7 @@ export function useAppData(profile: ProfileRow | null) {
             }));
             if (page === 0) setClients(mapped);
             else setClients((prev: MappedClient[]) => [...prev, ...mapped]);
+            if (page === 0 && !search.trim()) saveOfflineCache(CLIENTS_CACHE_KEY, profile.tenant_id, mapped);
             setClientsTotal(count || 0);
             setClientsPage(page);
             recordSuccess('db_clients');
