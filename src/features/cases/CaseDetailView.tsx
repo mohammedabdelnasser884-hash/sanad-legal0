@@ -27,7 +27,7 @@ import type { ClientModalContext } from '../clients/hooks/useClientActions';
 // ونفس التنسيق (case_parties + المسمى القانوني)، بدل الأعمدة القديمة
 // المنفصلة (plaintiff/defendant) المستخدمة سابقًا في الهيدر بس (بند 4 من
 // قسم 5 في الخطة).
-import { summarizePartySide } from '../../shared/parties/partyDisplay';
+import { summarizePartySide, effectiveLegalTitleForDisplay } from '../../shared/parties/partyDisplay';
 // 🆕 (خطة توحيد قفل الطرف — المرحلة 3، سد فجوة 5.3، 6 أغسطس 2026): مؤشر
 // orphan في الهيدر — كان مؤجل عمدًا في المرحلة 2 (linkedClients كانت
 // بتتجاهل الأطراف الـorphan بصمت، بلا أي مؤشر) لحد ما مرحلة الـBadges
@@ -536,8 +536,13 @@ function CaseDetailView({caseData, client, clients=[], onEnsureClientsLoaded, on
                         if (!summary) return null;
                         const legalTitle = (side === 'plaintiff' ? caseData.plaintiff_legal_title : caseData.defendant_legal_title) || '';
                         if (summary.othersCount > 0) {
+                            // ⚡ FIX (توحيد المسمى القانوني الجامع — 8 أغسطس 2026):
+                            // لو المسمى المكتوب صفة إجرائية عامة بس (زي "متهمين")
+                            // بدل مسمى مميّز فعلي (زي "ورثة فلان")، مبنستخدموش هنا
+                            // خالص — بيرجع الاسم الحقيقي بدل ما يطلع تركيب شاذ
+                            // زي "متهمين ضد فلان". شوف effectiveLegalTitleForDisplay.
                             return {
-                                name: legalTitle.trim() || summary.primaryName,
+                                name: effectiveLegalTitleForDisplay(legalTitle) || summary.primaryName,
                                 capacity: `+${summary.othersCount} ${summary.othersCount === 1 ? 'آخر' : 'آخرين'}`,
                             };
                         }
