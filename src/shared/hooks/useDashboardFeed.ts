@@ -1,5 +1,8 @@
 import { useState, useCallback } from 'react';
 import { db } from '../../supabaseClient';
+import { getCurrentTenantId } from '../../constants';
+import { createFetchGuard } from '../lib/offlineGuard';
+import { toast } from '../lib/notifications';
 import type { ProfileRow, ReminderRow } from '../../types';
 
 // شكل بيانات القضية المدمجة (embed) جوه استعلام case_sessions — نفس الأعمدة
@@ -41,6 +44,44 @@ export interface SessionFeedItem {
 // شكل صف المهمة (reminder) اللي بيترجع من select('id,title,due_date,notes,done')
 export type TaskFeedItem = Pick<ReminderRow, 'id' | 'title' | 'due_date' | 'notes' | 'done'>;
 
+// ─────────────────────────────────────────────────────────
+//  ⚡ NEW (فيكس "تأخير محسوس عند التنقل أوف لاين، جزء 4" — 9 أغسطس 2026):
+//  الملف ده (بيغذّي تاب الداشبورد نفسه — أرجح تاب بيتفتح) مكنش عنده أي
+//  حماية خالص، ولا حتى كاش fallback زي useAppData.ts/useRemindersTab.ts/
+//  CalendarTab.tsx — أوف لاين كان معناه شاشة فاضية بصمت (مفيش حتى بانر
+//  خطأ). بنضيف هنا نفس نمط الحماية (offlineGuard) + كاش بسيط لكل قائمة
+//  من القوائم الأربعة.
+// ─────────────────────────────────────────────────────────
+const DASHBOARD_CACHE_KEY = 'sanad_cached_dashboard_feed_v1';
+
+interface DashboardCache {
+    tenantId: string | null;
+    todaySessions?: SessionFeedItem[];
+    upcomingSessions?: SessionFeedItem[];
+    missedSessions?: SessionFeedItem[];
+    upcomingTasks?: TaskFeedItem[];
+    missedTasks?: TaskFeedItem[];
+}
+
+function loadDashboardCache(): DashboardCache | null {
+    try {
+        const raw = localStorage.getItem(DASHBOARD_CACHE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as DashboardCache;
+        if (parsed.tenantId !== getCurrentTenantId()) return null;
+        return parsed;
+    } catch {
+        return null;
+    }
+}
+
+function saveDashboardCache(patch: Partial<DashboardCache>) {
+    try {
+        const current = loadDashboardCache() || { tenantId: getCurrentTenantId() };
+        localStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify({ ...current, tenantId: getCurrentTenantId(), ...patch }));
+    } catch { /* localStorage غير متاح — تجاهل */ }
+}
+
 export function useDashboardFeed(profile: ProfileRow | null) {
     const [todaySessions,    setTodaySessions]    = useState<SessionFeedItem[]>([]);  // جلسات اليوم فقط
     const [upcomingSessions, setUpcomingSessions] = useState<SessionFeedItem[]>([]);  // بكره + 6 أيام
@@ -75,15 +116,43 @@ export function useDashboardFeed(profile: ProfileRow | null) {
         if (!profile) return;
         setLoadingUrgent(true);
         const todayStr = fmtDate(new Date());
-        const { data, error } = await db.from('case_sessions')
-            .select('id, session_date, session_time, session_floor, session_hall, description, case_id, client_id, result, next_action, title, case_number, court, case_type, circuit_number, cases(id,title,court_name,case_type,case_number_official,client_id)')
-            .eq('session_date', todayStr)
-            .order('session_date', { ascending: true });
-        // 🔒 FIX (تشخيص لوجز E2E — 30 يوليو 2026): كان بيتجاهل error تمامًا —
-        // أي فشل حقيقي في الاستعلام كان بيرجّع قائمة فاضية بصمت من غير أي أثر
-        // في الكونسول، يصعّب تشخيص أي مشكلة مستقبلية بنفس الطريقة.
-        if (error) console.error('[Dashboard] فشل تحميل جلسات اليوم:', error.message);
+        const guard = createFetchGuard();
+        let data: SessionFeedItem[] | null = null;
+        let error: { message: string } | null = null;
+        if (guard.offline) {
+            error = { message: 'offline' };
+        } else {
+            try {
+                const res = await db.from('case_sessions')
+                    .select('id, session_date, session_time, session_floor, session_hall, description, case_id, client_id, result, next_action, title, case_number, court, case_type, circuit_number, cases(id,title,court_name,case_type,case_number_official,client_id)')
+                    .eq('session_date', todayStr)
+                    .order('session_date', { ascending: true })
+                    .abortSignal(guard.controller.signal);
+                data = res.data;
+                error = res.error;
+            } catch (err) {
+                error = { message: guard.didTimeOut() ? 'timeout' : (err as { message?: string })?.message || 'fetch failed' };
+            } finally {
+                guard.cleanup();
+            }
+        }
+        if (error) {
+            // 🔒 FIX (تشخيص لوجز E2E — 30 يوليو 2026): كان بيتجاهل error تمامًا —
+            // أي فشل حقيقي في الاستعلام كان بيرجّع قائمة فاضية بصمت من غير أي أثر
+            // في الكونسول. دلوقتي كمان بنجرّب الكاش قبل ما نسيب القائمة فاضية.
+            const cached = loadDashboardCache();
+            if (cached?.todaySessions) {
+                setTodaySessions(cached.todaySessions);
+                if (guard.offline) toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من جلسات اليوم');
+            } else {
+                console.error('[Dashboard] فشل تحميل جلسات اليوم:', error.message);
+                setTodaySessions([]);
+            }
+            setLoadingUrgent(false);
+            return;
+        }
         setTodaySessions(data || []);
+        saveDashboardCache({ todaySessions: data || [] });
         setLoadingUrgent(false);
     }, [profile]);
 
@@ -93,13 +162,40 @@ export function useDashboardFeed(profile: ProfileRow | null) {
         const today    = new Date();
         const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
         const endDay   = new Date(today); endDay.setDate(today.getDate() + 7);
-        const { data, error } = await db.from('case_sessions')
-            .select('id, session_date, session_time, session_floor, session_hall, description, case_id, client_id, result, next_action, title, case_number, court, case_type, circuit_number, cases(id,title,court_name,case_type,case_number_official,client_id)')
-            .gte('session_date', fmtDate(tomorrow))
-            .lte('session_date', fmtDate(endDay))
-            .order('session_date', { ascending: true });
-        if (error) console.error('[Dashboard] فشل تحميل جلسات الأسبوع القادم:', error.message);
+        const guard = createFetchGuard();
+        let data: SessionFeedItem[] | null = null;
+        let error: { message: string } | null = null;
+        if (guard.offline) {
+            error = { message: 'offline' };
+        } else {
+            try {
+                const res = await db.from('case_sessions')
+                    .select('id, session_date, session_time, session_floor, session_hall, description, case_id, client_id, result, next_action, title, case_number, court, case_type, circuit_number, cases(id,title,court_name,case_type,case_number_official,client_id)')
+                    .gte('session_date', fmtDate(tomorrow))
+                    .lte('session_date', fmtDate(endDay))
+                    .order('session_date', { ascending: true })
+                    .abortSignal(guard.controller.signal);
+                data = res.data;
+                error = res.error;
+            } catch (err) {
+                error = { message: guard.didTimeOut() ? 'timeout' : (err as { message?: string })?.message || 'fetch failed' };
+            } finally {
+                guard.cleanup();
+            }
+        }
+        if (error) {
+            const cached = loadDashboardCache();
+            if (cached?.upcomingSessions) {
+                setUpcomingSessions(cached.upcomingSessions);
+                if (guard.offline) toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من جلسات الأسبوع القادم');
+            } else {
+                console.error('[Dashboard] فشل تحميل جلسات الأسبوع القادم:', error.message);
+                setUpcomingSessions([]);
+            }
+            return;
+        }
         setUpcomingSessions(data || []);
+        saveDashboardCache({ upcomingSessions: data || [] });
     }, [profile]);
 
     // ── جلب الجلسات الفائتة ──
@@ -109,23 +205,50 @@ export function useDashboardFeed(profile: ProfileRow | null) {
     const fetchMissedSessions = useCallback(async () => {
         if (!profile) return;
         const todayStr = fmtDate(new Date());
-
-        // 1. كل الـ case_ids اللي عندها جلسة مستقبلية (اليوم أو بعده)
-        const { data: futureData } = await db.from('case_sessions')
-            .select('case_id')
-            .gte('session_date', todayStr);
-        const caseIdsWithFuture = new Set((futureData || []).map((s: { case_id: string | null }) => s.case_id));
-
-        // 2. جيب أحدث جلسة فائتة لكل قضية (بدون limit — RLS بتحمي الحجم)
-        // ⚠️ FIX (14 يوليو 2026): كان ناقص session_floor/session_hall هنا مقارنة
-        // بالـ select بتاع جلسات اليوم/الأسبوع فوق، مع إن SessionFeedItem بيطلبهم
-        // إجباريًا — ده كان بيكسر النوع وقت التخزين في setMissedSessions.
-        const { data: pastData } = await db.from('case_sessions')
-            .select('id, session_date, session_time, session_floor, session_hall, description, case_id, client_id, result, next_action, title, case_number, court, case_type, circuit_number, cases(id,title,court_name,case_type,case_number_official,client_id)')
-            .lt('session_date', todayStr)
-            .order('session_date', { ascending: false });
+        const guard = createFetchGuard();
+        let futureData: Array<{ case_id: string | null }> | null = null;
+        let pastData: SessionFeedItem[] | null = null;
+        let error: { message: string } | null = null;
+        if (guard.offline) {
+            error = { message: 'offline' };
+        } else {
+            try {
+                // 1. كل الـ case_ids اللي عندها جلسة مستقبلية (اليوم أو بعده)
+                // 2. جيب أحدث جلسة فائتة لكل قضية (بدون limit — RLS بتحمي الحجم)
+                const [futureRes, pastRes] = await Promise.all([
+                    db.from('case_sessions')
+                      .select('case_id')
+                      .gte('session_date', todayStr)
+                      .abortSignal(guard.controller.signal),
+                    db.from('case_sessions')
+                      .select('id, session_date, session_time, session_floor, session_hall, description, case_id, client_id, result, next_action, title, case_number, court, case_type, circuit_number, cases(id,title,court_name,case_type,case_number_official,client_id)')
+                      .lt('session_date', todayStr)
+                      .order('session_date', { ascending: false })
+                      .abortSignal(guard.controller.signal),
+                ]);
+                futureData = futureRes.data;
+                pastData = pastRes.data;
+                error = pastRes.error || futureRes.error || null;
+            } catch (err) {
+                error = { message: guard.didTimeOut() ? 'timeout' : (err as { message?: string })?.message || 'fetch failed' };
+            } finally {
+                guard.cleanup();
+            }
+        }
+        if (error) {
+            const cached = loadDashboardCache();
+            if (cached?.missedSessions) {
+                setMissedSessions(cached.missedSessions);
+                if (guard.offline) toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من الجلسات الفائتة');
+            } else {
+                console.error('[Dashboard] فشل تحميل الجلسات الفائتة:', error.message);
+                setMissedSessions([]);
+            }
+            return;
+        }
 
         // 3. فلتر: قضايا مفيهاش جلسة مستقبلية + خد جلسة واحدة (الأحدث) لكل قضية
+        const caseIdsWithFuture = new Set((futureData || []).map((s: { case_id: string | null }) => s.case_id));
         const seenCases = new Set();
         const uniqueMissed = (pastData || []).filter((s: SessionFeedItem) => {
             if (caseIdsWithFuture.has(s.case_id)) return false;
@@ -134,19 +257,47 @@ export function useDashboardFeed(profile: ProfileRow | null) {
             return true;
         });
         setMissedSessions(uniqueMissed);
+        saveDashboardCache({ missedSessions: uniqueMissed });
     }, [profile]);
 
     // ── جلب المهام ──
     const fetchTasks = useCallback(async () => {
         if (!profile) return;
         const todayStr = fmtDate(new Date());
-        const { data } = await db.from('reminders')
-            .select('id,title,due_date,notes,done')
-            .eq('done', false)
-            .order('due_date', { ascending: true });
+        const guard = createFetchGuard();
+        let data: TaskFeedItem[] | null = null;
+        let error: { message: string } | null = null;
+        if (guard.offline) {
+            error = { message: 'offline' };
+        } else {
+            try {
+                const res = await db.from('reminders')
+                    .select('id,title,due_date,notes,done')
+                    .eq('done', false)
+                    .order('due_date', { ascending: true })
+                    .abortSignal(guard.controller.signal);
+                data = res.data;
+                error = res.error;
+            } catch (err) {
+                error = { message: guard.didTimeOut() ? 'timeout' : (err as { message?: string })?.message || 'fetch failed' };
+            } finally {
+                guard.cleanup();
+            }
+        }
+        if (error) {
+            const cached = loadDashboardCache();
+            if (cached?.upcomingTasks || cached?.missedTasks) {
+                setUpcomingTasks(cached.upcomingTasks || []);
+                setMissedTasks(cached.missedTasks || []);
+            }
+            return;
+        }
         const all = data || [];
-        setUpcomingTasks(all.filter((r: TaskFeedItem) => (r.due_date as string) >= todayStr));
-        setMissedTasks(all.filter((r: TaskFeedItem) => (r.due_date as string) < todayStr));
+        const upcoming = all.filter((r: TaskFeedItem) => (r.due_date as string) >= todayStr);
+        const missed   = all.filter((r: TaskFeedItem) => (r.due_date as string) < todayStr);
+        setUpcomingTasks(upcoming);
+        setMissedTasks(missed);
+        saveDashboardCache({ upcomingTasks: upcoming, missedTasks: missed });
     }, [profile]);
 
     return {
