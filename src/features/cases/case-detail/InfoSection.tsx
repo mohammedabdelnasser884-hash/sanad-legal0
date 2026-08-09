@@ -8,7 +8,7 @@ import { findClientDataMismatches, findPartyDataMismatches, type FieldMismatch }
 import { ClientSearchSelect, type ClientSearchResult } from '../../../shared/ui/ClientSearchSelect';
 // 🆕 (خطة "المسمى القانوني" — مرحلة 5): منطق موحّد لعرض المسمى القانوني
 // عند تعدد الأشخاص تحت طرف واحد — نفس الدالة مستخدمة في هيدر CaseDetailView.tsx.
-import { summarizePartySide } from '../../../shared/parties/partyDisplay';
+import { summarizePartySide, effectiveLegalTitleForDisplay } from '../../../shared/parties/partyDisplay';
 // 🆕 (خطة توحيد قفل الطرف، المرحلة 2 — 6 أغسطس 2026)
 import { isOrphanedLink } from '../../../shared/parties/partyDomainService';
 
@@ -240,8 +240,13 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                             const summary = summarizePartySide(list);
                             if (!summary || summary.othersCount === 0) return null;
                             const title = (side === 'plaintiff' ? caseData.plaintiff_legal_title : caseData.defendant_legal_title) || '';
-                            if (!title.trim()) return null;
-                            return React.createElement('p', {className: `text-[10px] font-black ${colorClass} mb-1.5`}, `🔖 ${title.trim()}`);
+                            // ⚡ FIX (توحيد المسمى القانوني الجامع — 8 أغسطس 2026): لو
+                            // المسمى صفة عامة بس (زي "متهمين")، مبيضيفش أي معلومة جديدة
+                            // فوق صفة كل شخص المعروضة أصلاً تحت (renderParty) — بنخفيه.
+                            // "ورثة فلان" (مسمى مميّز فعلي) بيفضل يظهر زي الأول بالظبط.
+                            const effectiveTitle = effectiveLegalTitleForDisplay(title);
+                            if (!effectiveTitle) return null;
+                            return React.createElement('p', {className: `text-[10px] font-black ${colorClass} mb-1.5`}, `🔖 ${effectiveTitle}`);
                         };
                         return React.createElement('div', {className: "space-y-3"},
                             renderLegalTitle('plaintiff', 'text-emerald-400/80'),
