@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { I } from '../../constants';
 import type { MappedCase, MappedClient } from '../../hooks/useAppData';
+import { db } from '../../supabaseClient';
+import { recordError } from '../../systemHealth';
 
 const PAGE_SIZE = 15; // ⚠️ لازم يطابق PAGE_SIZE الفعلي في useAppData.ts (fetchClients)
                        // — كان هنا 20 غلط، وده كان بيسبب اختفاء آخر موكلين لو
@@ -56,6 +58,46 @@ function ClientsTab({ cases, clients, clientSearch, setClientSearch, clientsPage
   const filtered  = clients.filter((c: MappedClient) => activeTab === 'individual' ? !isEntity(c) : isEntity(c));
   const indCount  = clients.filter((c: MappedClient) => !isEntity(c)).length;
   const entCount  = clients.filter((c: MappedClient) =>  isEntity(c)).length;
+
+  // ⚡ FIX (باگ "قضية X" ناقصة في كارت الموكل لأطراف ثانويين — 9 أغسطس
+  // 2026): كارت القائمة هنا كان بيحسب caseCount بس من
+  // `cases.filter(ca => ca.client_id===c.id)` — عمود cases.client_id
+  // القديم بياخد موكل واحد أساسي بس للقضية، فموكل تاني مربوط فعليًا عن
+  // طريق case_parties (طرف/ورثة إلخ) كان بيطلع بادج القضايا مختفي خالص
+  // في القائمة، رغم إن كارت تفاصيل الموكل (ClientDetailModal عن طريق
+  // selectedClientCases في AppModals.tsx) بيعرضها صح لأنه بيسأل قاعدة
+  // البيانات مباشرة على case_parties.client_id. هنا بنعمل نفس الفكرة —
+  // استعلام واحد مجمّع لكل موكلين الصفحة الحالية (مش استعلام لكل كارت
+  // لوحده) بيرجّع كل case_id مرتبط بيهم عن طريق case_parties، ونضمّه
+  // لعمود client_id القديم وقت حساب caseCount تحت.
+  const [partyCaseIdsByClient, setPartyCaseIdsByClient] = useState<Record<string, string[]>>({});
+  useEffect(() => {
+    const clientIds = clients.map((c: MappedClient) => c.id);
+    if (clientIds.length === 0) { setPartyCaseIdsByClient({}); return; }
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await db.from('case_parties').select('client_id, case_id').in('client_id', clientIds);
+      if (error) { recordError('db_case_parties_by_client_ids', error.message); return; }
+      if (cancelled) return;
+      const grouped: Record<string, string[]> = {};
+      (data || []).forEach((row: { client_id: string | null; case_id: string | null }) => {
+        if (!row.client_id || !row.case_id) return;
+        (grouped[row.client_id] ||= []).push(row.case_id);
+      });
+      setPartyCaseIdsByClient(grouped);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clients]);
+
+  // اتحاد case_id من العمود القديم (cases.client_id) + case_parties،
+  // من غير عدّ مكرر لو نفس القضية موجودة في المصدرين مع بعض.
+  const caseCountFor = (clientId: string) => {
+    const idSet = new Set<string>();
+    cases.forEach((ca: MappedCase) => { if (ca.client_id === clientId) idSet.add(ca.id); });
+    (partyCaseIdsByClient[clientId] || []).forEach((id) => idSet.add(id));
+    return idSet.size;
+  };
 
   // ── تحميل تلقائي للصفحة التالية لو التاب الحالي (أفراد/شركات) فاضي ──
   // محليًا بس لسه فيه موكلين متحمّلينش (fetchClients بتجيب الأنواع مع بعض
@@ -209,7 +251,7 @@ function ClientsTab({ cases, clients, clientSearch, setClientSearch, clientsPage
         )
       : React.createElement('div',{className:"space-y-2"},
           filtered.map((c: MappedClient) => {
-            const caseCount = cases.filter((ca: MappedCase) => ca.client_id===c.id).length;
+            const caseCount = caseCountFor(c.id);
             const ent = isEntity(c);
             const typeLabel = c.type==='company'?'شركة':c.type==='government'?'جهة حكومية':'فرد';
             return React.createElement('div',{
