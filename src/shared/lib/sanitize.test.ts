@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { escapeHtml, ilikeOrClause, escapeTelegramHtml } from './sanitize';
+import { escapeHtml, ilikeOrClause, escapeTelegramHtml, normalizeArabicDigits } from './sanitize';
 
 describe('escapeHtml', () => {
     it('نص عادي → يرجع زي ما هو', () => {
@@ -90,5 +90,39 @@ describe('ilikeOrClause', () => {
 
     it('نص بحث فاضي → برضه بيرجع شرط صالح من غير خطأ', () => {
         expect(ilikeOrClause('notes', '')).toBe('notes.ilike."%%"');
+    });
+});
+
+describe('normalizeArabicDigits', () => {
+    it('أرقام عربية شرقية → إنجليزية عادية', () => {
+        expect(normalizeArabicDigits('٦٣٥٢')).toBe('6352');
+    });
+
+    it('أرقام فارسية شرقية → إنجليزية عادية', () => {
+        expect(normalizeArabicDigits('۶۳۵۲')).toBe('6352');
+    });
+
+    it('أرقام إنجليزية → بترجع زي ما هي بدون تغيير', () => {
+        expect(normalizeArabicDigits('6352')).toBe('6352');
+    });
+
+    it('نص عربي فيه أرقام مختلطة → الأرقام بس بتتحول والحروف تفضل زي ما هي', () => {
+        expect(normalizeArabicDigits('القضية رقم ٦٣٥٢ لسنة ٢٠٢٦')).toBe('القضية رقم 6352 لسنة 2026');
+    });
+
+    it('رقم موبايل عربي شرقي كامل → إنجليزي كامل', () => {
+        expect(normalizeArabicDigits('٠١٢٤٥٨٤٨٤٥٧')).toBe('01245848457');
+    });
+
+    it('نص فاضي → يرجع فاضي', () => {
+        expect(normalizeArabicDigits('')).toBe('');
+    });
+});
+
+describe('ilikeOrClause + normalizeArabicDigits (تكامل)', () => {
+    it('رقم قضية بأرقام عربية شرقية → شرط ilike بأرقام إنجليزية (البحث بيتطابق مع القيمة المخزّنة فعليًا)', () => {
+        expect(ilikeOrClause('case_number_official', '٦٣٥٢')).toBe(
+            'case_number_official.ilike."%6352%"'
+        );
     });
 });
