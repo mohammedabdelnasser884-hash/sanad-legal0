@@ -1,5 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
+import { db } from '../supabaseClient';
+import { recordError } from '../systemHealth';
 import { COUNTRY_CONFIGS } from '../constants';
 import type { TabName } from '../useNavigation';
 import type { NavigationState } from '../useNavigation';
@@ -21,6 +23,14 @@ import CaseDetailView from '../features/cases/CaseDetailView';
 interface AppModalsProps {
     // ── بيانات أساسية ──
     cases: MappedCase[];
+    // ⚡ FIX (باگ "القضايا المرتبطة" غلط لموكل مش أساسي — 9 أغسطس 2026):
+    // `cases` فوق مقيّدة بصفحة واحدة (PAGE_SIZE) + فلتر الحالة الحالي —
+    // موكل تاني على قضية عنده أكتر من موكل ممكن تكون قضيته مش من ضمن الـ15
+    // المحمّلين. casesWithExtras/ensureCasesLoaded (من useAppData) بيجيبوا
+    // أي قضية بالـid مباشرة من قاعدة البيانات بغض النظر عن الصفحة — نفس
+    // الآلية المستخدمة فعليًا في CaseDetailView لموكلين الأطراف.
+    casesWithExtras: MappedCase[];
+    ensureCasesLoaded: (ids: (string | null | undefined)[]) => void | Promise<void>;
     clients: MappedClient[];
     // ⚡ FIX (باگ "الموكل محذوف" غلط — 8 أغسطس 2026): بتوصّل لـ
     // CaseDetailView عشان تجيب أي موكل طرف لسه مش محمّل بالـid مباشرة
@@ -145,7 +155,7 @@ interface AppModalsProps {
 //  "Modals" الأصلية، وده مكوّن منفصل خالص اتعمل من قبل.)
 // ─────────────────────────────────────────────────────────
 function AppModals({
-    cases, clients, ensureClientsLoaded, lawyers, profile, country, isAdmin, casesFilter, nav,
+    cases, casesWithExtras, ensureCasesLoaded, clients, ensureClientsLoaded, lawyers, profile, country, isAdmin, casesFilter, nav,
     showSearch, showAI, showCaseModal, showNewSessionModal,
     showLawyerModal, showClientModal, savingCase, savingLawyer, savingClient,
     deleteConfirm, selectedClient, selectedClientEditMode, selectedCase, selectedCaseInitialTab,
@@ -163,6 +173,57 @@ function AppModals({
     handleSaveClient, handleDeleteClient, handleUpdateClient, handleSaveLawyer,
     sendTelegram,
 }: AppModalsProps) {
+    // ⚡ FIX (باگ "القضايا المرتبطة" غلط لموكل تاني على نفس القضية — 9
+    // أغسطس 2026): "القضايا المرتبطة" في ملف الموكل كانت بتفلتر بس
+    // `cases.filter(c => c.client_id === selectedClient.id)` — عمود
+    // `cases.client_id` القديم بياخد موكل واحد بس للقضية، فموكل تاني
+    // (مربوط فعليًا في case_parties) ميظهرش خالص، وحتى الموكل الصح كان
+    // ممكن تفوته القضية لو مش من ضمن الـ15 قضية المحمّلين في الصفحة
+    // الحالية. هنا بنجيب كل قضايا الموكل ده مباشرة من قاعدة البيانات
+    // (case_parties.client_id + عمود cases.client_id القديم للقضايا اللي
+    // لسه معتمدة عليه بس) وقت فتح مودال تفاصيل الموكل، وبعدين بنستخدم
+    // ensureCasesLoaded عشان نجيب القضايا دي كاملة بغض النظر عن الصفحة.
+    const clientDetailOpen = nav.isOpen('clientDetail');
+    const selectedClientId = selectedClient?.id ?? null;
+    const [linkedCaseIds, setLinkedCaseIds] = React.useState<string[] | null>(null);
+
+    React.useEffect(() => {
+        if (!selectedClientId || !clientDetailOpen) {
+            setLinkedCaseIds(null);
+            return;
+        }
+        let cancelled = false;
+        (async () => {
+            const [partyRes, legacyRes] = await Promise.all([
+                db.from('case_parties').select('case_id').eq('client_id', selectedClientId),
+                db.from('cases').select('id').eq('client_id', selectedClientId).is('deleted_at', null),
+            ]);
+            if (partyRes.error) recordError('db_case_parties_by_client', partyRes.error.message);
+            if (legacyRes.error) recordError('db_cases_by_client_id', legacyRes.error.message);
+            if (cancelled) return;
+            const idSet = new Set<string>();
+            (partyRes.data || []).forEach((r: { case_id: string | null }) => { if (r.case_id) idSet.add(r.case_id); });
+            (legacyRes.data || []).forEach((r: { id: string }) => idSet.add(r.id));
+            const idList = Array.from(idSet);
+            if (idList.length > 0) await ensureCasesLoaded(idList);
+            if (!cancelled) setLinkedCaseIds(idList);
+        })();
+        return () => { cancelled = true; };
+        // ⚠️ ensureCasesLoaded مقصودة برة الـdeps: هي useCallback بتتغيّر
+        // reference بتاعها كل ما cases/extraCases تتحدّث (useAppData.ts) —
+        // ضمّها هنا كان هيعيد نفس الاستعلام تكرارًا كل تغيير صفحة/قضية
+        // من غير أي داعي وقت ما مودال الموكل فاضل مفتوح. الاستعلام أصلاً
+        // بيتعمل مرة واحدة لكل موكل (selectedClientId) أو لما المودال
+        // يتفتح/يتقفل (clientDetailOpen)، وده الوحيد اللي محتاج يعيد التشغيل.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedClientId, clientDetailOpen]);
+
+    // لحد ما الاستعلام يخلص، بنسيب السلوك القديم كحالة انتقالية بدل ما
+    // نعرض "لا توجد قضايا" غلط للحظة.
+    const selectedClientCases = linkedCaseIds
+        ? casesWithExtras.filter((c) => linkedCaseIds.includes(c.id))
+        : cases.filter((c) => c.client_id === selectedClientId);
+
     return React.createElement(React.Fragment, null,
         // ⚠️ ملحوظة نوع (بدون تغيير سلوك): نتيجة بحث القضايا (SearchCaseResult
         // داخل UniversalSearchModal.tsx) شكلها أضيق من MappedCase الكامل —
@@ -209,7 +270,6 @@ function AppModals({
             onSaved: () => { fetchTodaySessions(); fetchUpcomingSessions(); fetchCases(0, casesFilter); onStandaloneSessionSaved(); },
             onClientAdded: () => { fetchClients(0, clientSearch); },
             onNotify: sendTelegram,
-            cases,
             onOpenCreateClient: handleOpenCreateClientForSession,
             onOpenCreateClientForCase: handleOpenCreateClientForSessionCase,
             onOpenCreateClientForParty: handleOpenCreateClientForSessionParty,
@@ -223,7 +283,7 @@ function AppModals({
         }),
         selectedClient && nav.isOpen('clientDetail') && React.createElement(ClientDetailModal, {
             client: selectedClient,
-            cases: cases.filter((c) => c.client_id === selectedClient?.id),
+            cases: selectedClientCases,
             onClose: () => { nav.closeModal('clientDetail'); _setSelectedClient(null); },
             onDelete: handleDeleteClient, onEdit: handleUpdateClient,
             // 🔒 FIX (تقرير الموثوقية — نتيجة 1): EditClientModal ما كانش عنده
