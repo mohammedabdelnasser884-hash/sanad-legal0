@@ -39,7 +39,10 @@ test('إنشاء قضية بأكتر من مدعي واحد — فاليديشن
 
   // 1) محاولة حفظ من غير مسمى قانوني → رفض بتوست واضح، والمودال يفضل مفتوح
   await page.getByTestId('new-case-save').click();
-  await expectToast(page, '⚠️ الطرف الأول (المدعي) فيه أكثر من شخص — لازم تكتب "المسمى القانوني" الجامع لهذا الطرف');
+  // ⚡ FIX (تحليل لوجز E2E — 9 أغسطس 2026): الرسالة اتغيّرت عمدًا في
+  // casePartiesValidation.ts النهاردة — الطرف الأول ممكن يكون طاعن/مستأنف
+  // مش مدعي بالضرورة، فاللقب اتشال من الرسالة.
+  await expectToast(page, '⚠️ الطرف الأول فيه أكثر من شخص — لازم تكتب "المسمى القانوني" الجامع لهذا الطرف');
   await expect(page.getByTestId('new-case-save')).toBeVisible();
   await expect(page.getByTestId('case-card').filter({ hasText: caseTitle })).toHaveCount(0);
 
