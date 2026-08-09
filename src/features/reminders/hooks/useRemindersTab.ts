@@ -15,14 +15,21 @@ import type { ReminderRow, ProfileRow } from '../../../types';
 //  محاولة استرجاع آخر نسخة اتحمّلت.
 // ─────────────────────────────────────────────────────────
 const REMINDERS_CACHE_KEY = 'sanad_cached_reminders_upcoming_v1';
+// ⚡ NEW (تكملة الفيكس — نفس التاريخ): fetchOverdue/fetchDone كانوا بيسجّلوا
+// db_reminders كـ"فاشل" دايمًا لما يحصل خطأ، حتى وقت fetchUpcoming كان بيرجع
+// بهدوء من الكاش. النتيجة: البانر الأحمر يرجع يظهر تاني فورًا بسبب الاتنين
+// دول، حتى لو fetchUpcoming نجح offline. بنطبّق نفس فكرة الكاش عليهم، بس
+// بنكاش صفحة 0 بس (أول تحميل)، مش كل صفحات الـpagination.
+const REMINDERS_CACHE_KEY_OVERDUE = 'sanad_cached_reminders_overdue_v1';
+const REMINDERS_CACHE_KEY_DONE = 'sanad_cached_reminders_done_v1';
 
-function saveRemindersCache(tenantId: string | null | undefined, items: ReminderRow[]) {
-    try { localStorage.setItem(REMINDERS_CACHE_KEY, JSON.stringify({ tenantId: tenantId ?? null, items })); } catch { /* localStorage غير متاح — تجاهل */ }
+function saveCache(key: string, tenantId: string | null | undefined, items: ReminderRow[]) {
+    try { localStorage.setItem(key, JSON.stringify({ tenantId: tenantId ?? null, items })); } catch { /* localStorage غير متاح — تجاهل */ }
 }
 
-function loadRemindersCache(tenantId: string | null | undefined): ReminderRow[] | null {
+function loadCache(key: string, tenantId: string | null | undefined): ReminderRow[] | null {
     try {
-        const raw = localStorage.getItem(REMINDERS_CACHE_KEY);
+        const raw = localStorage.getItem(key);
         if (!raw) return null;
         const parsed = JSON.parse(raw) as { tenantId: string | null; items: ReminderRow[] };
         if (parsed.tenantId !== (tenantId ?? null)) return null;
@@ -30,6 +37,14 @@ function loadRemindersCache(tenantId: string | null | undefined): ReminderRow[] 
     } catch {
         return null;
     }
+}
+
+function saveRemindersCache(tenantId: string | null | undefined, items: ReminderRow[]) {
+    saveCache(REMINDERS_CACHE_KEY, tenantId, items);
+}
+
+function loadRemindersCache(tenantId: string | null | undefined): ReminderRow[] | null {
+    return loadCache(REMINDERS_CACHE_KEY, tenantId);
 }
 
 export interface ReminderForm {
@@ -121,14 +136,34 @@ export function useRemindersTab(initialFilter?: string | null, profile: ProfileR
             .lt('due_date', todayStr)
             .order('due_date', {ascending: false})
             .range(from, to);
-        if(error){ recordError('db_reminders', error.message); return; }
+        if(error){
+            // نفس فكرة fetchUpcoming: أول تحميل (صفحة 0، من غير append) بيرجع
+            // بهدوء من الكاش لو موجود، من غير ما يسجّل خطأ. صفحات "تحميل المزيد"
+            // التالية (append) مالهاش كاش، فبتفضل تسجّل الخطأ زي ما هي.
+            if (page === 0 && !append) {
+                const cached = loadCache(REMINDERS_CACHE_KEY_OVERDUE, profile?.tenant_id);
+                if (cached && cached.length > 0) {
+                    setOverdueList(cached);
+                    setOverdueTotal(cached.length);
+                    setOverduePage(0);
+                    setOverdueMore(false);
+                    return;
+                }
+            }
+            recordError('db_reminders', error.message);
+            return;
+        }
+        recordSuccess('db_reminders');
         const list = data || [];
         if(append) setOverdueList((prev) => [...prev, ...list]);
-        else setOverdueList(list);
+        else {
+            setOverdueList(list);
+            if (page === 0) saveCache(REMINDERS_CACHE_KEY_OVERDUE, profile?.tenant_id, list);
+        }
         setOverdueTotal(count || 0);
         setOverduePage(page);
         setOverdueMore((page + 1) * PAGE_SIZE < (count || 0));
-    }, []);
+    }, [profile]);
 
     // ── جلب المنجزة (paginated) ──
     const fetchDone = useCallback(async (page = 0, append = false) => {
@@ -139,14 +174,31 @@ export function useRemindersTab(initialFilter?: string | null, profile: ProfileR
             .eq('done', true)
             .order('due_date', {ascending: false})
             .range(from, to);
-        if(error){ recordError('db_reminders', error.message); return; }
+        if(error){
+            if (page === 0 && !append) {
+                const cached = loadCache(REMINDERS_CACHE_KEY_DONE, profile?.tenant_id);
+                if (cached && cached.length > 0) {
+                    setDoneList(cached);
+                    setDoneTotal(cached.length);
+                    setDonePage(0);
+                    setDoneMore(false);
+                    return;
+                }
+            }
+            recordError('db_reminders', error.message);
+            return;
+        }
+        recordSuccess('db_reminders');
         const list = data || [];
         if(append) setDoneList((prev) => [...prev, ...list]);
-        else setDoneList(list);
+        else {
+            setDoneList(list);
+            if (page === 0) saveCache(REMINDERS_CACHE_KEY_DONE, profile?.tenant_id, list);
+        }
         setDoneTotal(count || 0);
         setDonePage(page);
         setDoneMore((page + 1) * PAGE_SIZE < (count || 0));
-    }, []);
+    }, [profile]);
 
     // ── جلب كل البيانات عند الفتح ──
     const fetchReminders = useCallback(async () => {
