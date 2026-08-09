@@ -984,9 +984,22 @@ window.__dbWrite = async function <T extends DbWriteTable>({ type, table, data, 
 //  للصفحة بنفسه. الفيكس: نربط المستمعين دول بأحداث المتصفح الحقيقية
 //  'online'/'offline' مباشرة (بدل الأحداث المخصصة اللي محدش بيبعتها).
 // ══════════════════════════════════════════════════════════
-window.addEventListener('offline', async () => {
-    const count = await window.__getOfflineQueueCount?.() || 0;
-    showOfflineBanner(count);
+// 🐛 FIX (اللوج الجديد بعد الفيكس السابق — 9 أغسطس 2026): كان الـlistener
+// بينتظر (await) نتيجة __getOfflineQueueCount قبل ما ينادي showOfflineBanner
+// أصلاً — يعني ظهور البانر نفسه (مش بس رقم البادج) كان معلّق على نداء
+// غير متزامن مالوش داعي يوقف عرض البانر. النتيجة: تأخير حقيقي (ولو بسيط)
+// في ظهور بانر "أنت أوف لاين" بعد الحدث فعليًا، وده اللي كان بيخلي تست
+// "showOfflineBanner بتتنادى" يفشل أحيانًا (توقيت الـmicrotask بتاع await
+// مش مضمون يتغطى بعدد محدد من "await Promise.resolve()" في التست).
+// الحل: نعرض البانر فورًا (بدون انتظار)، وبعدين لما الرقم يوصل نحدّث
+// البادج بنداء تاني — pendingCount اختياري أصلاً (افتراضيًا 0) ومالوش
+// تأثير على ظهور البانر نفسه، بس بيتحكم في نص البادج جواه بس.
+window.addEventListener('offline', () => {
+    showOfflineBanner();
+    (async () => {
+        const count = await window.__getOfflineQueueCount?.() || 0;
+        showOfflineBanner(count);
+    })();
 });
 window.addEventListener('online', async () => {
     hideOfflineBanner();
@@ -998,9 +1011,13 @@ window.addEventListener('online', async () => {
     const count = await window.__getOfflineQueueCount?.() || 0;
     if (count > 0) showSyncIndicator('جاري المزامنة...');
 });
-(async () => {
-    if (!navigator.onLine) {
+if (!navigator.onLine) {
+    // 🐛 FIX (نفس فيكس listener الـ'offline' فوق): نفس المبدأ — نعرض
+    // البانر فورًا عند تحميل الصفحة لو أوف لاين من الأساس، من غير ما
+    // نستنى نداء غير متزامن للرقم الأول.
+    showOfflineBanner();
+    (async () => {
         const count = await window.__getOfflineQueueCount?.() || 0;
         showOfflineBanner(count);
-    }
-})();
+    })();
+}
