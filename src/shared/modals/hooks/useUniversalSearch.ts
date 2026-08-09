@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../../../supabaseClient';
-import { ilikeOrClause } from '../../lib/sanitize';
+import { ilikeOrClause, normalizeArabicDigits } from '../../lib/sanitize';
 import type { Json } from '../../../database.types';
 
 // ── مدة الانتظار قبل ما نبعت الـ query للـ DB (ms) ──
@@ -265,7 +265,11 @@ export function useUniversalSearch() {
         return () => { if (timerRef.current) clearTimeout(timerRef.current); };
     }, [q]);
 
-    const query = q.trim().toLowerCase();
+    // 🔢 FIX (تطبيع الأرقام العربية في البحث — 8 أغسطس 2026): بحث الـDB
+    // نفسه (ilikeOrClause) بقى بيطبّع تلقائيًا. لازم نطبّع query هنا كمان
+    // عشان highlight() تحت تلاقي المطابقة صح جوه النص الراجع من الـDB
+    // (اللي دايمًا أرقام إنجليزية عادية).
+    const query = normalizeArabicDigits(q.trim()).toLowerCase();
 
     // ── فلترة القضايا والموكلين (محلية لأنهم جايين كـ props) ──
     const fmtNum = (num: string) => {
