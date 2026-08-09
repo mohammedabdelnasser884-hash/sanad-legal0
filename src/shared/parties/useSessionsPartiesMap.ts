@@ -15,6 +15,7 @@
 
 import { useEffect, useState } from 'react';
 import { db } from '../../supabaseClient';
+import { createFetchGuard } from '../lib/offlineGuard';
 import type { PartyDisplayRow } from './partiesDisplay';
 
 export interface SessionsPartiesIndex {
@@ -42,15 +43,25 @@ export function useSessionsPartiesMap(sessions: PartiesSourceSession[]): Session
         const standaloneIds = standaloneIdsKey ? standaloneIdsKey.split(',') : [];
         if (caseIds.length === 0 && standaloneIds.length === 0) { setIndex(EMPTY_INDEX); return; }
 
+        // ⚡ NEW (فيكس "تأخير محسوس عند التنقل أوف لاين، جزء 5" — 9 أغسطس
+        // 2026): نداء مصاحب على نفس شاشات الجلسات (الداشبورد/الكالندر/قائمة
+        // الشهر/الفائتة) كان من غير أي حماية — offline من الأساس يرجع
+        // EMPTY_INDEX فورًا (نفس سلوك التدهور الطبيعي الموجود أصلاً لو
+        // الاستعلام فشل)، بدل ما يفضل معلّق. أونلاين بطيء/متقطع يتقفل بعد
+        // 8 ثواني.
+        const guard = createFetchGuard();
+        if (guard.offline) { setIndex(EMPTY_INDEX); return; }
+
         let cancelled = false;
         Promise.all([
             caseIds.length
-                ? db.from('case_parties').select('case_id,side,name,capacity,client_id').in('case_id', caseIds).order('sort_order', { ascending: true })
+                ? db.from('case_parties').select('case_id,side,name,capacity,client_id').in('case_id', caseIds).order('sort_order', { ascending: true }).abortSignal(guard.controller.signal)
                 : Promise.resolve({ data: [] as Array<Record<string, unknown>> }),
             standaloneIds.length
-                ? db.from('case_parties').select('session_id,side,name,capacity,client_id').in('session_id', standaloneIds).order('sort_order', { ascending: true })
+                ? db.from('case_parties').select('session_id,side,name,capacity,client_id').in('session_id', standaloneIds).order('sort_order', { ascending: true }).abortSignal(guard.controller.signal)
                 : Promise.resolve({ data: [] as Array<Record<string, unknown>> }),
         ]).then(([byCaseRes, bySessionRes]) => {
+            guard.cleanup();
             if (cancelled) return;
             const byCaseId: Record<string, PartyDisplayRow[]> = {};
             (byCaseRes.data || []).forEach((p: Record<string, unknown>) => {
@@ -64,7 +75,7 @@ export function useSessionsPartiesMap(sessions: PartiesSourceSession[]): Session
             });
             setIndex({ byCaseId, bySessionId });
         });
-        return () => { cancelled = true; };
+        return () => { cancelled = true; guard.cleanup(); };
     }, [caseIdsKey, standaloneIdsKey]);
 
     return index;
