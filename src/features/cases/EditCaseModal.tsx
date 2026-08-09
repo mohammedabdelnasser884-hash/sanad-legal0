@@ -65,7 +65,7 @@ interface EditCaseForm {
     title: string; caseNum: string; caseYear: string;
     court: string; court_floor: string; court_hall: string;
     type: string;
-    court_level: string; court_level_other: string; circuit_number: string;
+    court_level: string; circuit_number: string;
     status: string; date: string; session_time: string;
     session_hall: string; secretary_hall: string; secretary_name: string; secretary_mobile: string;
     // ⚡ ملحوظة (مرحلة 5.1 — خطة تعدد الأطراف، 22 يوليو 2026): بيانات
@@ -212,10 +212,14 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
         ? {name: caseData.defendant || '', capacity: caseData.defendant_role}
         : splitParty(caseData.defendant);
 
-    // تحديد لو درجة التقاضي هي أخرى
-    const knownLevels = ['ابتدائي','استئناف','نقض'];
+    // ⚡ CHANGED (طلب مباشر — 9 أغسطس 2026): درجة التقاضي بقت مربع نص حر
+    // زي "المحكمة"/"تصنيف الدعوى" فوق بالظبط، بدل أزرار اختيار مقفولة
+    // (ابتدائي/استئناف/نقض/أخرى) — نفس السبب: تقييد اختيارات مش موجودة
+    // فعليًا (درجات تقاضي تانية زي "دائرة أحوال شخصية استئناف" أو مسميات
+    // خاصة بدول تانية) كان بيجبر المستخدم يدوس "أخرى" ويكتب في حقل ثاني
+    // منفصل. مفيش داعي بعد كده لـknownLevels/isOther — بنقرا القيمة زي
+    // ما هي مباشرة.
     const existingLevel = caseData.court_level || '';
-    const isOther = existingLevel && !knownLevels.includes(existingLevel);
 
     // ⚡ FIX (طلب مباشر من جيمي، 22 يوليو 2026): المحكمة وتصنيف الدعوى بقوا
     // مربع نص حر دايمًا (شوف تعليق الرندر تحت) — مفيش داعي بعد كده لتفرقة
@@ -231,8 +235,7 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
         court_floor: caseData.court_floor || '',
         court_hall: caseData.court_hall || '',
         type: existingType,
-        court_level: isOther ? 'أخرى' : existingLevel,
-        court_level_other: isOther ? existingLevel : '',
+        court_level: existingLevel,
         circuit_number: caseData.circuit_number || '',
         status: caseData.status || 'نشطة',
         date: caseData.date==='—'?'':caseData.date || '',
@@ -387,7 +390,7 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
 
     // تحذير قبل الإغلاق لو فيه بيانات مكتوبة لسه ما اتحفظتش (الـbaseline
     // هنا هو بيانات القضية المحمّلة فعليًا، مش فورم فاضي)
-    const { guardedClose, confirmModal } = useUnsavedChangesGuard(draftData, { form, parties: partyFields.parties, legalTitles: partyFields.legalTitles }, onClose);
+    const { guardedClose, confirmModal } = useUnsavedChangesGuard(draftData, { form, parties: partyFields.parties, legalTitles: partyFields.legalTitles }, onClose, draft.clearDraft);
 
     // ⚡ NEW (خطة تطوير أطراف الدعوى — مرحلة 4 خطوة 2، 23 يوليو 2026): نفس
     // فكرة linkClientToParty في NewCaseModal.tsx بالحرف — بس هنا لأي طرف
@@ -649,21 +652,22 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
                 : React.createElement(DatePicker, {label:"تاريخ الجلسة القادمة", value:form.date, onChange:(v: string) =>s("date",v)}),
 
             // ٦. درجة التقاضي
+            // ⚡ CHANGED (طلب مباشر — 9 أغسطس 2026): نفس فيكس "المحكمة
+            // المختصة"/"تصنيف الدعوى" فوق بالظبط — نص حر دايمًا، مع
+            // datalist للاقتراح بس (مش إجبار).
             React.createElement('div', null,
                 React.createElement('label', {className:"block text-[10px] font-bold text-slate-400 mb-1.5"}, "درجة التقاضي"),
-                React.createElement('div', {className:"flex gap-2"},
-                    ['ابتدائي','استئناف','نقض','أخرى'].map((lvl: string) =>React.createElement('button',{
-                        key:lvl, type:"button",
-                        onClick:()=>s('court_level',lvl),
-                        className:`flex-1 py-2.5 rounded-xl text-[10px] font-black transition-all active:scale-95 ${form.court_level===lvl?'bg-premium-gold text-premium-bg':'bg-white/5 border border-white/10 text-slate-400'}`
-                    },lvl))
-                ),
-                form.court_level==='أخرى'&&React.createElement('input',{
-                    value:form.court_level_other, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('court_level_other',e.target.value),
+                React.createElement('input', {
+                    value:form.court_level,
+                    onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('court_level',e.target.value),
                     placeholder:"اكتب درجة التقاضي",
-                    className:"w-full mt-2 p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600",
-                    style:inpStyle
-                })
+                    className:inputCls, style:inpStyle,
+                    list:'edit-case-court-levels-list',
+                    'data-testid':'edit-case-court-level',
+                }),
+                React.createElement('datalist',{id:'edit-case-court-levels-list'},
+                    ['ابتدائي','استئناف','نقض'].map((lvl: string) => React.createElement('option',{key:lvl,value:lvl}))
+                )
             ),
 
             // ٧. حالة القضية [فورم التعديل بس — القضية الجديدة بتبدأ "نشطة"
@@ -761,7 +765,7 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
                     // الرقم القومي).
                     if(!partyFields.validation.valid){ toast(partyFields.validation.message || 'يرجى مراجعة بيانات أطراف الدعوى', true); return; }
                     const number = form.caseNum&&form.caseYear ? form.caseNum+'/'+form.caseYear : form.caseNum||form.caseYear||'';
-                    const finalCourtLevel = form.court_level==='أخرى' ? form.court_level_other : form.court_level;
+                    const finalCourtLevel = form.court_level.trim();
                     const finalCourt = form.court.trim() || '—';
                     const finalType  = form.type.trim() || 'عام';
                     // ⚡ CHANGED (خطة تفكيك legacy columns — Phase F.1، 6 أغسطس
