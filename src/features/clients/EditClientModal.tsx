@@ -93,7 +93,7 @@ function EditClientModal({client: c, onClose, onSave, saving = false}: EditClien
     }, [draft.restoredDraft]);
 
     // تحذير قبل الإغلاق — الـbaseline هنا بيانات الموكل المحمّلة فعليًا
-    const { guardedClose, confirmModal } = useUnsavedChangesGuard(form, form, onClose);
+    const { guardedClose, confirmModal } = useUnsavedChangesGuard(form, form, onClose, draft.clearDraft);
 
     const pickId  = (file: File | null | undefined) => { if(!file) return; setIdFile(file);  setIdPreview(URL.createObjectURL(file)); };
     const pickPoa = (file: File | null | undefined) => { if(!file) return; setPoaFile(file); setPoaPreview(URL.createObjectURL(file)); };
