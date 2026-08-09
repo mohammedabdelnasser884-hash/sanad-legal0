@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../../supabaseClient';
-import { I } from '../../../constants';
+import { toast } from '../../../shared/lib/notifications';
+import { recordError, recordSuccess } from '../../../systemHealth';
+import { getCurrentTenantId, I } from '../../../constants';
+import { createFetchGuard } from '../../../shared/lib/offlineGuard';
 import { MONTHS_AR2, DAYS_AR_FULL, toDateStr } from './constants';
 import SessionCard from './SessionCard';
 import TaskCard from './TaskCard';
@@ -14,6 +17,30 @@ import type { CalendarSessionRow } from './CalendarTab';
 // (كائن `cases` المدمج من الاستعلام، أو `cases.find(...)` من الـ prop) — نفس
 // النمط المستخدم في DashboardTab.tsx/UpcomingSessionsList.tsx بالضبط.
 type LinkedCaseLike = Partial<MappedCase> & Partial<SessionCaseEmbed>;
+
+function saveTypedCache<T>(key: string, items: T) {
+    try { localStorage.setItem(key, JSON.stringify({ tenantId: getCurrentTenantId(), items })); } catch { /* localStorage غير متاح — تجاهل */ }
+}
+
+function loadTypedCache<T>(key: string): T | null {
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as { tenantId: string | null; items: T };
+        if (parsed.tenantId !== getCurrentTenantId()) return null;
+        return parsed.items;
+    } catch {
+        return null;
+    }
+}
+
+const MISSED_SESSIONS_CACHE_KEY = 'sanad_cached_missed_sessions_v1';
+const MISSED_TASKS_CACHE_KEY = 'sanad_cached_missed_tasks_v1';
+// ⚡ NEW (فيكس "الجلسات مش موجودة نهائي" — 9 أغسطس 2026): نفس فكرة الكاش
+// في CalendarTab.tsx/MonthListTab.tsx — هنا مفتاحين مستقلين (جلسات فائتة /
+// مهام فائتة) لأن المصدرين مختلفين، ونطاق التاريخ مش محدود بشهر (limit 50
+// آخر جلسات فائتة)، فالكاش هنا بيحفظ آخر نتيجة ناجحة زي ما هي بدل تقسيمها
+// بالشهر.
 
 interface MissedTabProps {
     cases: MappedCase[];
@@ -33,6 +60,23 @@ function MissedTab({ cases, clients, onOpenCase, onOpenReminders, onOpenStandalo
     const [loading, setLoading]   = useState(true);
 
     useEffect(() => {
+        // ⚡ NEW (فيكس "تأخير محسوس عند التنقل أوف لاين" — 9 أغسطس 2026):
+        // نفس نمط CalendarTab.tsx/MonthListTab.tsx/useDbConnectivity —
+        // offline من الأساس يروح على الكاشين فورًا من غير أي نداء شبكة،
+        // وأونلاين بطيء/متقطع يتقفل بعد 8 ثواني بدل ما يفضل معلّق.
+        const guard = createFetchGuard();
+        if (guard.offline) {
+            const cachedSess = loadTypedCache<CalendarSessionRow[]>(MISSED_SESSIONS_CACHE_KEY);
+            const cachedTsk  = loadTypedCache<TaskFeedItem[]>(MISSED_TASKS_CACHE_KEY);
+            if (cachedSess) toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من الجلسات الفائتة');
+            if (!cachedSess) recordError('db_calendar_sessions', 'offline');
+            if (!cachedTsk) recordError('db_reminders', 'offline');
+            setSessions(cachedSess || []);
+            setMissedTasks(cachedTsk || []);
+            setLoading(false);
+            return () => guard.cleanup();
+        }
+
         // جلسات فات تاريخها وليس فيها result ولا next_action (لم تُحدَّث)
         Promise.all([
             db.from('case_sessions')
@@ -40,16 +84,38 @@ function MissedTab({ cases, clients, onOpenCase, onOpenReminders, onOpenStandalo
               .lt('session_date', todayStr)
               .order('session_date', { ascending: false })
               .limit(50)
-              .then(({ data }) => ((data || []) as unknown as CalendarSessionRow[]).filter((s: CalendarSessionRow) => !s.result?.trim() && !s.next_action?.trim())),
+              .abortSignal(guard.controller.signal),
             db.from('reminders')
               .select('id,title,due_date,notes,done')
               .eq('done', false)
               .lt('due_date', todayStr)
               .order('due_date', { ascending: false })
-              .then(({ data }) => (data || []) as unknown as TaskFeedItem[])
-        ]).then(([sess, tsk]: [CalendarSessionRow[], TaskFeedItem[]]) => {
+              .abortSignal(guard.controller.signal)
+        ]).then(([sessRes, tskRes]) => {
+            guard.cleanup();
+            let sess: CalendarSessionRow[];
+            if (sessRes.error) {
+                const cached = loadTypedCache<CalendarSessionRow[]>(MISSED_SESSIONS_CACHE_KEY);
+                if (cached) { sess = cached; toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من الجلسات الفائتة'); }
+                else { sess = []; recordError('db_calendar_sessions', sessRes.error.message); }
+            } else {
+                recordSuccess('db_calendar_sessions');
+                sess = ((sessRes.data || []) as unknown as CalendarSessionRow[]).filter((s: CalendarSessionRow) => !s.result?.trim() && !s.next_action?.trim());
+                saveTypedCache(MISSED_SESSIONS_CACHE_KEY, sess);
+            }
+            let tsk: TaskFeedItem[];
+            if (tskRes.error) {
+                const cached = loadTypedCache<TaskFeedItem[]>(MISSED_TASKS_CACHE_KEY);
+                if (cached) tsk = cached;
+                else { tsk = []; recordError('db_reminders', tskRes.error.message); }
+            } else {
+                recordSuccess('db_reminders');
+                tsk = (tskRes.data || []) as unknown as TaskFeedItem[];
+                saveTypedCache(MISSED_TASKS_CACHE_KEY, tsk);
+            }
             setSessions(sess); setMissedTasks(tsk); setLoading(false);
         });
+        return () => guard.cleanup();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [refreshKey]);
 
