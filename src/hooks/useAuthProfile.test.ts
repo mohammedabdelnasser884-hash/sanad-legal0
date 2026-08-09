@@ -188,7 +188,22 @@ describe('useAuthProfile', () => {
   });
 
   it('✅ NEW: أونلاين لكن النداء متعلّق (اتصال ضعيف) → بيتقفل بعد 8 ثواني بدل ما يفضل عالق للأبد، ويرجع للكاش لو موجود', async () => {
-    vi.useFakeTimers();
+    // ⚡ FIX (فيكس "التستات اللي بعد الاختبار ده كانت بتعمل timeout" —
+    // 9 أغسطس 2026): vi.useFakeTimers() كانت بتتفعّل قبل أول waitFor
+    // (بتاع الـrender الأول اللي مش محتاج تحكم في الوقت أصلًا). المشكلة:
+    // waitFor بتاعة @testing-library بتعتمد داخليًا على setInterval/
+    // setTimeout الحقيقيين للـpolling، ومحدّش عندها دعم مباشر لـ Vitest
+    // fake timers (بتدوّر بس على global اسمه jest اللي مش موجود هنا أصلًا
+    // — المشروع مش بيستخدم globals:true ولا shim لـjest). النتيجة:
+    // بمجرد ما fake timers بتتفعّل، أي waitFor بعدها بيتجمّد للأبد لحد
+    // ما Vitest نفسه يوقفه بعد 5 ثواني (timeout حقيقي)، وده بيمنع
+    // vi.useRealTimers() في آخر السطر من إنه ينفّذ أصلًا → fake timers
+    // بتفضل شغالة وتكسر كل التستات اللي جاية بعد كده في نفس الملف (بالظبط
+    // اللي كان بيحصل في الـCI: 7 تستات فشلوا كلهم بـ"Test timed out in
+    // 5000ms"، مش بسبب منطق خاطئ فيهم، بس لأن fake timers اتسربت).
+    // الحل: منفعّلش fake timers إلا بعد ما الـrender الأول (اللي مش
+    // محتاج تحكم في الوقت) يخلص تمامًا، وبنلف الجزء اللي محتاجها في
+    // try/finally عشان نضمن vi.useRealTimers() ينفّذ حتى لو فيه فشل.
     const onLineSpy = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
     getSessionResult = { data: { session: { user: USER } } };
     maybeSingleResult = { data: PROFILE, error: null };
@@ -196,14 +211,18 @@ describe('useAuthProfile', () => {
     await waitFor(() => expect(first.result.current.profile).toEqual(PROFILE));
     first.unmount();
 
-    abortShouldHang = true;
-    const { result } = renderHook(() => useAuthProfile());
-    await act(async () => { await vi.advanceTimersByTimeAsync(8000); });
-    await waitFor(() => expect(result.current.authLoading).toBe(false));
-    expect(result.current.profile).toEqual(PROFILE);
-    expect(recordError).not.toHaveBeenCalled();
+    vi.useFakeTimers();
+    try {
+      abortShouldHang = true;
+      const { result } = renderHook(() => useAuthProfile());
+      await act(async () => { await vi.advanceTimersByTimeAsync(8000); });
+      await waitFor(() => expect(result.current.authLoading).toBe(false));
+      expect(result.current.profile).toEqual(PROFILE);
+      expect(recordError).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
     onLineSpy.mockRestore();
-    vi.useRealTimers();
   });
 
   it('onAuthStateChange: session جديدة بمستخدم → بتنادي loadProfile وبتحدّث profile', async () => {
