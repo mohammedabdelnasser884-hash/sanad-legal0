@@ -120,7 +120,13 @@ function CalendarTab({ cases, clients, onOpenCase, onOpenStandalone, refreshKey 
             const cached = loadCalendarSessionsCache(viewYear, viewMonth);
             if (cached) {
                 setAllSessions(cached);
-                toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من جلسات الشهر ده');
+                // ⚡ FIX (تحليل لوجز E2E — 9 أغسطس 2026): كان التوست ده بيظهر في
+                // كل refetch حتى لو السبب refreshKey بس (زي حفظ جلسة مستقلة
+                // أوفلاين، اللي بيعمل externalRefreshSignal → refreshKey هنا) —
+                // فبيكتم توست "الجلسة محفوظة محلياً" بتاع الحفظ نفسه (نفس عنصر
+                // #toast، مفيش queue). بنعرضه بس لو فعلاً تنقل بين الشهور (نفس
+                // شرط isMonthNavigation المستخدم تحت لـsetSelectedDay).
+                if (isMonthNavigation) toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من جلسات الشهر ده');
             } else {
                 setAllSessions([]);
                 recordError('db_calendar_sessions', 'offline');
@@ -141,7 +147,7 @@ function CalendarTab({ cases, clients, onOpenCase, onOpenStandalone, refreshKey 
                   const cached = loadCalendarSessionsCache(viewYear, viewMonth);
                   if (cached) {
                       setAllSessions(cached);
-                      toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من جلسات الشهر ده');
+                      if (isMonthNavigation) toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من جلسات الشهر ده');
                   } else {
                       setAllSessions([]);
                       recordError('db_calendar_sessions', error.message);
