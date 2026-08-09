@@ -15,7 +15,7 @@ import type { CalendarSessionRow } from './CalendarTab';
 
 // شكل "القضية المرتبطة" اللي ممكن تيجي من مصدرين مختلفين الشكل هنا بالظبط
 // (كائن `cases` المدمج من الاستعلام، أو `cases.find(...)` من الـ prop) — نفس
-// النمط المستخدم في DashboardTab.tsx/UpcomingSessionsList.tsx بالضبط.
+// النمط المستخدم في DashboardTab.tsx بالضبط.
 type LinkedCaseLike = Partial<MappedCase> & Partial<SessionCaseEmbed>;
 
 function saveTypedCache<T>(key: string, items: T) {
