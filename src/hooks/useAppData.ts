@@ -3,6 +3,7 @@ import { db } from '../supabaseClient';
 import { recordError, recordSuccess } from '../systemHealth';
 import { ilikeOrClause } from '../shared/lib/sanitize';
 import { toast } from '../shared/lib/notifications';
+import { createFetchGuard } from '../shared/lib/offlineGuard';
 import type { CaseRow, ClientRow, ProfileRow } from '../types';
 // ⚡ NEW (خطة تفكيك الأعمدة القديمة، المرحلة B.4 — 6 أغسطس 2026): نفس
 // شكل صف الطرف المستخدم في B.1/B.2/B.3 (`PartyDisplayRow`) — بيتاح دلوقتي
@@ -341,13 +342,35 @@ export function useAppData(profile: ProfileRow | null) {
         const from = page * PAGE_SIZE;
         const to   = from + PAGE_SIZE - 1;
 
-        const { data, error, count } = await db
-            .from('cases')
-            .select('*', { count: 'exact' })
-            .eq('status', filter)
-            .is('deleted_at', null)
-            .order('created_at', { ascending: false })
-            .range(from, to);
+        // ⚡ NEW (فيكس "تأخير محسوس عند التنقل أوف لاين" — 9 أغسطس 2026):
+        // نفس نمط useDbConnectivity/useAuthProfile — لو offline من الأساس
+        // منحاولش نتصل بالسيرفر خالص، ولو هنحاول فعلاً بنقفله بعد 8 ثواني
+        // كحد أقصى بدل ما يفضل معلّق لحد ما يفشل من نفسه.
+        const guard = createFetchGuard();
+        let data: CaseRow[] | null = null;
+        let error: { message: string } | null = null;
+        let count: number | null = null;
+        if (guard.offline) {
+            error = { message: 'offline' };
+        } else {
+            try {
+                const res = await db
+                    .from('cases')
+                    .select('*', { count: 'exact' })
+                    .eq('status', filter)
+                    .is('deleted_at', null)
+                    .order('created_at', { ascending: false })
+                    .range(from, to)
+                    .abortSignal(guard.controller.signal);
+                data = res.data;
+                error = res.error;
+                count = res.count;
+            } catch (err) {
+                error = { message: guard.didTimeOut() ? 'timeout' : (err as { message?: string })?.message || 'fetch failed' };
+            } finally {
+                guard.cleanup();
+            }
+        }
 
         if (error) {
             // ⚡ NEW: لو الصفحة الأولى (اللي بتظهر فعليًا في الشاشة
@@ -492,24 +515,44 @@ export function useAppData(profile: ProfileRow | null) {
         const from = page * PAGE_SIZE;
         const to   = from + PAGE_SIZE - 1;
 
-        let query = db
-            .from('clients')
-            .select('*', { count: 'exact' })
-            .is('deleted_at', null)
-            .order('created_at', { ascending: false })
-            .range(from, to);
+        // ⚡ NEW (فيكس "تأخير محسوس عند التنقل أوف لاين" — 9 أغسطس 2026):
+        // نفس نمط useDbConnectivity/useAuthProfile (راجع تعليق fetchCases فوق).
+        const guard = createFetchGuard();
+        let data: ClientRow[] | null = null;
+        let error: { message: string } | null = null;
+        let count: number | null = null;
+        if (guard.offline) {
+            error = { message: 'offline' };
+        } else {
+            let query = db
+                .from('clients')
+                .select('*', { count: 'exact' })
+                .is('deleted_at', null)
+                .order('created_at', { ascending: false })
+                .range(from, to)
+                .abortSignal(guard.controller.signal);
 
-        if (search.trim()) {
-            const s = search.trim();
-            // FIX: فاصلة أو قوس في نص البحث كان بيكسر صياغة فلتر .or()
-            query = query.or([
-                ilikeOrClause('client_name', s),
-                ilikeOrClause('phone', s),
-                ilikeOrClause('national_id', s),
-            ].join(','));
+            if (search.trim()) {
+                const s = search.trim();
+                // FIX: فاصلة أو قوس في نص البحث كان بيكسر صياغة فلتر .or()
+                query = query.or([
+                    ilikeOrClause('client_name', s),
+                    ilikeOrClause('phone', s),
+                    ilikeOrClause('national_id', s),
+                ].join(','));
+            }
+
+            try {
+                const res = await query;
+                data = res.data;
+                error = res.error;
+                count = res.count;
+            } catch (err) {
+                error = { message: guard.didTimeOut() ? 'timeout' : (err as { message?: string })?.message || 'fetch failed' };
+            } finally {
+                guard.cleanup();
+            }
         }
-
-        const { data, error, count } = await query;
 
         if (error) {
             // ⚡ FIX (9 أغسطس 2026): كان بينادي recordError('db_clients')
