@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../../supabaseClient';
 import { toast } from '../../../shared/lib/notifications';
+import { recordError, recordSuccess } from '../../../systemHealth';
 import { I } from '../../../constants';
+import { createFetchGuard } from '../../../shared/lib/offlineGuard';
 import { exportSessionToGoogleCalendar } from '@/shared/ui/calendarExport';
 import { MONTHS_AR2, toDateStr } from './constants';
 import DayCard from './DayCard';
@@ -10,6 +12,7 @@ import MonthWeekView from './MonthWeekView';
 import { useSessionsPartiesMap } from '@/shared/parties/useSessionsPartiesMap';
 import type { MappedCase, MappedClient } from '../../../hooks/useAppData';
 import type { CalendarSessionRow } from './CalendarTab';
+import { saveCalendarSessionsCache, loadCalendarSessionsCache } from './CalendarTab';
 import type { TaskFeedItem } from '@/shared/hooks/useDashboardFeed';
 
 // نفس أعمدة case_sessions اللي CalendarTab.tsx بيجيبها (CalendarSessionRow) —
@@ -57,14 +60,55 @@ function MonthListTab({ cases, clients, onOpenCase, onOpenReminders, onOpenStand
         const last = new Date(viewYear, viewMonth + 1, 0).getDate();
         const startStr = `${viewYear}-${mm}-01`;
         const endStr   = `${viewYear}-${mm}-${String(last).padStart(2,'0')}`;
+
+        // ⚡ NEW (فيكس "تأخير محسوس عند التنقل أوف لاين" — 9 أغسطس 2026):
+        // نفس نمط CalendarTab.tsx/useDbConnectivity/useAuthProfile — offline
+        // من الأساس يروح على الكاش فورًا، وأونلاين بطيء/متقطع يتقفل بعد
+        // 8 ثواني بدل ما يفضل معلّق.
+        const guard = createFetchGuard();
+        if (guard.offline) {
+            const cached = loadCalendarSessionsCache(viewYear, viewMonth);
+            if (cached) {
+                setSessions(cached);
+                toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من جلسات الشهر ده');
+            } else {
+                setSessions([]);
+                recordError('db_calendar_sessions', 'offline');
+            }
+            setTasks([]); setLoading(false);
+            return () => guard.cleanup();
+        }
+
         db.from('case_sessions')
           .select('id,session_date,case_id,client_id,description,result,next_action,session_time,session_floor,session_hall,title,case_number,court,case_type,circuit_number,cases(id,title,court_name,case_type,case_number_official,client_id)')
           .gte('session_date', startStr)
           .lte('session_date', endStr)
           .order('session_date', { ascending: true })
-          .then(({ data }) => {
-              setSessions((data || []) as unknown as MonthSessionRow[]); setTasks([]); setLoading(false);
+          .abortSignal(guard.controller.signal)
+          .then(({ data, error }) => {
+              guard.cleanup();
+              // ⚡ NEW (فيكس "الجلسات مش موجودة نهائي" — 9 أغسطس 2026): نفس
+              // فكرة الكاش المطبّقة في CalendarTab.tsx بالضبط (مفتاح مشترك
+              // بينهم — نفس البيانات فعليًا)، راجع التعليق الكامل هناك.
+              if (error) {
+                  const cached = loadCalendarSessionsCache(viewYear, viewMonth);
+                  if (cached) {
+                      setSessions(cached);
+                      toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من جلسات الشهر ده');
+                  } else {
+                      setSessions([]);
+                      recordError('db_calendar_sessions', error.message);
+                  }
+                  setTasks([]); setLoading(false);
+                  return;
+              }
+              recordSuccess('db_calendar_sessions');
+              const list = (data || []) as unknown as MonthSessionRow[];
+              setSessions(list);
+              saveCalendarSessionsCache(viewYear, viewMonth, list);
+              setTasks([]); setLoading(false);
           });
+        return () => guard.cleanup();
     }, [viewYear, viewMonth, refreshKey]);
 
     const prevMonth = () => { if (viewMonth === 0) { setViewMonth(11); setViewYear((y: number) => y-1); } else setViewMonth((m: number) => m-1); };
