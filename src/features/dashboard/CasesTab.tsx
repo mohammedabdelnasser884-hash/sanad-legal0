@@ -24,6 +24,7 @@ import type { MappedCase } from '../../hooks/useAppData';
 // ولو فيه على الأقل واحد بيتلاقى في clients، القضية مش orphan — حتى لو
 // العمود القديم نفسه فاضي أو غلط.
 import { getPartyStateBadge } from '@/shared/parties/partyDomainService';
+import { effectiveLegalTitleForDisplay } from '@/shared/parties/partyDisplay';
 import type { ClientRow } from '../../types';
 
 const PAGE_SIZE = 15;
@@ -172,8 +173,13 @@ function CasesTab({ cases, casesFilter, setCasesFilter, casesPage, setCasesPage,
                         // استعلام إضافي)، يُستخدم بدل الاسم المفرد. الحالة الغالبة (طرف
                         // واحد، الحقلان فاضيان) صفر تغيير عن السطر القديم.
                         (() => {
-                            const displayPlaintiff = c.plaintiff_legal_title || c.plaintiff;
-                            const displayDefendant = c.defendant_legal_title || c.defendant;
+                            // ⚡ FIX (توحيد المسمى القانوني الجامع — 8 أغسطس 2026):
+                            // effectiveLegalTitleForDisplay بترجع '' لو المسمى صفة
+                            // عامة بس (زي "متهمين") — يبقى نرجع لاسم الطرف المفرد
+                            // بدل تركيب شاذ زي "متهمين ضد فلان". "ورثة فلان" (مسمى
+                            // مميّز فعلي) بيفضل يحل محل الاسم زي الأول بالظبط.
+                            const displayPlaintiff = effectiveLegalTitleForDisplay(c.plaintiff_legal_title) || c.plaintiff;
+                            const displayDefendant = effectiveLegalTitleForDisplay(c.defendant_legal_title) || c.defendant;
                             return (displayPlaintiff || displayDefendant) && React.createElement('span', { className: "text-[10px] text-slate-300 truncate max-w-[160px]" },
                                 (displayPlaintiff || '—') + ' ضد ' + (displayDefendant || '—')
                             );
