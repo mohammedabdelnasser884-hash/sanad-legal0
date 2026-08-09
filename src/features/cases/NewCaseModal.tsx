@@ -33,7 +33,7 @@ interface NewCaseModalProps {
 interface NewCaseForm {
     title: string; court: string; court_floor: string; court_hall: string;
     type: string; caseNum: string; caseYear: string;
-    court_level: string; court_level_other: string; circuit_number: string; date: string; session_time: string;
+    court_level: string; circuit_number: string; date: string; session_time: string;
     session_hall: string; secretary_hall: string; secretary_name: string; secretary_mobile: string;
     // ⚡ ملحوظة (مرحلة 4 — خطة تعدد الأطراف، 22 يوليو 2026): بيانات
     // الموكل/الخصم (الاسم/الصفة/الرقم القومي/العنوان/التوكيل/الربط
@@ -51,7 +51,7 @@ const SESSION_TIME_OPTIONS = [
 function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCourts,countryCaseTypes,openNewClientModal}: NewCaseModalProps){
     const [form,setForm]=useState<NewCaseForm>({
         title:'',court:'',court_floor:'',court_hall:'',type:'',caseNum:'',caseYear:'',
-        court_level:'',court_level_other:'',circuit_number:'',date:'',session_time:'صباحي',
+        court_level:'',circuit_number:'',date:'',session_time:'صباحي',
         session_hall:'',secretary_hall:'',secretary_name:'',secretary_mobile:'',
     });
     const s=<K extends keyof NewCaseForm>(k: K,v: NewCaseForm[K])=>setForm((p) =>({...p,[k]:v}));
@@ -87,7 +87,7 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
     }, [draft.restoredDraft]);
 
     // تحذير قبل الإغلاق لو فيه بيانات مكتوبة لسه ما اتحفظتش
-    const { guardedClose, confirmModal } = useUnsavedChangesGuard(draftData, { form, parties: partyFields.parties, legalTitles: partyFields.legalTitles }, onClose);
+    const { guardedClose, confirmModal } = useUnsavedChangesGuard(draftData, { form, parties: partyFields.parties, legalTitles: partyFields.legalTitles }, onClose, draft.clearDraft);
 
     // ربط طرف بعينه بموكل موجود من النظام — بيملى الاسم/الرقم القومي/
     // التوكيل/العنوان دفعة واحدة من بيانات الموكل الحقيقية (نفس سلوك
@@ -287,21 +287,21 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
                     : React.createElement(DatePicker,{label:"تاريخ الجلسة القادمة",value:form.date,onChange:(v: string) =>s("date",v)}),
 
                 // ٦. درجة التقاضي
+                // ⚡ CHANGED (طلب مباشر — 9 أغسطس 2026): نفس فيكس "المحكمة
+                // المختصة" فوق بالظبط — نص حر دايمًا، مع datalist للاقتراح بس.
                 React.createElement('div',null,
                     React.createElement('label',{className:"block text-[10px] font-bold text-slate-400 mb-1.5"},"درجة التقاضي"),
-                    React.createElement('div',{className:"flex gap-2"},
-                        ['ابتدائي','استئناف','نقض','أخرى'].map((lvl: string) =>React.createElement('button',{
-                            key:lvl,type:"button",
-                            onClick:()=>s('court_level',lvl),
-                            className:`flex-1 py-2.5 rounded-xl text-[10px] font-black transition-all active:scale-95 ${form.court_level===lvl?'bg-premium-gold text-premium-bg':'bg-white/5 border border-white/10 text-slate-400'}`
-                        },lvl))
-                    ),
-                    form.court_level==='أخرى'&&React.createElement('input',{
-                        value:form.court_level_other,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('court_level_other',e.target.value),
+                    React.createElement('input',{
+                        value:form.court_level,
+                        onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('court_level',e.target.value),
                         placeholder:"اكتب درجة التقاضي",
-                        className:"w-full mt-2 p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600",
-                        style:inpStyle
-                    })
+                        className:inputCls, style:inpStyle,
+                        list:'new-case-court-levels-list',
+                        'data-testid':'new-case-court-level',
+                    }),
+                    React.createElement('datalist',{id:'new-case-court-levels-list'},
+                        ['ابتدائي','استئناف','نقض'].map((lvl: string) => React.createElement('option',{key:lvl,value:lvl}))
+                    )
                 ),
 
                 // ══════════════ أطراف الدعوى ══════════════
@@ -350,7 +350,7 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
                         // تكرار الرقم القومي) — مش فحوصات مفردة هنا زي الشكل القديم.
                         if(!partyFields.validation.valid){toast(partyFields.validation.message || 'يرجى مراجعة بيانات أطراف الدعوى',true);return;}
                         const number = form.caseNum&&form.caseYear ? form.caseNum+'/'+form.caseYear : form.caseNum||form.caseYear||'';
-                        const finalCourtLevel = form.court_level==='أخرى' ? form.court_level_other : form.court_level;
+                        const finalCourtLevel = form.court_level.trim();
                         const finalCourt = form.court.trim() || '—';
                         const finalType  = form.type.trim() || 'عام';
                         // ⚡ CHANGED (خطة تفكيك legacy columns — Phase F.1، 6 أغسطس
