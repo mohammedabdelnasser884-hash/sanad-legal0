@@ -106,6 +106,7 @@ describe('useRemindersTab', () => {
   beforeEach(() => {
     mockDb = makeMockDb();
     vi.clearAllMocks();
+    localStorage.clear();
     window.__dbWrite = vi.fn() as unknown as typeof window.__dbWrite;
   });
 
@@ -142,12 +143,44 @@ describe('useRemindersTab', () => {
       expect(result.current.activeSection.key).toBe('upcoming');
     });
 
-    it('فشل جلب القادمة (error) → recordError بمفتاح db_reminders، وقائمة فاضية بدل استثناء', async () => {
+    it('فشل جلب القادمة (error) ومفيش نسخة محفوظة → recordError بمفتاح db_reminders، وقائمة فاضية بدل استثناء', async () => {
       mockDb.setResult('reminders:upcoming', { data: null, error: { message: 'fetch failed' } });
       const { result } = await renderReady();
 
       expect(recordError).toHaveBeenCalledWith('db_reminders', 'fetch failed');
       expect(result.current.pillSections.find((s) => s.key === 'upcoming')!.data).toEqual([]);
+    });
+
+    it('✅ NEW: فشل جلب القادمة أوف لاين لكن فيه نسخة محفوظة من قبل لنفس المكتب → بيرجع النسخة المحفوظة بهدوء، من غير recordError، مع توست', async () => {
+      // أول مرة: نجاح — بيتخزن في الكاش
+      mockDb.setResult('reminders:upcoming', { data: [makeReminder({ id: 'cached-1' })], error: null });
+      const first = await renderReady();
+      expect(first.result.current.pillSections.find((s) => s.key === 'upcoming')!.data).toEqual([expect.objectContaining({ id: 'cached-1' })]);
+      first.unmount();
+      vi.clearAllMocks();
+
+      // تاني مرة: فشل الشبكة — المفروض يرجع لنفس النسخة المحفوظة
+      mockDb.setResult('reminders:upcoming', { data: null, error: { message: 'network error' } });
+      const { result } = await renderReady();
+
+      expect(result.current.pillSections.find((s) => s.key === 'upcoming')!.data).toEqual([expect.objectContaining({ id: 'cached-1' })]);
+      expect(recordError).not.toHaveBeenCalledWith('db_reminders', expect.anything());
+      expect(toast).toHaveBeenCalledWith('أنت أوف لاين — بتشوف آخر نسخة محفوظة من التذكيرات');
+    });
+
+    it('✅ NEW: نسخة الكاش مربوطة بـtenant_id — مكتب تاني على نفس الجهاز ميشوفش كاش مكتب غيره', async () => {
+      mockDb.setResult('reminders:upcoming', { data: [makeReminder({ id: 'tenant1-item' })], error: null });
+      const first = await renderReady();
+      expect(first.result.current.pillSections.find((s) => s.key === 'upcoming')!.data.length).toBe(1);
+      first.unmount();
+      vi.clearAllMocks();
+
+      const otherTenantProfile = { ...profile, tenant_id: 'tenant-2' } as ProfileRow;
+      mockDb.setResult('reminders:upcoming', { data: null, error: { message: 'network error' } });
+      const { result } = await renderReady(undefined, otherTenantProfile);
+
+      expect(result.current.pillSections.find((s) => s.key === 'upcoming')!.data).toEqual([]);
+      expect(recordError).toHaveBeenCalledWith('db_reminders', 'network error');
     });
   });
 
