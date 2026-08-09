@@ -5,6 +5,8 @@ import { ilikeOrClause } from '../../../shared/lib/sanitize';
 import { COUNTRY_CONFIGS } from '../../../constants';
 import { db } from '../../../supabaseClient';
 import { formatArNumber, formatArDate } from '../../../shared/ui/arabicLocale';
+import { createFetchGuard } from '../../../shared/lib/offlineGuard';
+import { recordError, recordSuccess } from '../../../systemHealth';
 import { computeFeeStatus } from '../feeStatus';
 import type { ClientRow, CaseFeeRow, FeePaymentRow, ProfileRow, PaymentsByFeeId } from '../../../types';
 import type { MappedCase } from '../../../hooks/useAppData';
@@ -93,24 +95,49 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
 
     const fetchStatusCounts = useCallback(async () => {
         if (!profile) return;
-        const [c1, c2, c3] = await Promise.all([
-            db.from('case_fees').select('id', { count: 'exact', head: true }).eq('status','collected').is('deleted_at', null),
-            db.from('case_fees').select('id', { count: 'exact', head: true }).eq('status','deferred').is('deleted_at', null),
-            db.from('case_fees').select('id', { count: 'exact', head: true }).eq('status','open').is('deleted_at', null),
-        ]);
-        setStatusCounts({ collected: c1.count||0, deferred: c2.count||0, open: c3.count||0 });
+        // ⚡ FIX (تحليل شكوى "قسم الأتعاب بيقعد يحمّل" — 9 أغسطس 2026): نفس
+        // نمط useRemindersTab.ts/CalendarTab.tsx — offline يوقف فورًا،
+        // أونلاين بطيء يتقفل بعد 8 ثواني بدل ما يفضل معلّق، وأي فشل يتسجل
+        // بلقب واضح (db_fees) بدل ما يظهر برسالة عامة غلط في الداشبورد.
+        const guard = createFetchGuard();
+        if (guard.offline) { recordError('db_fees', 'offline'); return; }
+        try {
+            const [c1, c2, c3] = await Promise.all([
+                db.from('case_fees').select('id', { count: 'exact', head: true }).eq('status','collected').is('deleted_at', null).abortSignal(guard.controller.signal),
+                db.from('case_fees').select('id', { count: 'exact', head: true }).eq('status','deferred').is('deleted_at', null).abortSignal(guard.controller.signal),
+                db.from('case_fees').select('id', { count: 'exact', head: true }).eq('status','open').is('deleted_at', null).abortSignal(guard.controller.signal),
+            ]);
+            if (c1.error || c2.error || c3.error) throw (c1.error || c2.error || c3.error);
+            setStatusCounts({ collected: c1.count||0, deferred: c2.count||0, open: c3.count||0 });
+            recordSuccess('db_fees');
+        } catch (err) {
+            const msg = guard.didTimeOut() ? 'timeout' : (err as { message?: string })?.message || 'fetch failed';
+            recordError('db_fees', msg);
+        } finally {
+            guard.cleanup();
+        }
     }, [profile]);
 
     const fetchGrandSummary = useCallback(async () => {
         if (!profile) return;
         setLoadingSummary(true);
-        const { data, error } = await db.from('case_fees').select('total_fees,paid_fees').is('deleted_at', null);
-        if (error) { setLoadingSummary(false); return; }
-        const t = (data || []).reduce((s: number, f: { total_fees: number | null }) => s + (f.total_fees || 0), 0);
-        const p = (data || []).reduce((s: number, f: { paid_fees: number | null }) => s + (f.paid_fees  || 0), 0);
-        setGrandTotalAll(t);
-        setGrandPaidAll(p);
-        setLoadingSummary(false);
+        const guard = createFetchGuard();
+        if (guard.offline) { recordError('db_fees', 'offline'); setLoadingSummary(false); return; }
+        try {
+            const { data, error } = await db.from('case_fees').select('total_fees,paid_fees').is('deleted_at', null).abortSignal(guard.controller.signal);
+            if (error) throw error;
+            const t = (data || []).reduce((s: number, f: { total_fees: number | null }) => s + (f.total_fees || 0), 0);
+            const p = (data || []).reduce((s: number, f: { paid_fees: number | null }) => s + (f.paid_fees  || 0), 0);
+            setGrandTotalAll(t);
+            setGrandPaidAll(p);
+            recordSuccess('db_fees');
+        } catch (err) {
+            const msg = guard.didTimeOut() ? 'timeout' : (err as { message?: string })?.message || 'fetch failed';
+            recordError('db_fees', msg);
+        } finally {
+            guard.cleanup();
+            setLoadingSummary(false);
+        }
     }, [profile]);
 
     useEffect(() => { fetchGrandSummary(); fetchStatusCounts(); }, [fetchGrandSummary, fetchStatusCounts]);
@@ -138,38 +165,53 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
             q = q.or([ilikeOrClause('client_name', s), ilikeOrClause('notes', s)].join(','));
         }
 
-        const { data, error, count } = await q;
-        if (error) { setLoading(false); return; }
+        // ⚡ FIX (تحليل شكوى "قسم الأتعاب بيقعد يحمّل" — 9 أغسطس 2026): نفس
+        // نمط fetchStatusCounts/fetchGrandSummary فوق — offline يوقف فورًا،
+        // أونلاين بطيء يتقفل بعد 8 ثواني، وأي فشل يتسجل بلقب واضح.
+        const guard = createFetchGuard();
+        if (guard.offline) { recordError('db_fees', 'offline'); setLoading(false); return; }
+        try {
+            const { data, error, count } = await q.abortSignal(guard.controller.signal);
+            if (error) throw error;
 
-        const list = data || [];
+            const list = data || [];
 
-        // جلب الدفعات للصفحة الحالية بس
-        const feeIds = list.map((f) => f.id);
-        const grouped: PaymentsByFeeId = {};
-        if (feeIds.length > 0) {
-            const { data: pays } = await db.from('fee_payments')
-                .select('*')
-                .in('fee_id', feeIds)
-                .order('payment_date', { ascending: false });
-            (pays || []).forEach((p) => {
-                const key = p.fee_id as string;
-                if (!grouped[key]) grouped[key] = [];
-                grouped[key].push(p);
-            });
+            // جلب الدفعات للصفحة الحالية بس
+            const feeIds = list.map((f) => f.id);
+            const grouped: PaymentsByFeeId = {};
+            if (feeIds.length > 0) {
+                const { data: pays, error: paysErr } = await db.from('fee_payments')
+                    .select('*')
+                    .in('fee_id', feeIds)
+                    .order('payment_date', { ascending: false })
+                    .abortSignal(guard.controller.signal);
+                if (paysErr) throw paysErr;
+                (pays || []).forEach((p) => {
+                    const key = p.fee_id as string;
+                    if (!grouped[key]) grouped[key] = [];
+                    grouped[key].push(p);
+                });
+            }
+
+            if (append) {
+                setFees((prev) => [...prev, ...list]);
+                setPayments((prev) => ({ ...prev, ...grouped }));
+            } else {
+                setFees(list);
+                setPayments(grouped);
+            }
+
+            setFeesTotal(count || 0);
+            setFeesPage(page);
+            setFeesMore((page + 1) * PAGE_SIZE < (count || 0));
+            recordSuccess('db_fees');
+        } catch (err) {
+            const msg = guard.didTimeOut() ? 'timeout' : (err as { message?: string })?.message || 'fetch failed';
+            recordError('db_fees', msg);
+        } finally {
+            guard.cleanup();
+            setLoading(false);
         }
-
-        if (append) {
-            setFees((prev) => [...prev, ...list]);
-            setPayments((prev) => ({ ...prev, ...grouped }));
-        } else {
-            setFees(list);
-            setPayments(grouped);
-        }
-
-        setFeesTotal(count || 0);
-        setFeesPage(page);
-        setFeesMore((page + 1) * PAGE_SIZE < (count || 0));
-        setLoading(false);
     }, [profile, feesFilter, feesSearch]);
 
     useEffect(() => { fetchFees(0, feesFilter, feesSearch, false); }, [fetchFees, feesFilter, feesSearch]);
