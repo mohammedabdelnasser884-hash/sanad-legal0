@@ -189,10 +189,14 @@ export function validateParties(
     }
 
     // 🆕 قاعدة 6 — المسمى القانوني إجباري لو الجهة فيها شخصان فأكثر.
+    // ⚡ FIX (طلب حذف اللقب من رسالة التحذير — 9 أغسطس 2026): sideLabel
+    // كان "الطرف الأول (المدعي)"/"الطرف الثاني (المدعى عليه)" — الألقاب
+    // دي مش دقيقة دايمًا (ممكن الطرف الأول يكون طاعن/مستأنف مثلاً مش مدعي
+    // بالضرورة)، فبقت "الطرف الأول"/"الطرف الثاني" بس من غير أي لقب.
     (['plaintiff', 'defendant'] as const).forEach((side) => {
         const countOnSide = parties.filter((p) => p.side === side).length;
         if (countOnSide >= 2 && !legalTitles[side].trim()) {
-            const sideLabel = side === 'plaintiff' ? 'الطرف الأول (المدعي)' : 'الطرف الثاني (المدعى عليه)';
+            const sideLabel = side === 'plaintiff' ? 'الطرف الأول' : 'الطرف الثاني';
             errors.push({
                 partyId: '',
                 field: 'legal_title',
