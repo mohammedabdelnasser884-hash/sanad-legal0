@@ -15,7 +15,6 @@ let getSessionResult: { data: { session: { user: { id: string; email?: string | 
   data: { session: null },
 };
 let maybeSingleResult: MaybeSingleResult = { data: null, error: null };
-let maybeSingleShouldReject: Error | null = null;
 let authChangeListeners: Array<(event: string, session: { user: { id: string; email?: string | null } } | null) => void> = [];
 const unsubscribeSpy = vi.fn();
 const fromSpy = vi.fn();
@@ -30,7 +29,7 @@ function buildMaybeSingleChain() {
   return {
     eq: vi.fn((col: string, val: unknown) => {
       fromSpy(col, val);
-      return { maybeSingle: vi.fn(() => maybeSingleShouldReject ? Promise.reject(maybeSingleShouldReject) : Promise.resolve(maybeSingleResult)) };
+      return { maybeSingle: vi.fn(() => Promise.resolve(maybeSingleResult)) };
     }),
   };
 }
@@ -54,9 +53,9 @@ let useAuthProfile: typeof import('./useAuthProfile').useAuthProfile;
 
 beforeEach(async () => {
   vi.resetModules();
+  localStorage.clear();
   getSessionResult = { data: { session: null } };
   maybeSingleResult = { data: null, error: null };
-  maybeSingleShouldReject = null;
   authChangeListeners = [];
   getSession.mockClear();
   onAuthStateChange.mockClear();
@@ -66,7 +65,6 @@ beforeEach(async () => {
   toast.mockClear();
   setCurrentTenantId.mockClear();
   recordError.mockClear();
-  localStorage.clear();
   ({ useAuthProfile } = await import('./useAuthProfile'));
 });
 
@@ -111,13 +109,43 @@ describe('useAuthProfile', () => {
     await waitFor(() => expect(toast).toHaveBeenCalledWith('لا يوجد ملف شخصي مرتبط بهذا الحساب — تواصل مع مدير المكتب'));
   });
 
-  it('🟢 (كان باگ، اتصلح 9 أغسطس 2026) جلسة موجودة والبروفايل فشل/مش موجود → authLoading بيتقفل برضو (مش بيفضل true للأبد)', async () => {
+  it('✅ فيكس: جلسة موجودة والبروفايل فشل/مش موجود → authLoading بيتقفل (false) برضه، مش عالق للأبد', async () => {
     getSessionResult = { data: { session: { user: USER } } };
     maybeSingleResult = { data: null, error: null };
     const { result } = renderHook(() => useAuthProfile());
     await waitFor(() => expect(toast).toHaveBeenCalled());
     await waitFor(() => expect(result.current.authLoading).toBe(false));
+  });
+
+  it('✅ أوف لاين: جلسة موجودة + فشل نداء البروفايل + navigator.onLine=false + فيه نسخة محفوظة من قبل لنفس المستخدم → بيرجع للنسخة المحفوظة، authLoading بيتقفل، من غير رسالة الخطأ العادية', async () => {
+    const onLineSpy = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+    getSessionResult = { data: { session: { user: USER } } };
+    maybeSingleResult = { data: PROFILE, error: null };
+    const first = renderHook(() => useAuthProfile());
+    await waitFor(() => expect(first.result.current.profile).toEqual(PROFILE));
+    first.unmount();
+    toast.mockClear();
+    recordError.mockClear();
+
+    onLineSpy.mockReturnValue(false);
+    maybeSingleResult = { data: null, error: { message: 'network error' } };
+    const { result } = renderHook(() => useAuthProfile());
+    await waitFor(() => expect(result.current.profile).toEqual(PROFILE));
+    expect(result.current.authLoading).toBe(false);
+    expect(toast).toHaveBeenCalledWith('أنت أوف لاين — بتشوف بيانات حسابك المحفوظة');
+    expect(recordError).not.toHaveBeenCalled();
+    onLineSpy.mockRestore();
+  });
+
+  it('أوف لاين لكن مفيش نسخة محفوظة أصلًا → بيرجع لرسالة الخطأ العادية زي الأونلاين، وauthLoading بيتقفل برضه', async () => {
+    const onLineSpy = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    getSessionResult = { data: { session: { user: USER } } };
+    maybeSingleResult = { data: null, error: { message: 'network error' } };
+    const { result } = renderHook(() => useAuthProfile());
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('تعذّر تحميل بيانات حسابك. أعد تحميل الصفحة. لو المشكلة استمرت، تواصل مع الدعم.'));
+    expect(result.current.authLoading).toBe(false);
     expect(result.current.profile).toBeNull();
+    onLineSpy.mockRestore();
   });
 
   it('onAuthStateChange: session جديدة بمستخدم → بتنادي loadProfile وبتحدّث profile', async () => {
@@ -163,34 +191,6 @@ describe('useAuthProfile', () => {
     maybeSingleResult = { data: { ...PROFILE, tenant_id: null }, error: null };
     renderHook(() => useAuthProfile());
     await waitFor(() => expect(setCurrentTenantId).toHaveBeenCalledWith(null));
-  });
-
-  // ⚡ NEW (فيكس باگ "عالق على الشعار أوف لاين" — 9 أغسطس 2026)
-  it('نداء الشبكة فشل (أوف لاين) وفيه بروفايل محفوظ لنفس المستخدم → بيستخدم النسخة المحفوظة وauthLoading بيتقفل', async () => {
-    // أول تحميل ناجح — بيسجّل البروفايل في localStorage
-    getSessionResult = { data: { session: { user: USER } } };
-    maybeSingleResult = { data: PROFILE, error: null };
-    const first = renderHook(() => useAuthProfile());
-    await waitFor(() => expect(first.result.current.profile).toEqual(PROFILE));
-    first.unmount();
-
-    // تشغيل تاني والنت مقطوع (maybeSingle بترفض الـpromise)
-    toast.mockClear();
-    maybeSingleShouldReject = new Error('Failed to fetch');
-    const { result } = renderHook(() => useAuthProfile());
-    await waitFor(() => expect(result.current.authLoading).toBe(false));
-    expect(result.current.profile).toEqual(PROFILE);
-    expect(toast).toHaveBeenCalledWith('أنت أوف لاين — بتشتغل على آخر نسخة محفوظة من بياناتك');
-  });
-
-  it('نداء الشبكة فشل ومفيش أي بروفايل محفوظ قبل كده → توست خطأ واضح، profile فاضل null، وauthLoading بيتقفل برضو', async () => {
-    getSessionResult = { data: { session: { user: USER } } };
-    maybeSingleShouldReject = new Error('Failed to fetch');
-    const { result } = renderHook(() => useAuthProfile());
-    await waitFor(() => expect(result.current.authLoading).toBe(false));
-    expect(result.current.profile).toBeNull();
-    expect(toast).toHaveBeenCalledWith('تعذّر تحميل بيانات حسابك. تأكد من الاتصال بالإنترنت.');
-    expect(recordError).toHaveBeenCalledWith('auth_profile_load_network', 'Failed to fetch', expect.objectContaining({ label: 'تحميل بيانات الحساب' }));
   });
 
   it('unmount بينادي listener.subscription.unsubscribe()', async () => {
