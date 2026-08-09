@@ -234,12 +234,22 @@ export default async function globalTeardown(): Promise<void> {
     if (logErr) console.warn('  ⚠️ فشل حذف من activity_log:', logErr.message);
     counts.activity_log = logCount ?? 0;
 
-    // الموكلين: بس اللي اسمهم فيه الماركر — مش أي موكل اترتبط بقضية
-    // اتمسحت (ممكن يكون موكل حقيقي)
+    // الموكلين: اللي اسمهم فيه الماركر، أو رقم تليفونهم هو الرقم الوهمي
+    // الثابت اللي بيتحط في كل موكل تست (createClient في utils.ts —
+    // '01000000000') — مش أي موكل اترتبط بقضية اتمسحت (ممكن يكون موكل
+    // حقيقي).
+    //
+    // ⚠️ FIX (تنظيف تام — 9 أغسطس 2026): شرط الاسم لوحده كان بيفوّت جزء
+    // كبير من موكلين التست، لإن مش كل تست بيحط "اختبار E2E" في الاسم
+    // بالظبط (زي "بوابة اختبار ..."، "... E2E جاهز للربط" بدون كلمة
+    // "اختبار" جنبها). رقم التليفون ثابت في كل موكلين E2E من غير استثناء،
+    // فده ماركر أوثق. اتضاف بـOR جنب شرط الاسم الأصلي (مش بدل منه) عشان
+    // ميتغيرش أي سلوك حالي شغال، بس يقفل الفجوة اللي كانت بتسيب بيانات
+    // عالقة.
     const { error: clientsErr, count: clientsCount } = await supabase
       .from('clients')
       .delete({ count: 'exact' })
-      .ilike('client_name', MARKER);
+      .or(`client_name.ilike.${MARKER},phone.eq.01000000000`);
     if (clientsErr) console.warn('  ⚠️ فشل حذف من clients:', clientsErr.message);
     counts.clients = clientsCount ?? 0;
 
