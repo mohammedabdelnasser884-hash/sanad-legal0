@@ -6,16 +6,45 @@ import { setCurrentTenantId } from '../constants';
 import type { ProfileRow } from '../types';
 
 // ─────────────────────────────────────────────────────────
+//  ⚡ NEW (فيكس "نظام الأوفلاين ملوش قيمة، جزء 2" — 9 أغسطس 2026):
+//  الفيكس القديم (الـtoast الواضح) كان بيبيّن السبب بس مش بيحل المشكلة —
+//  لو نداء تحميل البروفايل فشل بسبب مفيش نت، profile كانت بتفضل null
+//  للأبد، وبالتبعية authLoading (اللي بيتقفل بس لو profile!==null) كان
+//  بيفضل true للأبد كمان → المستخدم عالق في شاشة التحميل، ومحدش بيوصله
+//  لأي شاشة فيها بيانات حتى لو الأوفلاين كاش (القضايا/الموكلين) شغال
+//  تمام. هنا بنخزّن آخر بروفايل ناجح في localStorage (بمفتاح مربوط
+//  بـuser.id)، ولو الفشل بسبب مفيش نت (مفيش error.message من نوع رفض
+//  حقيقي زي RLS/تكرار — التمييز صعب من نص الرسالة، فبنستخدم أبسط إشارة
+//  متاحة: navigator.onLine)، بنرجع للنسخة المحفوظة بدل ما نسيب profile
+//  فاضية. وأهم حاجة: authLoading دلوقتي بيتقفل (false) في كل المسارات،
+//  مش بس لو profile بقى غير null — فمفيش سيناريو تاني ممكن يسيب المستخدم
+//  عالق في اللودينج للأبد.
+// ─────────────────────────────────────────────────────────
+const PROFILE_CACHE_KEY = 'sanad_cached_profile_v1';
+
+function saveProfileCache(userId: string, profile: ProfileRow) {
+    try { localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify({ userId, profile })); } catch { /* localStorage غير متاح — تجاهل */ }
+}
+
+function loadProfileCache(userId: string): ProfileRow | null {
+    try {
+        const raw = localStorage.getItem(PROFILE_CACHE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as { userId: string; profile: ProfileRow };
+        if (parsed.userId !== userId) return null;
+        return parsed.profile;
+    } catch {
+        return null;
+    }
+}
+
+// ─────────────────────────────────────────────────────────
 //  useAuthProfile — منقول حرفيًا من App.tsx.
 //  بيجمّع: profile/authUser/authLoading state + loadProfile +
 //  effect الاستماع لـ onAuthStateChange + effect ضبط tenant_id.
 //  ⚠️ أخطر جزء في المشروع كله (auth) — صفر تغيير في المنطق أو
 //  الترتيب، نفس الكود بالظبط بس جوه hook منفصل.
 // ─────────────────────────────────────────────────────────
-// مفتاح تخزين آخر بروفايل نجح تحميله — نفس المستخدم بس (بيتفحص عن طريق
-// userId المخزّن جنبه) — مستخدم كـfallback لما نداء الشبكة يفشل أوف لاين.
-const PROFILE_CACHE_KEY = 'sanad_cached_profile_v1';
-
 export function useAuthProfile() {
     const [profile,    setProfile]    = useState<ProfileRow | null>(null);
     const [authUser,   setAuthUser]   = useState<{ id: string; email?: string | null } | null>(null);
@@ -30,64 +59,38 @@ export function useAuthProfile() {
     // أدخل" من غير سبب واضح). استخدمنا .maybeSingle() (مبترميش error لو
     // الصف مش موجود) وبنعرض toast واضح لو حصل أي error فعلي (زي تكرار
     // بيانات أو رفض RLS).
-    //
-    // ⚡ FIX (باگ "عالق على الشعار أوف لاين للأبد" — 9 أغسطس 2026): كان
-    // فيه مسار واحد بس بيقفل authLoading (profile!==null useEffect تحت)
-    // — فلو نداء الشبكة فشل (أوف لاين تمامًا، أو حتى خطأ RLS/شبكة عادي
-    // أونلاين) authLoading كان فاضل true للأبد وشاشة الشعار (AppLoadingScreen)
-    // ما كانتش بتقفل خالص، حتى لو المستخدم عنده سيشن Auth محفوظة محليًا.
-    // الحل جزئين:
-    //   1. try/catch/finally حوالين نداء الشبكة — finally بينادي
-    //      setAuthLoading(false) دايمًا (نجاح أو فشل)، فمفيش مسار بيسيب
-    //      المستخدم عالق تاني.
-    //   2. تخزين آخر بروفايل نجح تحميله في localStorage، واستخدامه
-    //      كـfallback لو النداء فشل بسبب مفيش نت (offline) — عشان
-    //      المستخدم فعلاً يقدر يدخل التطبيق أوف لاين بدل ما يوقف عند
-    //      شاشة اللوجن/اللوجو، وده اللي بيدي لنظام الأوفلاين قيمة حقيقية.
     const loadProfile = useCallback(async (user: { id: string; email?: string | null } | null) => {
         if (!user) { setProfile(null); setAuthUser(null); return; }
         setAuthUser(user);
-        try {
-            const { data, error } = await db.from('profiles').select('*').eq('user_id', user.id).maybeSingle();
-            if (error) {
-                recordError('auth_profile_load', error.message, {
-                    label: 'تحميل بيانات الحساب',
-                    message: 'تعذّر تحميل بيانات حسابك. أعد تحميل الصفحة. لو المشكلة استمرت، تواصل مع الدعم.',
-                });
-                toast('تعذّر تحميل بيانات حسابك. أعد تحميل الصفحة. لو المشكلة استمرت، تواصل مع الدعم.');
-                setProfile(null);
+        const { data, error } = await db.from('profiles').select('*').eq('user_id', user.id).maybeSingle();
+        if (error) {
+            // ⚡ NEW: لو السبب المرجّح إننا أوف لاين، جرّب ترجع لآخر
+            // نسخة بروفايل محفوظة لنفس المستخدم بدل ما تسيب الشاشة عالقة.
+            const cached = !navigator.onLine ? loadProfileCache(user.id) : null;
+            if (cached) {
+                setProfile(cached);
+                toast('أنت أوف لاين — بتشوف بيانات حسابك المحفوظة');
+                setAuthLoading(false);
                 return;
             }
-            if (!data) {
-                toast('لا يوجد ملف شخصي مرتبط بهذا الحساب — تواصل مع مدير المكتب');
-                setProfile(null);
-                return;
-            }
-            setProfile(data);
-            try { localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify({ userId: user.id, profile: data })); } catch { /* localStorage غير متاح — تجاهل */ }
-        } catch (err) {
-            // نداء الشبكة نفسه فشل (أغلب الوقت: أوف لاين تمامًا) — نجرّب
-            // نرجع لآخر بروفايل محفوظ لنفس المستخدم بدل ما نوقف المستخدم
-            // بره التطبيق خالص.
-            let cached: { userId: string; profile: ProfileRow } | null = null;
-            try {
-                const raw = localStorage.getItem(PROFILE_CACHE_KEY);
-                cached = raw ? JSON.parse(raw) : null;
-            } catch { /* تجاهل */ }
-            if (cached && cached.userId === user.id) {
-                setProfile(cached.profile);
-                toast('أنت أوف لاين — بتشتغل على آخر نسخة محفوظة من بياناتك');
-            } else {
-                recordError('auth_profile_load_network', err instanceof Error ? err.message : String(err), {
-                    label: 'تحميل بيانات الحساب',
-                    message: 'تعذّر تحميل بيانات حسابك. تأكد من الاتصال بالإنترنت.',
-                });
-                toast('تعذّر تحميل بيانات حسابك. تأكد من الاتصال بالإنترنت.');
-                setProfile(null);
-            }
-        } finally {
+            recordError('auth_profile_load', error.message, {
+                label: 'تحميل بيانات الحساب',
+                message: 'تعذّر تحميل بيانات حسابك. أعد تحميل الصفحة. لو المشكلة استمرت، تواصل مع الدعم.',
+            });
+            toast('تعذّر تحميل بيانات حسابك. أعد تحميل الصفحة. لو المشكلة استمرت، تواصل مع الدعم.');
+            setProfile(null);
             setAuthLoading(false);
+            return;
         }
+        if (!data) {
+            toast('لا يوجد ملف شخصي مرتبط بهذا الحساب — تواصل مع مدير المكتب');
+            setProfile(null);
+            setAuthLoading(false);
+            return;
+        }
+        saveProfileCache(user.id, data);
+        setProfile(data);
+        setAuthLoading(false);
     }, []);
 
     useEffect(() => {
@@ -110,10 +113,9 @@ export function useAuthProfile() {
         setCurrentTenantId(profile?.tenant_id ?? null);
     }, [profile]);
 
-    // ⚡ ملحوظة: authLoading دلوقتي بيتقفل من جوه loadProfile نفسها
-    // (finally block فوق) — مش محتاجين نعتمد على تغيّر profile هنا زي
-    // الأول، لأن ده بالظبط كان سبب باگ "عالق على الشعار للأبد" لو
-    // profile فضل null بعد فشل التحميل.
+    useEffect(() => {
+        if (profile !== null) setAuthLoading(false);
+    }, [profile]);
 
     return { profile, setProfile, authUser, setAuthUser, authLoading, loadProfile };
 }
