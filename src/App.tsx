@@ -375,13 +375,6 @@ function App() {
         // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 3): زرار "عدّل من ملف
         // الموكل" جوه EditStandaloneModal — نفس آلية فتح تفاصيل الموكل.
         onOpenClientProfile: (c) => setSelectedClient(c as MappedClient, true),
-        // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): بتوصّل
-        // لـ StandaloneSessionDetailModal (زرار "🔗 ربط") عبر DashboardTab —
-        // نفس الدالة المستخدمة أصلاً في NewStandaloneSessionModal.tsx.
-        onOpenCreateClientForSessionParty: handleOpenCreateClientForSessionPartyOnly,
-        // 🆕 (بند 2.3 — 6 أغسطس 2026): زرار "➕ إنشاء موكل جديد" جوه دروب-داون
-        // ربط الجلسة المستقلة (StandaloneSessionDetailModal عبر DashboardTab).
-        openNewClientModal,
     });
     const CasesTabContent   = React.createElement(CasesTab, {
         cases, casesFilter, setCasesFilter, casesPage, setCasesPage,
@@ -438,12 +431,6 @@ function App() {
                     externalRefreshSignal: sessionsRefreshSignal,
                     nav,
                     onOpenClientProfile: (c) => setSelectedClient(c as MappedClient, true),
-                    // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): بتوصّل
-                    // لـ StandaloneSessionDetailModal (زرار "🔗 ربط") عبر تاب الجلسات —
-                    // نفس الدالة المستخدمة أصلاً في NewStandaloneSessionModal.tsx.
-                    onOpenCreateClientForSessionParty: handleOpenCreateClientForSessionPartyOnly,
-                    // 🆕 (بند 2.3 — 6 أغسطس 2026): نفس الشرح فوق (Dashboard).
-                    openNewClientModal,
                 })
             ),
             // ⚡ FIX (8 أغسطس 2026 — البند 4 من تقرير حالة التنفيذ): casesWithExtras
@@ -485,7 +472,7 @@ function App() {
         React.createElement(AppModals, {
             // ⚡ FIX (8 أغسطس 2026): clientsWithExtras بدل clients الخام —
             // راجع تعليق useAppData.ts/setSelectedCase فوق.
-            cases, clients: clientsWithExtras, ensureClientsLoaded, lawyers, profile, country, isAdmin, casesFilter, nav,
+            cases, casesWithExtras, ensureCasesLoaded, clients: clientsWithExtras, ensureClientsLoaded, lawyers, profile, country, isAdmin, casesFilter, nav,
             showSearch, showAI, showCaseModal, showNewSessionModal,
             showLawyerModal, showClientModal, savingCase, savingLawyer, savingClient,
             deleteConfirm, selectedClient, selectedClientEditMode, selectedCase, selectedCaseInitialTab,
