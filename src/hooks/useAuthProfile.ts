@@ -62,11 +62,39 @@ export function useAuthProfile() {
     const loadProfile = useCallback(async (user: { id: string; email?: string | null } | null) => {
         if (!user) { setProfile(null); setAuthUser(null); return; }
         setAuthUser(user);
-        const { data, error } = await db.from('profiles').select('*').eq('user_id', user.id).maybeSingle();
+        // ⚡ NEW (فيكس "شاشة اللوجو بتفضل ثابتة كتير" — 9 أغسطس 2026):
+        // النداء ده مكنش عليه أي timeout خالص (بعكس نفس فكرة الـ8 ثواني
+        // المستخدمة في useDbConnectivity)، فلو الاتصال ضعيف/متقطع (مش
+        // offline بالكامل بحيث navigator.onLine يبقى false، بس الطلب
+        // فعليًا معلّق/بياخد وقت طويل قبل ما يفشل)، شاشة التحميل كانت
+        // تفضل عالقة لحد ما الطلب يفشل من نفسه (ممكن يستغرق وقت طويل جدًا
+        // حسب المتصفح/الشبكة). دلوقتي: 1) لو navigator.onLine=false من
+        // الأساس منحاولش نتصل بالسيرفر خالص ونروح على الكاش فورًا، 2) لو
+        // فعلاً هنحاول الاتصال، بنقفله بعد 8 ثواني كحد أقصى (AbortController)
+        // زي useDbConnectivity بالظبط.
+        let data: ProfileRow | null = null;
+        let error: { message: string } | null = null;
+        let timedOut = false;
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+            error = { message: 'offline' };
+        } else {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => { timedOut = true; controller.abort(); }, 8000);
+            try {
+                const res = await db.from('profiles').select('*').eq('user_id', user.id).abortSignal(controller.signal).maybeSingle();
+                data = res.data;
+                error = res.error;
+            } catch (err) {
+                error = { message: timedOut ? 'timeout' : (err as { message?: string })?.message || 'fetch failed' };
+            } finally {
+                clearTimeout(timeoutId);
+            }
+        }
         if (error) {
-            // ⚡ NEW: لو السبب المرجّح إننا أوف لاين، جرّب ترجع لآخر
-            // نسخة بروفايل محفوظة لنفس المستخدم بدل ما تسيب الشاشة عالقة.
-            const cached = !navigator.onLine ? loadProfileCache(user.id) : null;
+            // ⚡ لو السبب المرجّح إننا أوف لاين (أو الطلب طوّل واتقفل بالـ
+            // timeout فوق)، جرّب ترجع لآخر نسخة بروفايل محفوظة لنفس
+            // المستخدم بدل ما تسيب الشاشة عالقة.
+            const cached = (!navigator.onLine || timedOut) ? loadProfileCache(user.id) : null;
             if (cached) {
                 setProfile(cached);
                 toast('أنت أوف لاين — بتشوف بيانات حسابك المحفوظة');
