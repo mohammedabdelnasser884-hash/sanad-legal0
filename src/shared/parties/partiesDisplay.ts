@@ -77,7 +77,7 @@ export function derivePartiesDisplay(
 }
 
 /** اختصار: نص سطر واحد جاهز مباشرة ("فلان ضد علان") لأماكن العرض المختصرة
- * (فولباك عنوان الكارت في MissedTab/UpcomingWidget/UpcomingSessionsList).
+ * (فولباك عنوان الكارت في MissedTab وأماكن مشابهة).
  * null لو مفيش أي طرف خالص (لا case_parties ولا legacy). */
 export function derivePartiesLine(
     parties: PartyDisplayRow[] | null | undefined,
