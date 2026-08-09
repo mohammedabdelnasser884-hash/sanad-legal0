@@ -1,10 +1,24 @@
 import { test, expect } from '@playwright/test';
-import { login, createCase, createStandaloneSession, createClient, expectToast } from './utils';
+import { login, createStandaloneSession, expectToast } from './utils';
 
 // المرحلة 2 من خطة تنفيذ اختبارات E2E المقسمة — الجلسة المستقلة
 // (NewStandaloneSessionModal.tsx + StandaloneSessionDetailModal.tsx).
 // كل تست بيبدأ بتسجيل دخول منفصل (فولباك نفس أسلوب باقي ملفات
 // المرحلة 1) عشان التستات تفضل مستقلة عن بعض وترتيبها ميأثرش على نتيجتها.
+
+// 🗑️ (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة، المرحلة 5، 9 أغسطس
+// 2026): 4 تستات اتحذفت بالكامل من الملف ده لأنها بتغطي واجهات اتشالت
+// فعليًا في المراحل 1-3 (تاب "قضية موجودة"، زرار "إضافة الموكل لقائمة
+// الموكلين فقط"، "🔗 ربط" بالكامل، دروب-داون الربط بموكل موجود) — الترقيم
+// اتعاد بالكامل بعد الحذف عشان يفضل متسلسل من غير فجوات:
+//   القديم 3 "ربط جلسة بقضية موجودة"                  → محذوف
+//   القديم 4 "مودال تحويل لقضية؟"                       → الجديد 3
+//   القديم 5 "إضافة الموكل لقائمة الموكلين فقط"         → محذوف
+//   القديم 6 "حفظ الجلسة المستقلة أوفلاين"               → الجديد 4
+//   القديم 7 "عرض تفاصيل جلسة مستقلة موجودة"            → الجديد 5
+//   القديم 8 "تعديل جلسة مستقلة بنجاح"                  → الجديد 6
+//   القديم 9 "ربط الجلسة بقضية جديدة من شاشة التفاصيل"  → محذوف
+//   القديم 10 "ربط طرف من جلسة مستقلة بموكل موجود"      → محذوف
 
 // هيلبر محلي — فتح اليوم بتاريخ النهاردة في شبكة التقويم (نفس نمط
 // session-date-day في sessions.spec.ts)، بيفترض إن المستخدم واقف
@@ -75,32 +89,13 @@ test('2) إنشاء جلسة مستقلة بأكتر من طرف — فاليد�
   await expect(card.first()).toBeVisible({ timeout: 10_000 });
 });
 
-test('3) ربط جلسة بقضية موجودة بدل "مستقلة"', async ({ page }) => {
-  await login(page);
+// 🗑️ (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة، المرحلة 5، 9 أغسطس
+// 2026): تست "ربط جلسة بقضية موجودة بدل مستقلة" اتحذف بالكامل — تاب
+// "قضية موجودة" (`linkMode`/`new-session-mode-existing`) اتشال من
+// NewStandaloneSessionModal.tsx في المرحلة 1. مفيش بديل: الجلسة
+// المستقلة النهاردة معندهاش وضع "existing" خالص، الإنشاء دايمًا standalone.
 
-  const caseTitle = `اختبار E2E - قضية لجلسة مرتبطة - ${Date.now()}`;
-  await createCase(page, caseTitle);
-
-  await page.getByTestId('nav-calendar').click();
-  await page.getByTestId('calendar-new-session-button').click();
-  await page.getByTestId('new-session-modal').waitFor({ state: 'visible', timeout: 10_000 });
-
-  await page.getByTestId('new-session-mode-existing').click();
-  await page.getByTestId('new-session-case-search').fill(caseTitle);
-  const option = page.getByTestId('new-session-case-results').locator('button', { hasText: caseTitle });
-  await option.first().click();
-  await expect(page.getByTestId('new-session-case-selected')).toContainText(caseTitle);
-
-  const today = new Date().toISOString().slice(0, 10);
-  await page.getByTestId('new-session-date').fill(today);
-  await page.getByTestId('new-session-save').click();
-
-  // في وضع "existing" مفيش مودال "تحويل لقضية؟" — الحفظ بيقفل المودال
-  // مباشرة (راجع handleSave: linkMode==='existing' → onClose() فورًا).
-  await page.getByTestId('new-session-modal').waitFor({ state: 'hidden', timeout: 10_000 });
-});
-
-test('4) مودال "تحويل لقضية؟" — إنشاء قضية من بيانات الجلسة بعد الحفظ', async ({ page }) => {
+test('3) مودال "تحويل لقضية؟" — إنشاء قضية من بيانات الجلسة بعد الحفظ', async ({ page }) => {
   await login(page);
   const title = `اختبار E2E - جلسة تتحول لقضية - ${Date.now()}`;
   await page.getByTestId('nav-calendar').click();
@@ -115,7 +110,7 @@ test('4) مودال "تحويل لقضية؟" — إنشاء قضية من بي�
   await page.getByTestId('new-session-plaintiff-0-capacity').fill('مدعي');
   await page.getByTestId('new-session-plaintiff-0-national-id').fill(`3${Date.now()}`.slice(0, 14));
   await page.getByTestId('new-session-plaintiff-subform-save').click();
-  // 🔒 FIX (نفس باج تست 6 — usePartyFields.ts بيبدأ دايمًا بطرف مدعى-عليه
+  // 🔒 FIX (نفس باج تست 4 تحت — usePartyFields.ts بيبدأ دايمًا بطرف مدعى-عليه
   // فاضي افتراضيًا حتى لو مالمسناهوش، وفاليديشن casePartiesValidation.ts
   // بترفض الحفظ لو اسمه فاضي. من غير الملء ده، new-session-save كان بيرجّع
   // توست تحذير بدل ما يفتح مودال "تحويل لقضية؟"، فـpostsave-create-case
@@ -134,7 +129,8 @@ test('4) مودال "تحويل لقضية؟" — إنشاء قضية من بي�
   // 🔒 FIX: زرار "إضافة الموكل وربطه بالقضية" بقى (خطة توحيد إنشاء الموكل،
   // Phase 2 — handleAddAndLinkClient في useClientLinking.ts) بيفتح
   // NewClientModal الموحّد بدل INSERT مباشر يوصّل لـ"تم بنجاح" على طول
-  // (نفس فيكس تست 5 تحت). الاسم والرقم القومي بييجوا متعبيين تلقائيًا من
+  // (نفس نمط فتح NewClientModal الموحّد المستخدم في باقي مسارات إنشاء
+  // الموكل بالملف ده). الاسم والرقم القومي بييجوا متعبيين تلقائيًا من
   // بيانات الطرف، لكن الهاتف لأ فلازم نتعباه يدوي قبل الحفظ.
   await page.getByTestId('new-session-postsave-add-and-link-notfound').click({ timeout: 10_000 });
   await page.getByTestId('new-client-name').waitFor({ state: 'visible', timeout: 10_000 });
@@ -150,56 +146,7 @@ test('4) مودال "تحويل لقضية؟" — إنشاء قضية من بي�
   await expect(caseCard.first()).toBeVisible({ timeout: 15_000 });
 });
 
-test('5) إضافة الموكل لقائمة الموكلين فقط من خطوة idle', async ({ page }) => {
-  await login(page);
-  const clientName = `اختبار E2E - موكل فقط ${Date.now()}`;
-  await page.getByTestId('nav-calendar').click();
-  await page.getByTestId('calendar-new-session-button').click();
-  await page.getByTestId('new-session-modal').waitFor({ state: 'visible', timeout: 10_000 });
-  await page.getByTestId('new-session-title').fill(`اختبار E2E - إضافة موكل فقط - ${Date.now()}`);
-  const today = new Date().toISOString().slice(0, 10);
-  await page.getByTestId('new-session-date').fill(today);
-  await page.getByTestId('party-side-card-plaintiff').click();
-  await page.getByTestId('new-session-plaintiff-0-star').click();
-  await page.getByTestId('new-session-plaintiff-0-name').fill(clientName);
-  await page.getByTestId('new-session-plaintiff-0-capacity').fill('مدعي');
-  await page.getByTestId('new-session-plaintiff-0-national-id').fill(`4${Date.now()}`.slice(0, 14));
-  await page.getByTestId('new-session-plaintiff-subform-save').click();
-  // 🔒 FIX (نفس باج تست 4 أعلاه وتست 6 — الطرف المدعى-عليه الافتراضي
-  // الفاضي بيفشل الفاليديشن لو متلمسش).
-  await page.getByTestId('party-side-card-defendant').click();
-  await page.getByTestId('new-session-defendant-0-name').fill(`خصم إضافة موكل E2E ${Date.now()}`);
-  await page.getByTestId('new-session-defendant-0-capacity').fill('مدعى عليه');
-  await page.getByTestId('new-session-defendant-subform-save').click();
-  await page.getByTestId('new-session-save').click();
-
-  // idlePartyList فيها طرف واحد ⭐ → زرار "إضافة X لقائمة الموكلين"
-  // بالـid الخاص بالطرف (مش الـlegacy الموحّد، لأن الجلسة دي جديدة
-  // بأطراف مسجّلة في case_parties من مرحلة 6.2).
-  // 🔒 FIX (27 يوليو 2026): التست ده كان بيفشل 100% من المرات — الزرار ده
-  // بقى (خطة توحيد إنشاء الموكل، Phase 3) بيفتح NewClientModal الموحّد
-  // بدل INSERT مباشر يوصّل لخطوة "تم بنجاح" (راجع
-  // handleAddClientOnlyForParty/handleOpenCreateClientForSessionPartyOnly
-  // في useClientLinking.ts/App.tsx). الاسم والرقم القومي بييجوا متعبيين
-  // تلقائيًا من initialData، لكن الهاتف لأ فلازم نتعباه يدوي. وبعد الحفظ
-  // مفيش خطوة "done" منفصلة — بنرجع لنفس خطوة "idle" وزرار الطرف ده
-  // بيختفي من القائمة (اتضاف لـ linkedIdlePartyIds).
-  const addButton = page.locator('[data-testid^="new-session-postsave-add-client-only"]').first();
-  await addButton.click();
-  await page.getByTestId('new-client-name').waitFor({ state: 'visible', timeout: 10_000 });
-  await expect(page.getByTestId('new-client-name')).toHaveValue(clientName);
-  await page.getByTestId('new-client-phone').fill('01000000000');
-  await page.getByTestId('save-client-button').click();
-  await expect(page.getByTestId('new-client-name')).not.toBeVisible({ timeout: 10_000 });
-  await page.getByTestId('new-session-postsave-idle-close').click();
-
-  await page.getByTestId('nav-more-toggle').click();
-  await page.getByTestId('nav-more-clients').click();
-  const clientCard = page.getByTestId('client-card').filter({ hasText: clientName });
-  await expect(clientCard.first()).toBeVisible({ timeout: 15_000 });
-});
-
-test('6) حفظ الجلسة المستقلة أوفلاين', async ({ page, context }) => {
+test('4) حفظ الجلسة المستقلة أوفلاين', async ({ page, context }) => {
   await login(page);
   const title = `اختبار E2E - جلسة أوفلاين - ${Date.now()}`;
 
@@ -239,7 +186,7 @@ test('6) حفظ الجلسة المستقلة أوفلاين', async ({ page, co
   }
 });
 
-test('7) عرض تفاصيل جلسة مستقلة موجودة', async ({ page }) => {
+test('5) عرض تفاصيل جلسة مستقلة موجودة', async ({ page }) => {
   await login(page);
   const title = `اختبار E2E - عرض تفاصيل - ${Date.now()}`;
   await createStandaloneSession(page, title);
@@ -254,7 +201,7 @@ test('7) عرض تفاصيل جلسة مستقلة موجودة', async ({ page 
   await expect(page.getByTestId('standalone-session-detail-modal')).not.toBeVisible();
 });
 
-test('8) تعديل جلسة مستقلة بنجاح', async ({ page }) => {
+test('6) تعديل جلسة مستقلة بنجاح', async ({ page }) => {
   await login(page);
   const title = `اختبار E2E - قبل التعديل - ${Date.now()}`;
   const newTitle = `اختبار E2E - بعد التعديل - ${Date.now()}`;
@@ -281,129 +228,3 @@ test('8) تعديل جلسة مستقلة بنجاح', async ({ page }) => {
   const updatedCard = page.getByTestId('calendar-session-card').filter({ hasText: newTitle });
   await expect(updatedCard.first()).toBeVisible({ timeout: 10_000 });
 });
-
-test('9) ربط الجلسة بقضية جديدة من شاشة التفاصيل (🔗 ربط)', async ({ page }) => {
-  await login(page);
-  const title = `اختبار E2E - ربط من التفاصيل - ${Date.now()}`;
-  await createStandaloneSession(page, title);
-
-  await openTodayInCalendar(page);
-  const card = page.getByTestId('calendar-session-card').filter({ hasText: title });
-  await card.first().click();
-  await expect(page.getByTestId('standalone-session-link-trigger')).toBeVisible({ timeout: 10_000 });
-  await page.getByTestId('standalone-session-link-trigger').click();
-
-  await page.getByTestId('link-session-modal').waitFor({ state: 'visible', timeout: 10_000 });
-  await page.getByTestId('link-session-create-case').click();
-
-  // بعد إنشاء القضية، useSessionLinking بينتقل لخطوة found/notfound
-  // (الموكل اللي جه من createStandaloneSession رقمه القومي ثابت
-  // '12345678901234' — ممكن يكون اتسجل من تست سابق فيرجع 'found'،
-  // فبنتعامل مع الاتنين وصولاً لـ 'done').
-  // 🔒 FIX (تحليل لوجز E2E — 30 يوليو 2026): كانت مهلة الـrace 10 ثواني بس
-  // لكل مسار — لو الاستعلام الحقيقي على Supabase (تقلبات شبكة CI عادية)
-  // استغرق أكتر من كده، الاتنين كانوا بيفشلوا بصمت (catch)، والتست كان
-  // بيفترض غلط إن الحالة "notfound" وبيدوس على زرار لسه مش ظاهر أصلاً —
-  // فيعلّق لحد الـ60 ثانية بتاعة التست كله. رفعنا المهلة لـ20 ثانية، وضفنا
-  // waitFor صريح قبل الدوس على مسار notfound (بدل دوس أعمى) عشان لو لسه
-  // مستني، يفشل برسالة واضحة بدل ما يعلّق لحد نهاية التست.
-  // 🔒 FIX (تحليل لوجز E2E — 30 يوليو 2026): رفعنا المهلة من 20 لـ35 ثانية
-  // لكل مسار في الـrace، ومن 10 لـ15 ثانية لانتظار notfound بالتحديد.
-  // نفس سبب مشكلة dashboard-tab.spec.ts: بطء استعلام حقيقي على Supabase
-  // تحت ضغط تستات متوازية قرب نهاية تشغيل الـCI، مش باج منطقي في الكود.
-  const foundLink = page.getByTestId('link-session-found-link-existing');
-  const notfoundAdd = page.getByTestId('link-session-notfound-add-and-link');
-  await Promise.race([
-    foundLink.waitFor({ state: 'visible', timeout: 35_000 }).catch(() => {}),
-    notfoundAdd.waitFor({ state: 'visible', timeout: 35_000 }).catch(() => {}),
-  ]);
-  if (await foundLink.isVisible().catch(() => false)) {
-    await foundLink.click();
-  } else {
-    await notfoundAdd.waitFor({ state: 'visible', timeout: 15_000 });
-    await notfoundAdd.click();
-  }
-
-  await expect(page.getByText('تم بنجاح')).toBeVisible({ timeout: 10_000 });
-  await page.getByTestId('link-session-done-close').click();
-
-  // بعد "done" الجلسة بقى ليها case_id — زرار "🔗 ربط" لازم يختفي من
-  // شاشة التفاصيل (شرط !hasCase في الفوتر).
-  await expect(page.getByTestId('standalone-session-link-trigger')).not.toBeVisible({ timeout: 10_000 });
-});
-
-// 🆕 (Phase 3 + Phase 4 — خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026):
-// "🔗 ربط بموكل موجود بالفعل" بقى بيربط الطرف (المدعي ⭐ من
-// createStandaloneSession — الطرف الوحيد في idlePartyList هنا) بموكل موجود
-// فعلاً بالفعل، عن طريق linkClientToSessionParty (case_parties.client_id +
-// case_sessions.client_id لأنه الطرف الأساسي) — بدل تحديث الجلسة كلها
-// بحقول حرة زي المسار القديم. بيغطي الزرار الجديد (idlePartyList-per-party)
-// وخطوة searching (بدون تعارض لأن مفيش بيانات حرة قديمة في case_parties)
-// وصولاً لتوست النجاح.
-test('10) ربط طرف من جلسة مستقلة بموكل موجود بالفعل (🔗 ربط بموكل موجود)', async ({ page }) => {
-  await login(page);
-  const clientName = `اختبار E2E - موكل جاهز للربط - ${Date.now()}`;
-  // 🔒 FIX (تحليل لوجز E2E — 8 أغسطس 2026، تصحيح): كنا جرّبنا نبعت نفس
-  // الرقم القومي الثابت ('12345678901234') هنا عشان نمنع تعارض البيانات —
-  // ده فشل فعليًا لأن نفس الرقم ده متسجّل زمان كموكل حقيقي (تست 9 فوق،
-  // اللي بيجري قبل التست ده على طول، بيعمل جلسة مستقلة بنفس الرقم القومي
-  // الثابت ده ويربطها بقضية جديدة عبر "notfound → إضافة موكل جديد" — ده
-  // بيسجّل موكل حقيقي بنفس الرقم). فيه UNIQUE index حقيقي على
-  // clients(tenant_id, national_id) — فمحاولة عمل موكل تاني بنفس الرقم
-  // كانت بترفض (تعارض رقم قومي)، فكارت الموكل ما كانش بيظهر خالص وcreateClient
-  // كان بيقع تايم آوت. الرجوع لرقم عشوائي (زي الأصل) هو الصح — والتعارض
-  // بين رقم الطرف الثابت ورقم الموكل العشوائي ده *متوقع فعليًا* (مش باج)،
-  // فبدل ما نمنعه، بنتعامل مع خطوة "⚠️ القيم دي مختلفة" تحت لو ظهرت.
-  await createClient(page, clientName);
-
-  const title = `اختبار E2E - ربط بموكل موجود - ${Date.now()}`;
-  await createStandaloneSession(page, title);
-
-  await openTodayInCalendar(page);
-  const card = page.getByTestId('calendar-session-card').filter({ hasText: title });
-  await card.first().click();
-  await expect(page.getByTestId('standalone-session-link-trigger')).toBeVisible({ timeout: 10_000 });
-  await page.getByTestId('standalone-session-link-trigger').click();
-  await page.getByTestId('link-session-modal').waitFor({ state: 'visible', timeout: 10_000 });
-
-  // idlePartyList فيها طرف واحد بس (المدعي ⭐ اللي عمله createStandaloneSession)
-  // → single=true، فالـ testid ليه لاحقة id الطرف بس النص زي القديم بالظبط.
-  await page.locator('[data-testid^="link-session-search-existing"]').first().click();
-
-  await page.getByTestId('link-session-client-search').fill(clientName);
-  const clientOption = page.locator('[data-testid^="link-session-client-option-"]').filter({ hasText: clientName });
-  await clientOption.first().waitFor({ state: 'visible', timeout: 10_000 });
-  await clientOption.first().click();
-
-  // 🔒 FIX (تحليل لوجز E2E — 8 أغسطس 2026، تصحيح): رقم الطرف القومي الثابت
-  // ('12345678901234') ورقم الموكل العشوائي (createClient من غير رقم مبعوت)
-  // مختلفين دايمًا فعليًا → findPartyDataMismatches هيرصد تعارض حقيقي على
-  // طول، وزرار "تأكيد الربط" هيوقف عند خطوة "⚠️ القيم دي مختلفة عن ملف
-  // الموكل" بدل ما يربط على طول (نفس الزرار، لكن بيتحول لـ"✅ نعم، استخدم
-  // بيانات الموكل"). دوسة واحدة بس مش كافية هنا — لازم نتأكد من ظهور
-  // تحذير التعارض وندوس تاني قبل ما نستنى توست النجاح.
-  const confirmBtn = page.getByTestId('link-existing-client-confirm');
-  await confirmBtn.click();
-  const mismatchWarning = page.getByText('القيم دي مختلفة عن ملف الموكل');
-  const mismatchAppeared = await mismatchWarning
-    .waitFor({ state: 'visible', timeout: 3_000 })
-    .then(() => true)
-    .catch(() => false);
-  if (mismatchAppeared) {
-    await confirmBtn.click();
-  }
-  const partyName = 'موكل جلسة مستقلة E2E';
-  // 🔒 FIX (تحليل لوجز CI — 4 أغسطس 2026): confirmLinkToExistingClient
-  // (مسار الطرف المحدد الجديد) بتعمل كتابتين متتاليتين على Supabase
-  // (case_parties UPDATE ثم case_sessions UPDATE لأنه الطرف الأساسي) بدل
-  // كتابة واحدة زي المسار القديم. مهلة expectToast الافتراضية (5 ثواني)
-  // كانت بتفشل قبل ما الكتابة التانية تخلص تحت ضغط شبكة الـCI — نفس نمط
-  // البطء الموثّق في تعليقات تست 9 فوق. رفعناها لـ15 ثانية.
-  await expectToast(page, `✅ تم ربط "${partyName}" بـ"${clientName}"`, 15_000);
-
-  // الزرار المستقل بتاع الطرف ده لازم يختفي فورًا (linkedIdlePartyIds)
-  // والموديل يرجع لخطوة idle (مش يتقفل) — يقدر يربط طرف تاني لو موجود.
-  await expect(page.getByTestId('link-session-modal')).toBeVisible();
-  await expect(page.locator('[data-testid^="link-session-search-existing"]')).toHaveCount(0);
-});
-
