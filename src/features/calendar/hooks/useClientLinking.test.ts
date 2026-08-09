@@ -3,15 +3,13 @@ import { renderHook, act } from '@testing-library/react';
 
 // ══════════════════════════════════════════════════════════════════
 // 🔒 FIX (مراجعة قبل المرحلة 2): الملف ده كان بيعمل mock لـ db.from()
-// فقط، لكن handleLinkCase وhandleAddClientOnly بيمروا فعليًا على
-// window.__dbWrite (Global function من src/lib/offlineQueue.ts) — مش
-// db.from() مباشرة. من غير mock مباشر لـ window.__dbWrite، أي نداء ليه
-// كان بيرمي "window.__dbWrite is not a function" فعليًا وقت التشغيل
-// (بيتلقّط في catch العام، فيظهر توست "❌ خطأ غير متوقع" بدل توست
-// النجاح المتوقع) — يعني تستات handleAddClientOnly (وبعد التعديل هنا،
-// handleLinkCase كمان) كانت هتفشل فعليًا. اتصلح بنفس النمط المتبع في
-// useCaseActions.test.ts بالظبط: window.__dbWrite بيتعمل mock مباشر
-// كـ vi.fn() مُوجَّه (router) حسب type/table، بدل ما نعتمد على db.from.
+// فقط، لكن handleLinkCase بيمر فعليًا على window.__dbWrite (Global
+// function من src/lib/offlineQueue.ts) — مش db.from() مباشرة. من غير
+// mock مباشر لـ window.__dbWrite، أي نداء ليه كان بيرمي "window.__dbWrite
+// is not a function" فعليًا وقت التشغيل (بيتلقّط في catch العام، فيظهر
+// توست "❌ خطأ غير متوقع" بدل توست النجاح المتوقع). اتصلح بنفس النمط
+// المتبع في useCaseActions.test.ts بالظبط: window.__dbWrite بيتعمل mock
+// مباشر كـ vi.fn() مُوجَّه (router) حسب type/table، بدل ما نعتمد على db.from.
 //
 // 🆕 المرحلة 3-1: handleLinkExistingClient اتحوّل هو كمان لـ __dbWrite
 // (UPDATE:cases، مع _offlineSelfTempId لو createdCaseId لسه تمبيد — شوف
@@ -101,7 +99,7 @@ import type { Form } from '../NewStandaloneSessionModal';
 // mock مباشر لـ window.__dbWrite — نفس نمط useCaseActions.test.ts
 // (dbWriteMock helper هناك) بالظبط. بيوجّه حسب `${type}:${table}` عشان
 // نقدر نتحكم في نتيجة كل نداء لوحده (INSERT:cases لإنشاء القضية،
-// UPDATE:case_sessions لربط الجلسة، INSERT:clients لـ handleAddClientOnly).
+// UPDATE:case_sessions لربط الجلسة، INSERT:clients لـ handleAddAndLinkClient).
 // ══════════════════════════════════════════════════════════════════
 type DbWriteOp = { type: 'INSERT' | 'UPDATE' | 'DELETE'; table: string; data?: Record<string, unknown>; id?: string; returning?: boolean };
 type DbWriteResult = { error: unknown; offline?: boolean; queued?: boolean; data?: unknown };
@@ -366,8 +364,8 @@ describe('useClientLinking', () => {
   });
 
   // 🔄 Phase 4 (خطة توحيد إنشاء الموكل): بعد Phase 2/3، handleAddAndLinkClient
-  // وhandleAddClientOnly بقوا مجرد كول-باك متزامن بيفتح NewClientModal
-  // الموحّد (onOpenCreateClientForCase / onOpenCreateClient) — الإدراج
+  // بقت مجرد كول-باك متزامن بيفتح NewClientModal الموحّد
+  // (onOpenCreateClientForCase) — الإدراج
   // الفعلي (INSERT:clients) والربط (UPDATE:cases/case_sessions) بقوا جوه
   // handleSaveClient الموحّد (useClientActions.ts)، مش هنا. التستات القديمة
   // اللي كانت بتتأكد من INSERT مباشر اتشالت، ومكانها تستات على استدعاء
@@ -446,47 +444,9 @@ describe('useClientLinking', () => {
     });
   });
 
-  describe('handleAddClientOnly', () => {
-    it('savedFormData فاضي → لا تنادي الكول-باك', () => {
-      const onOpenCreateClient = vi.fn();
-      const { result } = renderHook(() => useClientLinking(null, vi.fn(), undefined, onOpenCreateClient));
-
-      act(() => { result.current.handleAddClientOnly(); });
-
-      expect(onOpenCreateClient).not.toHaveBeenCalled();
-    });
-
-    it('اسم المدعي فاضي بعد trim → لا تنادي الكول-باك', () => {
-      const onOpenCreateClient = vi.fn();
-      const saved = makeSavedFormData({ plaintiff: '   ' });
-      const { result } = renderHook(() => useClientLinking(saved, vi.fn(), undefined, onOpenCreateClient));
-
-      act(() => { result.current.handleAddClientOnly(); });
-
-      expect(onOpenCreateClient).not.toHaveBeenCalled();
-    });
-
-    it('بيانات صحيحة → الكول-باك بيتنادى بـ sessionId/plaintiff/national_id/poa', () => {
-      const onOpenCreateClient = vi.fn();
-      const saved = makeSavedFormData(
-        { plaintiff: 'موكل مستقل', plaintiff_national_id: '999', plaintiff_power_of_attorney: 'توكيل-1' },
-        { sessionId: 'session-1' },
-      );
-      const { result } = renderHook(() => useClientLinking(saved, vi.fn(), undefined, onOpenCreateClient));
-
-      act(() => { result.current.handleAddClientOnly(); });
-
-      expect(onOpenCreateClient).toHaveBeenCalledWith('session-1', 'موكل مستقل', '999', 'توكيل-1');
-    });
-
-    it('sessionId فاضي (الجلسة أوفلاين، لسه من غير id حقيقي) → الكول-باك بيتنادى بـ sessionId = null زي ما هو', () => {
-      const onOpenCreateClient = vi.fn();
-      const saved = makeSavedFormData({ plaintiff: 'موكل بدون ربط' }, { sessionId: null });
-      const { result } = renderHook(() => useClientLinking(saved, vi.fn(), undefined, onOpenCreateClient));
-
-      act(() => { result.current.handleAddClientOnly(); });
-
-      expect(onOpenCreateClient).toHaveBeenCalledWith(null, 'موكل بدون ربط', '', '');
-    });
-  });
 });
+
+// 🗑️ (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة، المرحلة 5، 9 أغسطس
+// 2026): describe('handleAddClientOnly') (4 تستات) اتحذف بالكامل — الدالة
+// نفسها اتشالت من useClientLinking.ts في المرحلة 4 (كانت بتغذي زرار
+// "إضافة الموكل لقائمة الموكلين فقط" اللي اتشال من الواجهة في المرحلة 1).
