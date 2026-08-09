@@ -53,9 +53,16 @@ function MonthListTab({ cases, clients, onOpenCase, onOpenReminders, onOpenStand
     const [sessions, setSessions]   = useState<MonthSessionRow[]>([]);
     const [tasks,    setTasks]      = useState<TaskFeedItem[]>([]);
     const [loading, setLoading]     = useState(true);
+    // ⚡ FIX (تحليل لوجز E2E — 9 أغسطس 2026): نفس فكرة prevMonthYear في
+    // CalendarTab.tsx — بنستخدمها هنا كمان عشان نميّز refetch بسبب تنقل
+    // شهور حقيقي عن refetch بسبب refreshKey بس (زي حفظ جلسة أوفلاين).
+    const prevMonthYear = React.useRef({ viewYear, viewMonth });
 
     useEffect(() => {
         setLoading(true);
+        const isMonthNavigation =
+            prevMonthYear.current.viewYear !== viewYear || prevMonthYear.current.viewMonth !== viewMonth;
+        prevMonthYear.current = { viewYear, viewMonth };
         const mm   = String(viewMonth + 1).padStart(2, '0');
         const last = new Date(viewYear, viewMonth + 1, 0).getDate();
         const startStr = `${viewYear}-${mm}-01`;
@@ -70,7 +77,7 @@ function MonthListTab({ cases, clients, onOpenCase, onOpenReminders, onOpenStand
             const cached = loadCalendarSessionsCache(viewYear, viewMonth);
             if (cached) {
                 setSessions(cached);
-                toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من جلسات الشهر ده');
+                if (isMonthNavigation) toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من جلسات الشهر ده');
             } else {
                 setSessions([]);
                 recordError('db_calendar_sessions', 'offline');
@@ -94,7 +101,7 @@ function MonthListTab({ cases, clients, onOpenCase, onOpenReminders, onOpenStand
                   const cached = loadCalendarSessionsCache(viewYear, viewMonth);
                   if (cached) {
                       setSessions(cached);
-                      toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من جلسات الشهر ده');
+                      if (isMonthNavigation) toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من جلسات الشهر ده');
                   } else {
                       setSessions([]);
                       recordError('db_calendar_sessions', error.message);
