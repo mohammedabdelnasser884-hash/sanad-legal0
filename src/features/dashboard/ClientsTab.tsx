@@ -87,7 +87,6 @@ function ClientsTab({ cases, clients, clientSearch, setClientSearch, clientsPage
       setPartyCaseIdsByClient(grouped);
     })();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clients]);
 
   // اتحاد case_id من العمود القديم (cases.client_id) + case_parties،
