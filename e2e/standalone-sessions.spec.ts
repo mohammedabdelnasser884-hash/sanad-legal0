@@ -74,7 +74,9 @@ test('2) إنشاء جلسة مستقلة بأكتر من طرف — فاليد�
   await page.getByTestId('new-session-save').click();
   // 🔄 casePartiesValidation.ts دلوقتي بيرجّع رسالة أدق لكل جهة بدل الرسالة
   // العامة القديمة (راجع validateParties → قاعدة 6).
-  await expectToast(page, '⚠️ الطرف الثاني (المدعى عليه) فيه أكثر من شخص — لازم تكتب "المسمى القانوني" الجامع لهذا الطرف');
+  // ⚡ FIX (تحليل لوجز E2E — 9 أغسطس 2026): نفس تعديل الرسالة العمدي في
+  // casePartiesValidation.ts (راجع case-parties-and-sessions.spec.ts).
+  await expectToast(page, '⚠️ الطرف الثاني فيه أكثر من شخص — لازم تكتب "المسمى القانوني" الجامع لهذا الطرف');
 
   // نرجع نملأ المسمى القانوني الجامع ونحفظ تاني — لازم ينجح دلوقتي.
   await page.getByTestId('party-side-card-defendant').click();
