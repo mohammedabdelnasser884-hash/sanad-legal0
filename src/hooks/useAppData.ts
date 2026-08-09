@@ -512,16 +512,23 @@ export function useAppData(profile: ProfileRow | null) {
         const { data, error, count } = await query;
 
         if (error) {
-            recordError('db_clients', error.message);
-            // ⚡ NEW: نفس فكرة fetchCases فوق — fallback لآخر نسخة محفوظة
-            // من الصفحة الأولى (بلا بحث) لو الفشل بسبب مفيش نت.
+            // ⚡ FIX (9 أغسطس 2026): كان بينادي recordError('db_clients')
+            // دايمًا هنا قبل ما يجرّب الكاش خالص — عكس fetchCases اللي بتتخطى
+            // recordError تمامًا لو الكاش رجع بيانات فعلًا. النتيجة كانت
+            // بانر "خلل في: جلب الموكلين" أحمر وواضح يفضل ظاهر في الداشبورد
+            // حتى لو الكاش شغال 100% وعرض بيانات صح — يبوّظ فكرة إن الأوفلاين
+            // "شغال بهدوء" وخلّى المستخدم يحس إنه مش مستفيد من النظام خالص.
+            // دلوقتي: recordError بيتنادى بس لو مفيش كاش نرجعله (فشل حقيقي).
             if (page === 0 && !search.trim()) {
                 const cached = loadOfflineCache<MappedClient>(CLIENTS_CACHE_KEY, profile.tenant_id);
                 if (cached && cached.length > 0) {
                     setClients(cached);
                     toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من الموكلين');
+                    setClientsLoading(false);
+                    return;
                 }
             }
+            recordError('db_clients', error.message);
         } else {
             const mapped: MappedClient[] = (data || []).map((c: ClientRow) => ({
                 ...c,
