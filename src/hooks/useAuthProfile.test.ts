@@ -216,7 +216,14 @@ describe('useAuthProfile', () => {
       abortShouldHang = true;
       const { result } = renderHook(() => useAuthProfile());
       await act(async () => { await vi.advanceTimersByTimeAsync(8000); });
-      await waitFor(() => expect(result.current.authLoading).toBe(false));
+      // ⚡ FIX (9 أغسطس 2026): استبدلنا waitFor بـ assertion مباشر — waitFor
+      // بتستخدم setInterval حقيقي للـpolling داخليًا، ولو fake timers شغالة
+      // (زي هنا) بيبقى الـsetInterval ده fake برضه ومحدّش بيقدّمه، فبتتجمّد
+      // للأبد وده بيمنع finally تحت من إنه ينفّذ vi.useRealTimers()، فبتسرّب
+      // fake timers لكل التستات اللي جاية بعدها في الملف (السبب الحقيقي
+      // وراء الـ7 فشل في الـCI). act() فوق بالفعل بيعمل flush للـstate،
+      // فمش محتاجين waitFor أصلًا هنا.
+      expect(result.current.authLoading).toBe(false);
       expect(result.current.profile).toEqual(PROFILE);
       expect(recordError).not.toHaveBeenCalled();
     } finally {
