@@ -13,7 +13,6 @@ import type { PartyFieldValue } from '@/shared/parties/partyTypes';
 import { validateParties } from '@/shared/lib/casePartiesValidation';
 import { useFormDraft } from '@/shared/hooks/useFormDraft';
 import { useUnsavedChangesGuard } from '@/shared/hooks/useUnsavedChangesGuard';
-import type { MappedCase } from '../../hooks/useAppData';
 import { useClientLinking } from './hooks/useClientLinking';
 import { makeOfflineTempId, withFkOfflineSentinel } from './hooks/caseSessionLinkingShared';
 import type { OpenCreateClientForSession, OpenCreateClientForCase, OpenCreateClientForParty, OpenCreateClientForSessionParty } from './hooks/useClientLinking';
@@ -33,7 +32,6 @@ export interface Form {
     case_type_custom: string;
     circuit_number: string;
     court_level: string;
-    court_level_other: string;
     session_date: string;
     session_time: string;
     // ⚡ ملحوظة (مرحلة 6.1 — خطة تعدد الأطراف، 22 يوليو 2026): الحقول دي
@@ -72,7 +70,6 @@ const EMPTY: Form = {
     case_type_custom: '',
     circuit_number: '',
     court_level: '',
-    court_level_other: '',
     session_date: '',
     session_time: 'صباحي',
     plaintiff: '',
@@ -91,7 +88,9 @@ const EMPTY: Form = {
     result: '',
 };
 
-const COURT_LEVELS = ['ابتدائي', 'استئناف', 'نقض', 'أخرى'];
+// ⚡ CHANGED (طلب مباشر — 9 أغسطس 2026): بقت بس suggestions لـdatalist
+// (مش قايمة اختيارات مقفولة) — راجع تعليق الرندر تحت.
+const COURT_LEVELS = ['ابتدائي', 'استئناف', 'نقض'];
 
 // أرقام بس، وبالظبط 14 رقم — بيتقص أي حرف مش رقم أول بأول
 const onlyDigits = (v: string, max = 14) => v.replace(/\D/g, '').slice(0, max);
@@ -115,12 +114,14 @@ function Field({ label, required = false, children }: { label: string; required?
 const inputCls = 'w-full p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600';
 const inputStyle = { fontFamily: 'Cairo,sans-serif' };
 
-export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAdded, onNotify, cases = [], onOpenCreateClient, onOpenCreateClientForCase, onOpenCreateClientForParty, onOpenCreateClientForSessionParty }: {
+export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAdded, onNotify, onOpenCreateClient, onOpenCreateClientForCase, onOpenCreateClientForParty, onOpenCreateClientForSessionParty }: {
     onClose: () => void;
     onSaved: () => void;
     onClientAdded?: () => void;
     onNotify?: (msg: string) => void;
-    cases?: MappedCase[];
+    // ⚡ REMOVED (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة، المرحلة 6 — 9
+    // أغسطس 2026): `cases` prop كانت خدمة لتاب "قضية موجودة" (`linkMode`)
+    // اللي اتشال بالكامل في المرحلة 1 — بقيت غير مستخدمة من وقتها.
     // ⚡ NEW (خطة توحيد إنشاء الموكل، Phase 3): فتح NewClientModal الموحّد
     // من "إضافة الموكل لقائمة الموكلين فقط" — شوف App.tsx
     // (handleOpenCreateClientForSession) وuseClientLinking.ts.
@@ -147,9 +148,11 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
     // سلوت "ربط بموكل من النظام" هنا (الفورم ده أصلاً معندوش prop
     // للموكلين — نفس نطاق الفورم القديم قبل التعديل).
     const partyFields = usePartyFields();
-    const [linkMode, setLinkMode] = useState<'standalone' | 'existing'>('standalone');
-    const [caseSearch, setCaseSearch] = useState('');
-    const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
+    // ⚡ REMOVED (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة، Phase 1 — 9
+    // أغسطس 2026): linkMode/caseSearch/selectedCaseId (تاب "قضية موجودة")
+    // اتشالوا بالكامل — الفورم ده بيعمل جلسة مستقلة بس دلوقتي. "إضافة
+    // جلسة لقضية موجودة" بقت من جوه القضية نفسها (زرار "إضافة جلسة" في
+    // CaseDetailView)، مش من هنا.
 
     // ══════════════ حفظ مسودة تلقائي (خطة 1 أغسطس 2026) ══════════════
     // بيغطي حقول الفورم + وضع الربط (standalone/existing) + القضية
@@ -161,20 +164,12 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
     // هناك.
     interface SessionDraftData {
         form: Form;
-        linkMode: 'standalone' | 'existing';
-        selectedCaseId: string | null;
         parties: PartyFieldValue[];
         legalTitles: { plaintiff: string; defendant: string };
     }
-    const draftData: SessionDraftData = { form, linkMode, selectedCaseId, parties: partyFields.parties, legalTitles: partyFields.legalTitles };
-    // ⚡ FIX (بلاغ 5 أغسطس 2026 — مسودة "زيادة عن اللزوم"): كانت
-    // `d.linkMode === 'standalone'` شرط إلزامي هنا، يعني في وضع "existing"
-    // الفورم مكانش بيتحسب فاضي أبدًا حتى لو مفيش قضية متحددة ولا أي حاجة
-    // مكتوبة — بيتم تجاهل linkMode في فحص الفراغ؛ اختيار قضية (selectedCaseId)
-    // بيتفحص في الحالتين، وparties أصلاً بتفضل فاضية في وضع "existing" برضه.
+    const draftData: SessionDraftData = { form, parties: partyFields.parties, legalTitles: partyFields.legalTitles };
     const isSessionDraftEmpty = (d: SessionDraftData) =>
         !d.form.title.trim() && !d.form.session_date.trim() && !d.form.case_number.trim() &&
-        !d.selectedCaseId &&
         !d.parties.some((p) => p.name.trim() || p.national_id.trim() || p.address.trim() || p.power_of_attorney.trim() || p.capacity.trim());
     const [saving, setSaving] = useState(false);
     // ⚡ FIX (بلاغ 5 أغسطس 2026 — مسودة "زيادة عن اللزوم"): postSaveModal
@@ -191,7 +186,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
     // useClientLinking.ts) عشان يتنقلوا للقضية الجديدة وقت التحويل.
     const [savedFormData, setSavedFormData] = useState<{ form: Form; finalCaseType: string; finalCourtLevel: string; fullCaseNumber: string; sessionId: string | null; plaintiffLegalTitle?: string | null; defendantLegalTitle?: string | null } | null>(null);
     const {
-        linkingCase, linkingClient, linkingToCase,
+        linkingCase, linkingToCase,
         createdCaseId, setCreatedCaseId,
         clientStep, setClientStep,
         foundClient, setFoundClient, foundClientMatchType,
@@ -199,11 +194,13 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
         // وhandleSkipParty لتخطي الطرف الحالي بس وقت الـ wizard (بدل onClose
         // اللي بيقفل الموديل كله — مسار الجلسات القديمة قبل مرحلة 6).
         partyList, partyIndex, handleSkipParty,
-        // ⚡ NEW (مرحلة 13 جزء 2): idlePartyList/linkedIdlePartyIds لتحديد
-        // أي زرار يظهر في خطوة "idle"، وhandleAddClientOnlyForParty لفتح
-        // NewClientModal لطرف بعينه.
-        idlePartyList, linkedIdlePartyIds, handleAddClientOnlyForParty,
-        handleLinkCase, handleLinkExistingClient, handleAddAndLinkClient, handleAddClientOnly,
+        // ⚡ REMOVED (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة، Phase 1 —
+        // 9 أغسطس 2026): idlePartyList/linkedIdlePartyIds/
+        // handleAddClientOnlyForParty/handleAddClientOnly/linkingClient
+        // بقوا مش مستخدمين هنا (كانوا بس لزرار "إضافة الموكل لقائمة
+        // الموكلين فقط" اللي اتشال من خطوة idle تحت). لسه موجودين في
+        // useClientLinking.ts نفسه لحد ما الهوك يتنضف في مرحلة 4.
+        handleLinkCase, handleLinkExistingClient, handleAddAndLinkClient,
     } = useClientLinking(savedFormData, onSaved, onClientAdded, onOpenCreateClient, onOpenCreateClientForCase, onOpenCreateClientForParty, onOpenCreateClientForSessionParty);
     // ⚡ NEW (7.2 جزء 2 — بند 2.4): في وضع الـ wizard (partyList فيها أطراف)،
     // اسم الطرف الحالي بيحل محل savedFormData.form.plaintiff (اللي بقى بيمثل
@@ -216,9 +213,18 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
 
     useEffect(() => {
         if (!draft.restoredDraft) return;
+        // ⚡ NEW (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة، Phase 1 — 9
+        // أغسطس 2026): مسودة قديمة محفوظة قبل الشيل ده ممكن يكون شكلها
+        // فيه linkMode:'existing' (تاب "قضية موجودة" اللي اتشال بالكامل من
+        // الفورم). SessionDraftData الجديد معندوش الحقل ده خالص، فبدل ما
+        // نحاول نسترجع بيانات ناقصة/تكسر، بنتجاهل المسودة القديمة دي
+        // بالكامل هنا — الفورم بيرجع standalone فاضي عادي (زي أول فتح).
+        if ((draft.restoredDraft as unknown as { linkMode?: string }).linkMode === 'existing') {
+            draft.dismissRestoredDraft();
+            draft.clearDraft();
+            return;
+        }
         setForm(draft.restoredDraft.form);
-        setLinkMode(draft.restoredDraft.linkMode);
-        setSelectedCaseId(draft.restoredDraft.selectedCaseId);
         partyFields.replaceParties(draft.restoredDraft.parties);
         partyFields.replaceLegalTitles(draft.restoredDraft.legalTitles);
         toast('📝 تم استرجاع بيانات كنت بتكتبها قبل كده');
@@ -229,47 +235,35 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
     // تحذير قبل الإغلاق — بس لفورم الإدخال الأساسي (مش خطوات الـwizard اللي
     // بعد الحفظ الناجح، راجع onSkipOrClose/postSave تحت — البيانات هناك
     // اتحفظت فعليًا فمفيش داعي لتحذير).
-    const { guardedClose, confirmModal } = useUnsavedChangesGuard(draftData, { form, linkMode, selectedCaseId, parties: partyFields.parties, legalTitles: partyFields.legalTitles }, onClose);
+    const { guardedClose, confirmModal } = useUnsavedChangesGuard(draftData, { form, parties: partyFields.parties, legalTitles: partyFields.legalTitles }, onClose, draft.clearDraft);
 
     const finalCaseType = form.case_type === 'أخرى' ? (form.case_type_custom || 'أخرى') : form.case_type;
-    const finalCourtLevel = form.court_level === 'أخرى' ? (form.court_level_other || '') : form.court_level;
+    const finalCourtLevel = form.court_level.trim();
     const fullCaseNumber = [form.case_number, form.case_year].filter(Boolean).join('/');
-    const selectedCase = cases.find((c: MappedCase) => c.id === selectedCaseId) || null;
-    const filteredCases = !caseSearch ? cases : cases.filter((c: MappedCase) =>
-        c.title?.includes(caseSearch) || c.number?.includes(caseSearch) ||
-        c.plaintiff?.includes(caseSearch) || c.defendant?.includes(caseSearch)
-    );
 
     const handleSave = async () => {
         if (!form.session_date) { toast('⚠️ تاريخ الجلسة مطلوب', true); return; }
-        if (linkMode === 'existing' && !selectedCaseId) { toast('⚠️ اختر القضية أولاً', true); return; }
-        if (linkMode === 'standalone') {
-            if (!form.title?.trim()) {
-                toast('⚠️ يجب ملء الحقول الإجبارية المحددة بعلامة (*)', true);
-                return;
-            }
-            // ⚡ CHANGED (مرحلة 6.1 — خطة تعدد الأطراف): فاليديشن أطراف
-            // الجلسة كلها بقت من casePartiesValidation.ts (نفس القواعد
-            // المطبّقة في NewCaseModal.tsx مرحلة 4.1: اسم/صفة كل طرف،
-            // الرقم القومي 14 رقم لمن عليه ⭐، طرف واحد ⭐ على الأقل، عدم
-            // تكرار الرقم القومي) — بدل الفحوصات المفردة القديمة
-            // (validateFullNameParts للخصم، طول الرقم القومي يدويًا...).
-            if (!partyFields.validation.valid) {
-                toast(partyFields.validation.message || 'يرجى مراجعة بيانات أطراف الدعوى', true);
-                return;
-            }
+        if (!form.title?.trim()) {
+            toast('⚠️ يجب ملء الحقول الإجبارية المحددة بعلامة (*)', true);
+            return;
+        }
+        // ⚡ CHANGED (مرحلة 6.1 — خطة تعدد الأطراف): فاليديشن أطراف
+        // الجلسة كلها بقت من casePartiesValidation.ts (نفس القواعد
+        // المطبّقة في NewCaseModal.tsx مرحلة 4.1: اسم/صفة كل طرف،
+        // الرقم القومي 14 رقم لمن عليه ⭐، طرف واحد ⭐ على الأقل، عدم
+        // تكرار الرقم القومي) — بدل الفحوصات المفردة القديمة
+        // (validateFullNameParts للخصم، طول الرقم القومي يدويًا...).
+        if (!partyFields.validation.valid) {
+            toast(partyFields.validation.message || 'يرجى مراجعة بيانات أطراف الدعوى', true);
+            return;
         }
         // ⚡ NEW (مرحلة 6.1): "الطرف الأساسي" في كل جهة (أولوية لمن عليه ⭐،
         // وإلا أول طرف) بياخد مكان الحقول المفردة القديمة (plaintiff/
         // defendant/...) — نفس آلية "مزامنة الأعمدة القديمة" في مرحلة 4.1
         // (NewCaseModal.tsx). حفظ كل الأطراف فعليًا في case_parties (لجلسة
         // مستقلة) هيتضاف في مرحلة 6.2 التالية.
-        const primaryPlaintiff = linkMode === 'standalone'
-            ? (partyFields.plaintiffs.find((p) => p.is_client) || partyFields.plaintiffs[0])
-            : undefined;
-        const primaryDefendant = linkMode === 'standalone'
-            ? (partyFields.defendants.find((p) => p.is_client) || partyFields.defendants[0])
-            : undefined;
+        const primaryPlaintiff = partyFields.plaintiffs.find((p) => p.is_client) || partyFields.plaintiffs[0];
+        const primaryDefendant = partyFields.defendants.find((p) => p.is_client) || partyFields.defendants[0];
         // ⚡ NEW (مرحلة 6.2 — خطة تعدد الأطراف): معرّف مؤقت لصف الجلسة
         // نفسها — بيتبعت دايمًا مع نداء __dbWrite بغض النظر عن حالة
         // الاتصال (نفس نمط offlineTempId في useCaseActions.ts)، عشان لو
@@ -287,7 +281,6 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
         // خاصة بالجلسة نفسها — الأطراف بتاعة القضية المختارة أصلاً).
         type InsertPartiesResult = { ok: true } | { ok: false; reason: 'validation'; message: string } | { ok: false; reason: 'write' };
         const insertSessionParties = async (sessionId: string | null, isOffline: boolean, isQueued: boolean): Promise<InsertPartiesResult> => {
-            if (linkMode !== 'standalone') return { ok: true };
             const parties = partyFields.parties;
             if (!parties || parties.length === 0) return { ok: true };
             // 🔒 فاليديشن سيرفر مكرر (نفس نمط 4.3/5.2) — دفاع في العمق لو
@@ -343,7 +336,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                 type: 'INSERT',
                 table: 'case_sessions',
                 data: {
-                    case_id: linkMode === 'existing' ? selectedCaseId : null,
+                    case_id: null,
                     session_date: form.session_date,
                     session_time: form.session_time || null,
                     court_level: finalCourtLevel || null,
@@ -384,7 +377,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
             }
 
             if (offline && queued) {
-                toast(linkMode === 'existing' ? '📥 الجلسة محفوظة محلياً — ستُضاف فور عودة الإنترنت' : '📥 الجلسة المستقلة محفوظة محلياً — ستُضاف فور عودة الإنترنت');
+                toast('📥 الجلسة المستقلة محفوظة محلياً — ستُضاف فور عودة الإنترنت');
                 // ⚡ NEW (مرحلة 6.2): أطراف الجلسة (لو وضع standalone) بتتقيّد
                 // هي كمان في نفس طابور الأوفلاين — بتتحل تلقائيًا بـ session_id
                 // الحقيقي وقت المزامنة (_offlineFkTempId فوق في insertSessionParties).
@@ -404,9 +397,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
             }
 
             // ⚡ NEW (مرحلة 6.2): تسجيل كل أطراف الجلسة في case_parties — أونلاين
-            // بالـ session_id الحقيقي مباشرة (مفيش داعي لسنتينل هنا). بترجع
-            // {ok:true} فورًا لو linkMode==='existing' (مفيش أطراف خاصة
-            // بالجلسة نفسها في الوضع ده — راجع insertSessionParties فوق).
+            // بالـ session_id الحقيقي مباشرة (مفيش داعي لسنتينل هنا).
             // الفحص على sessionData?.id (زي newCaseId في useCaseActions.ts):
             // حالة نادرة ممكن الجلسة تتسجل بنجاح لكن الصف المُدرج ميترجعش
             // (RLS بتمنع SELECT بعد INSERT مثلاً) — لو حصل، مفيش session_id
@@ -422,50 +413,32 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                         true
                     );
                 }
-            } else if (linkMode === 'standalone' && partyFields.parties.length > 0) {
+            } else if (partyFields.parties.length > 0) {
                 toast('⚠️ الجلسة اتسجلت، لكن أطراف الدعوى محتاجة تتضاف يدويًا من تفاصيل الجلسة', true);
             }
 
             // إشعار تيليجرام
             try {
                 if (onNotify) {
-                    let msg = linkMode === 'existing'
-                        ? `📅 <b>جلسة جديدة</b>\n\n`
-                        : `📅 <b>جلسة مستقلة جديدة</b>\n\n`;
-                    if (linkMode === 'existing' && selectedCase) {
-                        msg += `⚖️ <b>${escapeTelegramHtml(selectedCase.title || '—')}</b>\n`;
-                        msg += `📋 رقم القيد: ${escapeTelegramHtml(selectedCase.number || '—')}\n`;
-                        msg += `🏛 المحكمة: ${escapeTelegramHtml(selectedCase.court || '—')}\n`;
-                    } else {
-                        if (form.title)       msg += `⚖️ <b>${escapeTelegramHtml(form.title)}</b>\n`;
-                        if (fullCaseNumber)   msg += `📋 رقم القضية: ${escapeTelegramHtml(fullCaseNumber)}\n`;
-                        if (form.court)       msg += `🏛 المحكمة: ${escapeTelegramHtml(form.court)}\n`;
-                        if (finalCaseType)    msg += `📂 النوع: ${escapeTelegramHtml(finalCaseType)}\n`;
-                    }
+                    let msg = `📅 <b>جلسة مستقلة جديدة</b>\n\n`;
+                    if (form.title)       msg += `⚖️ <b>${escapeTelegramHtml(form.title)}</b>\n`;
+                    if (fullCaseNumber)   msg += `📋 رقم القضية: ${escapeTelegramHtml(fullCaseNumber)}\n`;
+                    if (form.court)       msg += `🏛 المحكمة: ${escapeTelegramHtml(form.court)}\n`;
+                    if (finalCaseType)    msg += `📂 النوع: ${escapeTelegramHtml(finalCaseType)}\n`;
                     msg += `📆 تاريخ الجلسة: ${escapeTelegramHtml(form.session_date)} (${escapeTelegramHtml(form.session_time)})\n`;
-                    if (linkMode === 'standalone') {
-                        if (primaryPlaintiff?.name) msg += `👤 الموكل: ${escapeTelegramHtml(primaryPlaintiff.name)}${primaryPlaintiff.capacity ? ' — ' + escapeTelegramHtml(primaryPlaintiff.capacity) : ''}\n`;
-                        if (primaryDefendant?.name) msg += `👤 الخصم: ${escapeTelegramHtml(primaryDefendant.name)}${primaryDefendant.capacity ? ' — ' + escapeTelegramHtml(primaryDefendant.capacity) : ''}\n`;
-                    }
+                    if (primaryPlaintiff?.name) msg += `👤 الموكل: ${escapeTelegramHtml(primaryPlaintiff.name)}${primaryPlaintiff.capacity ? ' — ' + escapeTelegramHtml(primaryPlaintiff.capacity) : ''}\n`;
+                    if (primaryDefendant?.name) msg += `👤 الخصم: ${escapeTelegramHtml(primaryDefendant.name)}${primaryDefendant.capacity ? ' — ' + escapeTelegramHtml(primaryDefendant.capacity) : ''}\n`;
                     if (form.next_action) msg += `⚡ الإجراء القادم: ${escapeTelegramHtml(form.next_action)}\n`;
                     onNotify(msg);
                 }
             } catch { /* تيليجرام اختياري */ }
 
             try {
-                logActivity(db, linkMode === 'existing' ? 'إضافة جلسة لقضية موجودة' : 'إضافة جلسة مستقلة', {
+                logActivity(db, 'إضافة جلسة مستقلة', {
                     entity_type: 'session',
                     details: form.session_date || null,
                 });
             } catch { /* activity log اختياري */ }
-
-            if (linkMode === 'existing') {
-                toast('✅ تمت إضافة الجلسة');
-                onSaved();
-                draft.clearDraft();
-                onClose();
-                return;
-            }
 
             toast('✅ تمت إضافة الجلسة المستقلة');
             onSaved();
@@ -491,12 +464,8 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                 finalCourtLevel,
                 fullCaseNumber,
                 sessionId: sessionData?.id || null,
-                // 🆕 (خطة "المسمى القانوني" — بند مؤجل من التقرير): نفس شرط
-                // primaryPlaintiff/primaryDefendant فوق — بس في وضع
-                // standalone (أطراف خاصة بالجلسة نفسها، مش أطراف قضية
-                // مختارة أصلاً في وضع "existing").
-                plaintiffLegalTitle: linkMode === 'standalone' ? (partyFields.legalTitles.plaintiff || null) : null,
-                defendantLegalTitle: linkMode === 'standalone' ? (partyFields.legalTitles.defendant || null) : null,
+                plaintiffLegalTitle: partyFields.legalTitles.plaintiff || null,
+                defendantLegalTitle: partyFields.legalTitles.defendant || null,
             });
             setPostSaveModal(true);
         } catch {
@@ -531,39 +500,12 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                         },
                             React.createElement('span', null, '⚖️'),
                             React.createElement('span', null, linkingCase ? '⏳ جاري الإنشاء...' : 'إنشاء ملف قضية من هذه البيانات')
-                        ),
-                        // ⚡ CHANGED (خطة تعدد الأطراف، مرحلة 13 جزء 2 — 23 يوليو 2026):
-                        // زرار مستقل لكل طرف is_client=true في idlePartyList (بدل
-                        // زرار واحد مبني على savedFormData.form.plaintiff بس) — نفس
-                        // فكرة InfoSection.tsx في مرحلة 13 جزء 1 بالحرف. جلسة قديمة/
-                        // بلا case_parties (idlePartyList فاضية) → فولباك كامل للزرار
-                        // الواحد القديم، صفر تغيير سلوك.
-                        ...(idlePartyList.length === 0
-                            ? [savedFormData?.form.plaintiff?.trim() && React.createElement('button', {
-                                key: 'add-client-only-legacy',
-                                onClick: handleAddClientOnly,
-                                disabled: linkingClient,
-                                className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2',
-                                'data-testid': 'new-session-postsave-add-client-only'
-                            },
-                                React.createElement('span', null, '👤'),
-                                React.createElement('span', null, linkingClient ? '⏳ جاري الإضافة...' : 'إضافة الموكل لقائمة الموكلين فقط')
-                            )]
-                            : idlePartyList.filter((p) => !linkedIdlePartyIds.has(p.id)).map((p) => {
-                                const single = idlePartyList.length === 1;
-                                return React.createElement('button', {
-                                    key: `add-client-only-${p.id}`,
-                                    onClick: () => handleAddClientOnlyForParty(p),
-                                    disabled: linkingClient,
-                                    className: 'w-full py-3 rounded-2xl text-xs font-bold text-white border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-40 flex items-center justify-center gap-2',
-                                    'data-testid': 'new-session-postsave-add-client-only-' + p.id
-                                },
-                                    React.createElement('span', null, '👤'),
-                                    React.createElement('span', null, linkingClient
-                                        ? '⏳ جاري الإضافة...'
-                                        : (single ? `إضافة ${p.name} لقائمة الموكلين` : `إضافة "${p.name}" لقائمة الموكلين`))
-                                );
-                            }))
+                        )
+                        // ⚡ REMOVED (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة،
+                        // Phase 1 — 9 أغسطس 2026): زرار "إضافة الموكل لقائمة
+                        // الموكلين فقط" (وفرعه لكل طرف في idlePartyList) اتشال من
+                        // خطوة idle — "إنشاء ملف قضية" هو الاختيار الوحيد المتاح
+                        // هنا دلوقتي.
                     ),
                     React.createElement('button', {
                         onClick: onClose,
@@ -690,8 +632,8 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                 React.createElement('div', { className: 'flex items-center gap-2' },
                     React.createElement('span', { className: 'text-xl' }, '⚡'),
                     React.createElement('div', null,
-                        React.createElement('h2', { className: 'text-sm font-black text-white' }, linkMode === 'existing' ? 'إضافة جلسة' : 'جلسة مستقلة'),
-                        React.createElement('p', { className: 'text-[10px] text-slate-400' }, linkMode === 'existing' ? 'لقضية موجودة' : 'بدون ربط بملف قضية')
+                        React.createElement('h2', { className: 'text-sm font-black text-white' }, 'جلسة مستقلة'),
+                        React.createElement('p', { className: 'text-[10px] text-slate-400' }, 'بدون ربط بملف قضية')
                     )
                 ),
                 React.createElement('button', {
@@ -706,48 +648,13 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                 style: { maxHeight: 'calc(92vh - 130px)' }
             },
 
-                // ── تبديل: قضية مستقلة / قضية موجودة ──
-                React.createElement('div', { className: 'flex items-center bg-white/5 rounded-2xl p-1 gap-1' },
-                    React.createElement('button', {
-                        onClick: () => setLinkMode('standalone'),
-                        className: `flex-1 py-2 rounded-xl text-[11px] font-black transition-all ${linkMode === 'standalone' ? 'bg-premium-gold text-premium-bg' : 'text-slate-400'}`,
-                        'data-testid': 'new-session-mode-standalone'
-                    }, 'قضية مستقلة'),
-                    React.createElement('button', {
-                        onClick: () => setLinkMode('existing'),
-                        className: `flex-1 py-2 rounded-xl text-[11px] font-black transition-all ${linkMode === 'existing' ? 'bg-premium-gold text-premium-bg' : 'text-slate-400'}`,
-                        'data-testid': 'new-session-mode-existing'
-                    }, 'قضية موجودة')
-                ),
+                // ⚡ REMOVED (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة، Phase
+                // 1 — 9 أغسطس 2026): تاب "قضية مستقلة / قضية موجودة" وخطوة
+                // اختيار قضية موجودة اتشالوا بالكامل — الفورم ده بيعمل جلسة
+                // مستقلة بس دلوقتي.
 
-                // ── اختيار قضية موجودة (يظهر بس في وضع "قضية موجودة") ──
-                linkMode === 'existing' && React.createElement(React.Fragment, null,
-                    React.createElement(Field, { label: 'ابحث عن القضية', required: true },
-                        React.createElement('input', {
-                            value: caseSearch,
-                            onChange: (e: React.ChangeEvent<HTMLInputElement>) => setCaseSearch(e.target.value),
-                            placeholder: 'اسم القضية، رقمها، أو اسم الموكل/الخصم',
-                            className: inputCls,
-                            style: inputStyle,
-                            'data-testid': 'new-session-case-search'
-                        })
-                    ),
-                    React.createElement('div', { className: 'max-h-40 overflow-y-auto space-y-1.5 rounded-xl', 'data-testid': 'new-session-case-results' },
-                        filteredCases.slice(0, 20).map((c: MappedCase) => React.createElement('button', {
-                            key: c.id,
-                            onClick: () => { setSelectedCaseId(c.id); setCaseSearch(''); },
-                            className: `w-full text-right p-2.5 rounded-xl text-[11px] border transition-all ${selectedCaseId === c.id ? 'border-premium-gold bg-premium-gold/10 text-premium-gold' : 'border-white/10 bg-white/5 text-slate-300'}`,
-                            'data-testid': 'new-session-case-option-' + c.id
-                        }, (c.title || 'بدون عنوان') + (c.number ? ' — ' + c.number : ''))),
-                        filteredCases.length === 0 && React.createElement('p', { className: 'text-[10px] text-slate-500 text-center py-2' }, 'لا توجد نتائج')
-                    ),
-                    selectedCase && React.createElement('div', { className: 'p-2.5 rounded-xl bg-premium-gold/10 border border-premium-gold/20 text-[11px] text-premium-gold', 'data-testid': 'new-session-case-selected' },
-                        '✓ القضية المختارة: ' + (selectedCase.title || selectedCase.number || '—')
-                    )
-                ),
-
-                // ── بيانات القضية (يظهر بس في وضع "قضية مستقلة") ──
-                linkMode === 'standalone' && React.createElement(React.Fragment, null,
+                // ── بيانات القضية ──
+                React.createElement(React.Fragment, null,
                 React.createElement(SectionTitle, null, '⚖️ بيانات القضية'),
 
                 // المحكمة — نص حر
@@ -818,23 +725,22 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                 })
                 ),
 
-                // درجة التقاضي — نفس أزرار مودال إنشاء القضية بالظبط
+                // درجة التقاضي — نص حر مع اقتراحات (نفس نمط "المحكمة
+                // المختصة"/"تصنيف الدعوى")، بدل أزرار اختيار مقفولة —
+                // ⚡ CHANGED (طلب مباشر — 9 أغسطس 2026).
                 React.createElement(Field, { label: 'درجة التقاضي' },
-                    React.createElement('div', { className: 'flex gap-2' },
-                        COURT_LEVELS.map((lvl: string) => React.createElement('button', {
-                            key: lvl,
-                            type: 'button',
-                            onClick: () => setForm((f: Form) => ({ ...f, court_level: lvl })),
-                            className: `flex-1 py-2.5 rounded-xl text-[10px] font-black transition-all active:scale-95 ${form.court_level === lvl ? 'bg-premium-gold text-premium-bg' : 'bg-white/5 border border-white/10 text-slate-400'}`
-                        }, lvl))
-                    ),
-                    form.court_level === 'أخرى' && React.createElement('input', {
-                        value: form.court_level_other,
-                        onChange: set('court_level_other'),
+                    React.createElement('input', {
+                        value: form.court_level,
+                        onChange: set('court_level'),
                         placeholder: 'اكتب درجة التقاضي',
-                        className: `${inputCls} mt-2`,
-                        style: inputStyle
-                    })
+                        className: inputCls,
+                        style: inputStyle,
+                        list: 'new-standalone-session-court-levels-list',
+                        'data-testid': 'new-standalone-session-court-level',
+                    }),
+                    React.createElement('datalist', { id: 'new-standalone-session-court-levels-list' },
+                        COURT_LEVELS.map((lvl: string) => React.createElement('option', { key: lvl, value: lvl }))
+                    )
                 ),
 
                 // تاريخ الجلسة + توقيت الجلسة
@@ -865,7 +771,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                 // حقلي "الموكل"/"الخصم" المفردين، PartyFieldsGroup بيدعم عدد
                 // بلا حدود من المدعين والمدعى عليهم، وأي عدد منهم ممكن يتحدد
                 // كـ"موكلنا" (⭐) — نفس نمط مرحلة 4.1 (NewCaseModal.tsx) بالحرف.
-                linkMode === 'standalone' && React.createElement(React.Fragment, null,
+                React.createElement(React.Fragment, null,
                 React.createElement(SectionTitle, null, '👥 بيانات الخصوم'),
                 React.createElement(PartyFieldsGroup, { controller: partyFields, testIdPrefix: 'new-session' })
                 ),
@@ -922,7 +828,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                 }, 'إلغاء'),
                 React.createElement('button', {
                     onClick: handleSave,
-                    disabled: saving || !form.session_date || (linkMode === 'existing' && !selectedCaseId),
+                    disabled: saving || !form.session_date,
                     className: 'flex-2 flex-grow-[2] py-3 rounded-2xl text-xs font-black text-premium-bg transition-all disabled:opacity-40',
                     style: { background: saving ? '#888' : 'linear-gradient(135deg,#d4af37,#f0c040)' },
                     'data-testid': 'new-session-save'
