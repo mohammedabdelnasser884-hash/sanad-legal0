@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { PartyFields } from './PartyFields';
 import { Inp } from '../ui/Inp';
 import { I } from '../../constants';
@@ -17,6 +18,17 @@ import type { PartyLinkState } from './partyDomainService';
 //  هي اللي بتسجل حالة النموذج الفرعي ده صح من البداية، عشان زر الرجوع
 //  الفعلي يقفله هو بس (يرجع لفورم القضية)، مش يقفل فورم القضية نفسه.
 //  خطة "تطوير أطراف الدعوى" — مرحلة 4، خطوة 1 (23 يوليو 2026).
+//
+//  ⚡ FIX (شيت الطرف بيفتح "مقطوع من فوق" — 9 أغسطس 2026): الموديل
+//  الأساسي (القضية/الجلسة) عليه كلاس `slide-up` اللي بيستخدم CSS
+//  transform لأنيميشن الدخول. أي transform على عنصر أب بيخليه
+//  "containing block" جديد لأي حفيد `position: fixed` جواه — يعني
+//  الشيت ده كان بيتحط فعليًا نسبةً لصندوق الموديل الأساسي (المسكرول)
+//  مش نسبةً للشاشة الحقيقية، فكان لازم تسكرول الموديل الأساسي لفوق
+//  عشان تشوف عنوان الشيت وزرار الإغلاق. createPortal بيخرّج الشيت
+//  يترندر مباشرة في document.body، بره شجرة الموديل الأساسي بالكامل،
+//  فبيبقى fixed نسبةً للشاشة دايمًا مهما كان أي transform حواليه —
+//  نفس النمط المستخدم بالفعل في UnsavedChangesConfirmModal.tsx.
 // ══════════════════════════════════════════════════════════════
 
 interface PartySubformProps {
@@ -91,8 +103,10 @@ export function PartySubform({
         : null;
 
     // ── الشيت نفسه — z-index أعلى من مودال القضية/الجلسة الرئيسي (z-50)
-    // عشان يظهر فوقه، مش جواه بصريًا ──
-    return React.createElement('div', {
+    // عشان يظهر فوقه، مش جواه بصريًا. مترندر عن طريق createPortal في
+    // document.body مباشرة (راجع تعليق الـFIX فوق) — عشان يفضل fixed
+    // نسبةً للشاشة الحقيقية دايمًا، مش نسبةً لصندوق الموديل الأساسي. ──
+    return createPortal(React.createElement('div', {
         className: 'fixed inset-0 z-[60] flex items-end justify-center bg-black/70 backdrop-blur-sm',
         onClick: (e: React.MouseEvent<HTMLDivElement>) => { if (e.target === e.currentTarget) onClose(); },
     },
@@ -126,5 +140,5 @@ export function PartySubform({
                 className: 'w-full py-3 bg-gradient-to-tr from-premium-gold to-amber-200 text-premium-bg rounded-xl font-black text-sm shadow-md active:scale-95 transition-transform mt-4',
             }, 'حفظ والعودة')
         )
-    );
+    ), document.body);
 }
