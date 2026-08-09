@@ -106,7 +106,11 @@ export function useClientLinking(
   onOpenCreateClientForSessionParty?: OpenCreateClientForSessionParty,
 ) {
   const [linkingCase, setLinkingCase] = useState(false);
-  const [linkingClient, setLinkingClient] = useState(false);
+  // ⚡ REMOVED (Phase 4، 9 أغسطس 2026): linkingClient — state ميت فعليًا
+  // (setLinkingClient معندوش أي نداء في الملف ده أصلًا، القيمة فاضلة
+  // false للأبد)، ومش مستهلكة في NewStandaloneSessionModal.tsx (مؤكد من
+  // فجوة Phase 1). اكتشاف إضافي وقت مراجعة Phase 4 — مش مذكور في نص
+  // الخطة الأصلي بس بينطبق عليه نفس السبب بالظبط.
   const [createdCaseId, setCreatedCaseId] = useState<string | null>(null);
   const [clientStep, setClientStep] = useState<'idle' | 'found' | 'notfound' | 'done'>('idle');
   const [foundClient, setFoundClient] = useState<{ id: string; full_name: string | null } | null>(null);
@@ -126,28 +130,12 @@ export function useClientLinking(
   const [partyMatches, setPartyMatches] = useState<PartyClientMatch[]>([]);
   const [partyIndex, setPartyIndex] = useState(0);
 
-  // ⚡ NEW (خطة تعدد الأطراف، مرحلة 13 جزء 2 — 23 يوليو 2026): أطراف
-  // الجلسة (is_client=true) لعرض زرار مستقل لكل واحد فيهم في خطوة
-  // "idle" (قبل ما المستخدم يختار "إنشاء قضية" أو "إضافة موكل فقط") —
-  // مختلفة عن partyList فوق (اللي بتتملى بس جوه handleLinkCase، بعد
-  // ما القضية اتعملت فعلًا). بتتملى بمجرد ما savedFormData.sessionId
-  // يبقى متاح (فور نجاح حفظ الجلسة أونلاين) — كل الأطراف الراجعة هنا
-  // مضمون إنها مش مربوطة (client_id) لسه، لأن الجلسة لسه جديدة تمامًا
-  // (usePartyFields مبيدّيش قيمة client_id للأطراف الجديدة أصلًا).
-  const [idlePartyList, setIdlePartyList] = useState<SessionClientParty[]>([]);
-  const [linkedIdlePartyIds, setLinkedIdlePartyIds] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    let cancelled = false;
-    setIdlePartyList([]);
-    setLinkedIdlePartyIds(new Set());
-    if (savedFormData?.sessionId) {
-      fetchSessionClientParties(db, savedFormData.sessionId).then((parties) => {
-        if (!cancelled) setIdlePartyList(parties);
-      });
-    }
-    return () => { cancelled = true; };
-  }, [savedFormData?.sessionId]);
+  // ⚡ REMOVED (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة، Phase 4 — 9
+  // أغسطس 2026): idlePartyList/linkedIdlePartyIds + الـuseEffect اللي كان
+  // بيجيبهم بـfetchSessionClientParties، وhandleAddClientOnlyForParty تحت.
+  // كانوا بيغذّوا زرار "إضافة الموكل لقائمة الموكلين فقط" (لكل طرف على
+  // حدة) في خطوة idle قبل تحويل الجلسة لقضية — اتشال الزرار نفسه في
+  // Phase 1 (NewStandaloneSessionModal.tsx)، فبقوا بلا أي استهلاك.
 
   const goToNextPartyOrDone = (currentIndex: number, parties: SessionClientParty[], matches: PartyClientMatch[]) => {
     const nextIndex = currentIndex + 1;
@@ -432,56 +420,27 @@ export function useClientLinking(
     goToNextPartyOrDone(partyIndex, partyList, partyMatches);
   };
 
-  // ⚡ CHANGED (خطة توحيد إنشاء الموكل، Phase 3): بقى بيفتح NewClientModal
-  // الموحّد (نفس موديل قسم الموكلين، بكل حقوله الإلزامية اسم/نوع/هاتف/رقم
-  // قومي، وفحص التكرار) بدل INSERT مباشر بحقلين بس (اسم + رقم قومي) —
-  // شوف handleOpenCreateClientForSession في App.tsx. فحص التكرار والربط
-  // بـ case_sessions.client_id (+ logActivity) بقوا بيحصلوا جوه
-  // handleSaveClient الموحّد (useClientActions.ts) بعد الحفظ.
-  // ⚠️ ملحوظة سلوك: لو الجلسة لسه ما اتحفظتش أونلاين (savedFormData.sessionId
-  // فاضي)، بنفتح الموديل من غير target ربط (زي السلوك القديم بالظبط —
-  // الموكل بيتحفظ من غير ربط تلقائي)، بس من غير استدعاء fetchTodaySessions/
-  // fetchUpcomingSessions بعد كده في الحالة دي تحديدًا (مفيش ربط حصل
-  // أصلاً يستأهل تحديث شاشة الجلسات) — فرق طفيف عن السلوك القديم اللي كان
-  // بينادي عليهم دايمًا بغض النظر، هيتأكد وقت الاختبار اليدوي الأوفلاين
-  // في Phase 4.
-  const handleAddClientOnly = () => {
-    if (!savedFormData) return;
-    const { form: f } = savedFormData;
-    if (!f.plaintiff?.trim()) return;
-    onOpenCreateClient?.(savedFormData.sessionId, f.plaintiff, f.plaintiff_national_id, f.plaintiff_power_of_attorney);
-  };
-
-  // ⚡ NEW (خطة تعدد الأطراف، مرحلة 13 جزء 2 — 23 يوليو 2026): نفس فكرة
-  // handleAddClientOnly فوق، بس لطرف بعينه من idlePartyList — بتتنادى
-  // لكل زرار مستقل على حدة (مش wizard)، فبتحدد "الطرف الأساسي" بمقارنة
-  // id الطرف بأول عنصر في idlePartyList (نفس تعريف "الأساسي" المستخدم
-  // في كل مكان تاني — أول is_client=true بترتيب sort_order). onAfterLink
-  // بتضيف الطرف لـ linkedIdlePartyIds عشان زراره يختفي فورًا من غير ما
-  // نستنى إعادة فتح الموديل.
-  const handleAddClientOnlyForParty = (party: SessionClientParty) => {
-    if (!savedFormData?.sessionId) return;
-    const isPrimary = idlePartyList[0]?.id === party.id;
-    onOpenCreateClientForSessionParty?.(
-      party.id, savedFormData.sessionId, isPrimary,
-      party.name, party.national_id, party.power_of_attorney, party.address,
-      () => setLinkedIdlePartyIds((prev) => new Set(prev).add(party.id)),
-    );
-  };
+  // ⚡ REMOVED (Phase 4، 9 أغسطس 2026): handleAddClientOnly و
+  // handleAddClientOnlyForParty (زرار "إضافة الموكل لقائمة الموكلين فقط"
+  // بنسختيه — الاسم الواحد القديم، وكل طرف على حدة) اتشالوا بالكامل —
+  // مفيش مستدعي لهم بعد Phase 1. onOpenCreateClient/onOpenCreateClientForSessionParty
+  // (الباراميترين اللي كانوا بيتغذوا بيهم بس) سيبوا في التوقيع كما هما
+  // من غير استخدام داخلي — نفس قرار cases prop في Phase 1، يترجعوا في
+  // المرحلة 6.
 
   return {
 
-    linkingCase, linkingClient, linkingToCase,
+    linkingCase, linkingToCase,
     createdCaseId, setCreatedCaseId,
     clientStep, setClientStep,
     foundClient, setFoundClient, foundClientMatchType,
     // ⚡ NEW (7.2 جزء 2): partyList/partyIndex لعرض "طرف X من Y" وتحديد
     // الطرف الحالي في الواجهة، وhandleSkipParty لتخطي الطرف ده بس.
     partyList, partyIndex, handleSkipParty,
-    // ⚡ NEW (مرحلة 13 جزء 2): idlePartyList/linkedIdlePartyIds لعرض زرار
-    // مستقل لكل طرف في خطوة "idle"، وhandleAddClientOnlyForParty لفتح
-    // NewClientModal لطرف بعينه.
-    idlePartyList, linkedIdlePartyIds, handleAddClientOnlyForParty,
-    handleLinkCase, handleLinkExistingClient, handleAddAndLinkClient, handleAddClientOnly,
+    // ⚡ CHANGED (Phase 4، 9 أغسطس 2026): handleLinkExistingClient اتسابت
+    // (لسه بتتنادى فعليًا من NewStandaloneSessionModal.tsx جوه مسار
+    // found/notfound بعد "إنشاء ملف قضية من هذه البيانات" — ده خارج نطاق
+    // خطة الإلغاء دي تمامًا). handleAddClientOnly اتشالت (فوق).
+    handleLinkCase, handleLinkExistingClient, handleAddAndLinkClient,
   };
 }
