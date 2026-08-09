@@ -6,6 +6,32 @@ import { db } from '../../../supabaseClient';
 import { normalizeArabicDigits } from '../../../shared/lib/sanitize';
 import type { ReminderRow, ProfileRow } from '../../../types';
 
+// ─────────────────────────────────────────────────────────
+//  ⚡ NEW (فيكس "نظام الأوفلاين ملوش قيمة، جزء 3" — 9 أغسطس 2026):
+//  نفس فكرة الكاش بتاعة القضايا/الموكلين في useAppData.ts، بس هنا
+//  للتذكيرات "القادمة" (fetchUpcoming — القائمة الرئيسية اللي المستخدم
+//  بيشوفها فعليًا في تاب التذكيرات). قبل كده fetchUpcoming مكنش عنده
+//  أي fallback خالص — فشل النت = قائمة فاضية + بانر خطأ أحمر، من غير أي
+//  محاولة استرجاع آخر نسخة اتحمّلت.
+// ─────────────────────────────────────────────────────────
+const REMINDERS_CACHE_KEY = 'sanad_cached_reminders_upcoming_v1';
+
+function saveRemindersCache(tenantId: string | null | undefined, items: ReminderRow[]) {
+    try { localStorage.setItem(REMINDERS_CACHE_KEY, JSON.stringify({ tenantId: tenantId ?? null, items })); } catch { /* localStorage غير متاح — تجاهل */ }
+}
+
+function loadRemindersCache(tenantId: string | null | undefined): ReminderRow[] | null {
+    try {
+        const raw = localStorage.getItem(REMINDERS_CACHE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as { tenantId: string | null; items: ReminderRow[] };
+        if (parsed.tenantId !== (tenantId ?? null)) return null;
+        return parsed.items;
+    } catch {
+        return null;
+    }
+}
+
 export interface ReminderForm {
     title: string;
     due_date: string;
@@ -66,10 +92,22 @@ export function useRemindersTab(initialFilter?: string | null, profile: ProfileR
             .eq('done', false)
             .gte('due_date', todayStr)
             .order('due_date', {ascending: true});
-        if(error){ recordError('db_reminders', error.message); }
-        else { recordSuccess('db_reminders'); }
+        if(error){
+            // ⚡ NEW: fallback لآخر نسخة محفوظة من التذكيرات القادمة —
+            // نفس فكرة fetchCases/fetchClients في useAppData.ts. لو فيه
+            // نسخة، بنرجعها بهدوء من غير ما نسجّل خطأ يظهر كبانر أحمر.
+            const cached = loadRemindersCache(profile?.tenant_id);
+            if (cached && cached.length > 0) {
+                toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من التذكيرات');
+                return cached;
+            }
+            recordError('db_reminders', error.message);
+        } else {
+            recordSuccess('db_reminders');
+            saveRemindersCache(profile?.tenant_id, data || []);
+        }
         return data || [];
-    }, []);
+    }, [profile]);
 
     // ── جلب المتأخرة (paginated) ──
     const fetchOverdue = useCallback(async (page = 0, append = false) => {
