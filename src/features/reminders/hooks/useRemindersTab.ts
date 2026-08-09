@@ -4,6 +4,7 @@ import { safeUpdate, logActivity } from '../../../shared/lib/dataAccess';
 import { recordError, recordSuccess } from '../../../systemHealth';
 import { db } from '../../../supabaseClient';
 import { normalizeArabicDigits } from '../../../shared/lib/sanitize';
+import { createFetchGuard } from '../../../shared/lib/offlineGuard';
 import type { ReminderRow, ProfileRow } from '../../../types';
 
 // ─────────────────────────────────────────────────────────
@@ -102,11 +103,30 @@ export function useRemindersTab(initialFilter?: string | null, profile: ProfileR
     const fetchUpcoming = useCallback(async () => {
         const today = new Date();
         const todayStr = today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');
-        const {data, error} = await db.from('reminders')
-            .select('*')
-            .eq('done', false)
-            .gte('due_date', todayStr)
-            .order('due_date', {ascending: true});
+        // ⚡ NEW (فيكس "تأخير محسوس عند التنقل أوف لاين" — 9 أغسطس 2026):
+        // نفس نمط useDbConnectivity/useAuthProfile — offline يروح على الكاش
+        // فورًا، وأونلاين بطيء/متقطع يتقفل بعد 8 ثواني بدل ما يفضل معلّق.
+        const guard = createFetchGuard();
+        let data: ReminderRow[] | null = null;
+        let error: { message: string } | null = null;
+        if (guard.offline) {
+            error = { message: 'offline' };
+        } else {
+            try {
+                const res = await db.from('reminders')
+                    .select('*')
+                    .eq('done', false)
+                    .gte('due_date', todayStr)
+                    .order('due_date', {ascending: true})
+                    .abortSignal(guard.controller.signal);
+                data = res.data;
+                error = res.error;
+            } catch (err) {
+                error = { message: guard.didTimeOut() ? 'timeout' : (err as { message?: string })?.message || 'fetch failed' };
+            } finally {
+                guard.cleanup();
+            }
+        }
         if(error){
             // ⚡ NEW: fallback لآخر نسخة محفوظة من التذكيرات القادمة —
             // نفس فكرة fetchCases/fetchClients في useAppData.ts. لو فيه
@@ -130,12 +150,31 @@ export function useRemindersTab(initialFilter?: string | null, profile: ProfileR
         const todayStr = today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');
         const from = page * PAGE_SIZE;
         const to   = from + PAGE_SIZE - 1;
-        const {data, error, count} = await db.from('reminders')
-            .select('*', {count: 'exact'})
-            .eq('done', false)
-            .lt('due_date', todayStr)
-            .order('due_date', {ascending: false})
-            .range(from, to);
+        // ⚡ NEW (نفس فيكس fetchUpcoming فوق — 9 أغسطس 2026)
+        const guard = createFetchGuard();
+        let data: ReminderRow[] | null = null;
+        let error: { message: string } | null = null;
+        let count: number | null = null;
+        if (guard.offline) {
+            error = { message: 'offline' };
+        } else {
+            try {
+                const res = await db.from('reminders')
+                    .select('*', {count: 'exact'})
+                    .eq('done', false)
+                    .lt('due_date', todayStr)
+                    .order('due_date', {ascending: false})
+                    .range(from, to)
+                    .abortSignal(guard.controller.signal);
+                data = res.data;
+                error = res.error;
+                count = res.count;
+            } catch (err) {
+                error = { message: guard.didTimeOut() ? 'timeout' : (err as { message?: string })?.message || 'fetch failed' };
+            } finally {
+                guard.cleanup();
+            }
+        }
         if(error){
             // نفس فكرة fetchUpcoming: أول تحميل (صفحة 0، من غير append) بيرجع
             // بهدوء من الكاش لو موجود، من غير ما يسجّل خطأ. صفحات "تحميل المزيد"
@@ -169,11 +208,30 @@ export function useRemindersTab(initialFilter?: string | null, profile: ProfileR
     const fetchDone = useCallback(async (page = 0, append = false) => {
         const from = page * PAGE_SIZE;
         const to   = from + PAGE_SIZE - 1;
-        const {data, error, count} = await db.from('reminders')
-            .select('*', {count: 'exact'})
-            .eq('done', true)
-            .order('due_date', {ascending: false})
-            .range(from, to);
+        // ⚡ NEW (نفس فيكس fetchUpcoming فوق — 9 أغسطس 2026)
+        const guard = createFetchGuard();
+        let data: ReminderRow[] | null = null;
+        let error: { message: string } | null = null;
+        let count: number | null = null;
+        if (guard.offline) {
+            error = { message: 'offline' };
+        } else {
+            try {
+                const res = await db.from('reminders')
+                    .select('*', {count: 'exact'})
+                    .eq('done', true)
+                    .order('due_date', {ascending: false})
+                    .range(from, to)
+                    .abortSignal(guard.controller.signal);
+                data = res.data;
+                error = res.error;
+                count = res.count;
+            } catch (err) {
+                error = { message: guard.didTimeOut() ? 'timeout' : (err as { message?: string })?.message || 'fetch failed' };
+            } finally {
+                guard.cleanup();
+            }
+        }
         if(error){
             if (page === 0 && !append) {
                 const cached = loadCache(REMINDERS_CACHE_KEY_DONE, profile?.tenant_id);
