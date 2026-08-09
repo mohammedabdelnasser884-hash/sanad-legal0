@@ -9,12 +9,6 @@ import type { MappedCase, MappedClient } from '../../hooks/useAppData';
 import type { SessionFeedItem, TaskFeedItem, SessionCaseEmbed } from '@/shared/hooks/useDashboardFeed';
 import type { CaseSessionRow } from '../../types';
 import type { TabName } from '../../useNavigation';
-// ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): نوع الكول-باك
-// بتاع فتح NewClientModal الموحّد لطرف بعينه من جلسة مستقلة.
-import type { OpenCreateClientForSessionParty } from '@/features/calendar/hooks/useClientLinking';
-// 🆕 (بند 2.3 — 6 أغسطس 2026): زرار "➕ إنشاء موكل جديد" جوه دروب-داون
-// ربط الجلسة المستقلة.
-import type { ClientModalContext } from '@/features/clients/hooks/useClientActions';
 // ⚡ NEW (خطة تفكيك الأعمدة القديمة، المرحلة B.2 — 6 أغسطس 2026): نفس
 // أساس العرض القرائي المستخدم فعليًا في الكالندر (B.1) — بيجيب صفوف
 // case_parties دفعة واحدة لكل جلسات الداشبورد (اليوم/القادم/الفائتة)
@@ -65,12 +59,11 @@ interface DashboardTabProps {
   // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 3): زرار "✏️ عدّل من
   // ملف الموكل" جوه EditStandaloneModal (عبر StandaloneSessionDetailModal).
   onOpenClientProfile?: (client: MappedClient) => void;
-  // ⚡ NEW (خطة توحيد منطق إنشاء/ربط الموكل، 4 أغسطس 2026): بتتوصّل لـ
-  // StandaloneSessionDetailModal تحت — نفس handleOpenCreateClientForSessionPartyOnly
-  // في App.tsx المستخدمة أصلاً في NewStandaloneSessionModal.tsx.
-  onOpenCreateClientForSessionParty?: OpenCreateClientForSessionParty;
-  // 🆕 (بند 2.3 — 6 أغسطس 2026): بتتوصّل لـ StandaloneSessionDetailModal.
-  openNewClientModal?: (ctx: ClientModalContext) => void;
+  // ⚡ REMOVED (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة، المرحلة 6 — 9
+  // أغسطس 2026): onOpenCreateClientForSessionParty وopenNewClientModal
+  // كانوا بيتوصّلوا لـ StandaloneSessionDetailModal تحت، لكن دي بقت prop
+  // بلا استخدام داخلي فيها من المراحل السابقة (2 و3) — الاتنين اتشالوا
+  // من StandaloneSessionDetailModalProps نفسها، فمفيش داعي نمررهم هنا.
 }
 
 function DashboardTab({
@@ -84,7 +77,7 @@ function DashboardTab({
   setTab, setRemindersInitialFilter, setSessionsInitialTab,
   dbOnline, healthErrors, setHealthErrors,
   fetchTodaySessions, fetchUpcomingSessions, fetchMissedSessions,
-  onOpenClientProfile, onOpenCreateClientForSessionParty, openNewClientModal,
+  onOpenClientProfile,
 }: DashboardTabProps) {
 
     // ── جلسة مستقلة مفتوحة حالياً (لعرض المودال) ──
@@ -559,8 +552,6 @@ function DashboardTab({
             onDone: () => { refreshAllSessionLists(); },
             clients,
             onOpenClientProfile,
-            onOpenCreateClientForSessionParty,
-            openNewClientModal,
         }),
         Dashboard
   );
