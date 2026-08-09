@@ -6,7 +6,7 @@ import type { MappedCase, MappedClient } from '../../../hooks/useAppData';
 import type { CalendarSessionRow } from './CalendarTab';
 import type { SessionCaseEmbed } from '@/shared/hooks/useDashboardFeed';
 
-// نفس نمط `LinkedCaseLike` المستخدم في MissedTab.tsx/DashboardTab.tsx/UpcomingWidget.tsx —
+// نفس نمط `LinkedCaseLike` المستخدم في MissedTab.tsx/DashboardTab.tsx —
 // linkedCase هنا بييجي من نفس المصدرين المختلفين الشكل بالظبط (كائن `cases` المدمج
 // مع الجلسة، أو `cases.find(...)` من الـ prop).
 type LinkedCaseLike = Partial<MappedCase> & Partial<SessionCaseEmbed>;
@@ -30,7 +30,7 @@ function SessionCard({ s, cases, clients, onOpenCase, onOpenStandalone, onGoogle
     // ⚠️ تصحيح جذري: القضية ممكن تكون موجودة فعليًا في قاعدة البيانات ومربوطة
     // صح بـ case_id، لكن غير موجودة في الـ "cases" array المحلي لأن القضايا
     // بتتحمّل بنظام صفحات (PAGE_SIZE = 15 في useAppData.ts) ومفلترة بحالة معينة.
-    // الاستعلامات في CalendarTab/MissedTab/UpcomingWidget بترفق بيانات القضية
+    // الاستعلامات في CalendarTab/MissedTab بترفق بيانات القضية
     // مباشرة مع كل جلسة عن طريق join باسم cases(...) — وهي مصدر موثوق ودايمًا
     // محدّث بغض النظر عن أي pagination. لازم نستخدمها كأولوية أولى قبل أي حاجة
     // تانية، وبعدها نرجع للـ array المحلي (احتياطي)، وأخيرًا الحقول الخام
