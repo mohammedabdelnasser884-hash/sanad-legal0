@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../../../supabaseClient';
 import { toast } from '../../../shared/lib/notifications';
+import { recordError, recordSuccess } from '../../../systemHealth';
+import { getCurrentTenantId } from '../../../constants';
+import { createFetchGuard } from '../../../shared/lib/offlineGuard';
 import { exportSessionToGoogleCalendar } from '@/shared/ui/calendarExport';
 import { MONTHS_AR2, DAYS_FULL, toDateStr } from './constants';
 import SessionCard from './SessionCard';
@@ -46,6 +49,37 @@ interface CalendarTabProps {
     refreshKey?: number;
 }
 
+// ─────────────────────────────────────────────────────────
+//  ⚡ NEW (فيكس "الجلسات مش موجودة نهائي" — 9 أغسطس 2026): نداء
+//  db.from('case_sessions')...then() مكنش عليه أي error handling خالص —
+//  لو فشل (أوف لاين)، `data` بترجع undefined فـ`data || []` تسيب الكالندر
+//  فاضي تمامًا بصمت، من غير أي بانر خطأ أو رجوع لآخر نسخة محفوظة (بعكس
+//  نفس فكرة الكاش المطبّقة في useAppData.ts/useRemindersTab.ts). بنكاش
+//  آخر شهر تم تحميله بنجاح بس (مفتاح مربوط بالسنة/الشهر/tenant)، وبنرجع
+//  له بهدوء لو نفس الشهر ده فشل تحميله تاني.
+// ─────────────────────────────────────────────────────────
+const CALENDAR_SESSIONS_CACHE_KEY = 'sanad_cached_calendar_sessions_v1';
+
+export function saveCalendarSessionsCache(year: number, month: number, items: CalendarSessionRow[]) {
+    try {
+        localStorage.setItem(CALENDAR_SESSIONS_CACHE_KEY, JSON.stringify({
+            tenantId: getCurrentTenantId(), year, month, items,
+        }));
+    } catch { /* localStorage غير متاح — تجاهل */ }
+}
+
+export function loadCalendarSessionsCache(year: number, month: number): CalendarSessionRow[] | null {
+    try {
+        const raw = localStorage.getItem(CALENDAR_SESSIONS_CACHE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as { tenantId: string | null; year: number; month: number; items: CalendarSessionRow[] };
+        if (parsed.tenantId !== getCurrentTenantId() || parsed.year !== year || parsed.month !== month) return null;
+        return parsed.items;
+    } catch {
+        return null;
+    }
+}
+
 function CalendarTab({ cases, clients, onOpenCase, onOpenStandalone, refreshKey }: CalendarTabProps) {
     const today = new Date();
     const [viewYear,  setViewYear]  = useState(today.getFullYear());
@@ -76,15 +110,55 @@ function CalendarTab({ cases, clients, onOpenCase, onOpenStandalone, refreshKey 
         prevMonthYear.current = { viewYear, viewMonth };
         const mm   = String(viewMonth+1).padStart(2,'0');
         const last = new Date(viewYear, viewMonth+1, 0).getDate();
+
+        // ⚡ NEW (فيكس "تأخير محسوس عند التنقل أوف لاين" — 9 أغسطس 2026):
+        // نفس نمط useDbConnectivity/useAuthProfile — لو offline من الأساس
+        // منحاولش نتصل بالسيرفر خالص ونروح على الكاش فورًا؛ لو هنحاول
+        // فعلاً، بنقفله بعد 8 ثواني كحد أقصى (AbortController) بدل ما يفضل
+        // معلّق لحد ما يفشل من نفسه.
+        const guard = createFetchGuard();
+        if (guard.offline) {
+            const cached = loadCalendarSessionsCache(viewYear, viewMonth);
+            if (cached) {
+                setAllSessions(cached);
+                toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من جلسات الشهر ده');
+            } else {
+                setAllSessions([]);
+                recordError('db_calendar_sessions', 'offline');
+            }
+            setLoading(false);
+            if (isMonthNavigation) setSelectedDay(null);
+            return () => guard.cleanup();
+        }
+
         db.from('case_sessions')
           .select('id,session_date,case_id,client_id,description,result,next_action,session_time,session_floor,session_hall,title,case_number,court,case_type,circuit_number,cases(id,title,court_name,case_type,case_number_official,client_id)')
           .gte('session_date', `${viewYear}-${mm}-01`)
           .lte('session_date', `${viewYear}-${mm}-${String(last).padStart(2,'0')}`)
-          .then(({ data }) => {
-              setAllSessions((data || []) as unknown as CalendarSessionRow[]);
+          .abortSignal(guard.controller.signal)
+          .then(({ data, error }) => {
+              guard.cleanup();
+              if (error) {
+                  const cached = loadCalendarSessionsCache(viewYear, viewMonth);
+                  if (cached) {
+                      setAllSessions(cached);
+                      toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من جلسات الشهر ده');
+                  } else {
+                      setAllSessions([]);
+                      recordError('db_calendar_sessions', error.message);
+                  }
+                  setLoading(false);
+                  if (isMonthNavigation) setSelectedDay(null);
+                  return;
+              }
+              recordSuccess('db_calendar_sessions');
+              const list = (data || []) as unknown as CalendarSessionRow[];
+              setAllSessions(list);
+              saveCalendarSessionsCache(viewYear, viewMonth, list);
               setLoading(false);
               if (isMonthNavigation) setSelectedDay(null);
           });
+        return () => guard.cleanup();
     }, [viewYear, viewMonth, refreshKey]);
 
     const firstDay  = new Date(viewYear, viewMonth, 1).getDay();
