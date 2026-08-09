@@ -33,6 +33,16 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { db } from '../../supabaseClient';
 
 const DEBOUNCE_MS = 800;
+// ⚡ FIX (مسودات قديمة بتفاجئ المستخدم — 9 أغسطس 2026): لو مفيش لحظة
+// تأكيد صريحة (تطبيق اتقفل من الميموري، مكالمة، إلخ)، المسودة كانت بتفضل
+// محفوظة للأبد. أي مسودة أقدم من المدة دي بنتجاهلها تلقائيًا وقت الفتح
+// وبنمسحها، حتى لو محدش أكّد حاجة صراحة.
+const DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000; // يوم واحد
+
+interface StoredDraft<T> {
+    data: T;
+    savedAt: number;
+}
 
 // هوية المستخدم بتتجاب مرة واحدة بس وتتكاش، عشان لو أكتر من فورم فاتح
 // نفس الوقت (أو بعضهم ورا بعض) ميحصلش نداء auth.getSession() لكل واحد.
@@ -101,8 +111,20 @@ export function useFormDraft<T>({ key, data, enabled = true, isEmpty }: UseFormD
             try {
                 const raw = localStorage.getItem(storageKey(key, uid));
                 if (raw) {
-                    const parsed = JSON.parse(raw) as T;
-                    if (!isEmpty || !isEmpty(parsed)) setRestoredDraft(parsed);
+                    const parsed = JSON.parse(raw);
+                    // شكل قديم (قبل إضافة savedAt): كان بيتخزن الـdata مباشرة
+                    // من غير غلاف. نتعامل معاه كمسودة "طازة" مرة واحدة بس —
+                    // أول حفظ تلقائي جديد هيغلّفها بالشكل الجديد.
+                    const isWrapped = parsed && typeof parsed === 'object' && 'savedAt' in parsed && 'data' in parsed;
+                    const stored: StoredDraft<T> = isWrapped
+                        ? (parsed as StoredDraft<T>)
+                        : { data: parsed as T, savedAt: Date.now() };
+                    const isStale = Date.now() - stored.savedAt > DRAFT_MAX_AGE_MS;
+                    if (isStale) {
+                        localStorage.removeItem(storageKey(key, uid));
+                    } else if (!isEmpty || !isEmpty(stored.data)) {
+                        setRestoredDraft(stored.data);
+                    }
                 }
             } catch { /* مسودة تالفة أو localStorage معطلة — نتجاهل، مش خطأ حرج */ }
             setChecked(true);
@@ -123,7 +145,8 @@ export function useFormDraft<T>({ key, data, enabled = true, isEmpty }: UseFormD
                 if (isEmpty && isEmpty(data)) {
                     localStorage.removeItem(storageKey(key, userIdRef.current));
                 } else {
-                    localStorage.setItem(storageKey(key, userIdRef.current), JSON.stringify(data));
+                    const stored: StoredDraft<T> = { data, savedAt: Date.now() };
+                    localStorage.setItem(storageKey(key, userIdRef.current), JSON.stringify(stored));
                 }
             } catch { /* localStorage ممتلئة/معطلة — الحفظ الأساسي مش متأثر، نتجاهل بصمت */ }
         }, DEBOUNCE_MS);
