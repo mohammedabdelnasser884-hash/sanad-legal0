@@ -15,6 +15,7 @@ let getSessionResult: { data: { session: { user: { id: string; email?: string | 
   data: { session: null },
 };
 let maybeSingleResult: MaybeSingleResult = { data: null, error: null };
+let maybeSingleShouldReject: Error | null = null;
 let authChangeListeners: Array<(event: string, session: { user: { id: string; email?: string | null } } | null) => void> = [];
 const unsubscribeSpy = vi.fn();
 const fromSpy = vi.fn();
@@ -29,7 +30,7 @@ function buildMaybeSingleChain() {
   return {
     eq: vi.fn((col: string, val: unknown) => {
       fromSpy(col, val);
-      return { maybeSingle: vi.fn(() => Promise.resolve(maybeSingleResult)) };
+      return { maybeSingle: vi.fn(() => maybeSingleShouldReject ? Promise.reject(maybeSingleShouldReject) : Promise.resolve(maybeSingleResult)) };
     }),
   };
 }
@@ -55,6 +56,7 @@ beforeEach(async () => {
   vi.resetModules();
   getSessionResult = { data: { session: null } };
   maybeSingleResult = { data: null, error: null };
+  maybeSingleShouldReject = null;
   authChangeListeners = [];
   getSession.mockClear();
   onAuthStateChange.mockClear();
@@ -64,6 +66,7 @@ beforeEach(async () => {
   toast.mockClear();
   setCurrentTenantId.mockClear();
   recordError.mockClear();
+  localStorage.clear();
   ({ useAuthProfile } = await import('./useAuthProfile'));
 });
 
@@ -108,14 +111,13 @@ describe('useAuthProfile', () => {
     await waitFor(() => expect(toast).toHaveBeenCalledWith('لا يوجد ملف شخصي مرتبط بهذا الحساب — تواصل مع مدير المكتب'));
   });
 
-  it('🔴 ملاحظة سلوك حقيقية: لو الجلسة موجودة والبروفايل فشل/مش موجود، authLoading بيفضل true للأبد (مفيش مسار تاني بيقفله غير profile!==null)', async () => {
+  it('🟢 (كان باگ، اتصلح 9 أغسطس 2026) جلسة موجودة والبروفايل فشل/مش موجود → authLoading بيتقفل برضو (مش بيفضل true للأبد)', async () => {
     getSessionResult = { data: { session: { user: USER } } };
     maybeSingleResult = { data: null, error: null };
     const { result } = renderHook(() => useAuthProfile());
     await waitFor(() => expect(toast).toHaveBeenCalled());
-    // بعد ما التوست اتنادى (يعني loadProfile خلصت) authLoading لسه true —
-    // مفيش أي setAuthLoading(false) بيتنفذ في المسار ده أصلًا.
-    expect(result.current.authLoading).toBe(true);
+    await waitFor(() => expect(result.current.authLoading).toBe(false));
+    expect(result.current.profile).toBeNull();
   });
 
   it('onAuthStateChange: session جديدة بمستخدم → بتنادي loadProfile وبتحدّث profile', async () => {
@@ -161,6 +163,34 @@ describe('useAuthProfile', () => {
     maybeSingleResult = { data: { ...PROFILE, tenant_id: null }, error: null };
     renderHook(() => useAuthProfile());
     await waitFor(() => expect(setCurrentTenantId).toHaveBeenCalledWith(null));
+  });
+
+  // ⚡ NEW (فيكس باگ "عالق على الشعار أوف لاين" — 9 أغسطس 2026)
+  it('نداء الشبكة فشل (أوف لاين) وفيه بروفايل محفوظ لنفس المستخدم → بيستخدم النسخة المحفوظة وauthLoading بيتقفل', async () => {
+    // أول تحميل ناجح — بيسجّل البروفايل في localStorage
+    getSessionResult = { data: { session: { user: USER } } };
+    maybeSingleResult = { data: PROFILE, error: null };
+    const first = renderHook(() => useAuthProfile());
+    await waitFor(() => expect(first.result.current.profile).toEqual(PROFILE));
+    first.unmount();
+
+    // تشغيل تاني والنت مقطوع (maybeSingle بترفض الـpromise)
+    toast.mockClear();
+    maybeSingleShouldReject = new Error('Failed to fetch');
+    const { result } = renderHook(() => useAuthProfile());
+    await waitFor(() => expect(result.current.authLoading).toBe(false));
+    expect(result.current.profile).toEqual(PROFILE);
+    expect(toast).toHaveBeenCalledWith('أنت أوف لاين — بتشتغل على آخر نسخة محفوظة من بياناتك');
+  });
+
+  it('نداء الشبكة فشل ومفيش أي بروفايل محفوظ قبل كده → توست خطأ واضح، profile فاضل null، وauthLoading بيتقفل برضو', async () => {
+    getSessionResult = { data: { session: { user: USER } } };
+    maybeSingleShouldReject = new Error('Failed to fetch');
+    const { result } = renderHook(() => useAuthProfile());
+    await waitFor(() => expect(result.current.authLoading).toBe(false));
+    expect(result.current.profile).toBeNull();
+    expect(toast).toHaveBeenCalledWith('تعذّر تحميل بيانات حسابك. تأكد من الاتصال بالإنترنت.');
+    expect(recordError).toHaveBeenCalledWith('auth_profile_load_network', 'Failed to fetch', expect.objectContaining({ label: 'تحميل بيانات الحساب' }));
   });
 
   it('unmount بينادي listener.subscription.unsubscribe()', async () => {
