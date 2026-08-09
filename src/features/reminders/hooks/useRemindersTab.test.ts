@@ -32,6 +32,7 @@ function makeMockDb() {
     order: () => SelectChain;
     range: () => SelectChain;
     limit: () => SelectChain;
+    abortSignal: (signal: AbortSignal) => SelectChain;
     then: (resolve: (r: Result) => void) => void;
   }
 
@@ -48,6 +49,12 @@ function makeMockDb() {
       order: vi.fn(() => c),
       range: vi.fn(() => c),
       limit: vi.fn(() => c),
+      // ⚡ NEW (فيكس "تأخير محسوس عند التنقل أوف لاين" — 9 أغسطس 2026):
+      // useRemindersTab.ts بقى بينادي .abortSignal(guard.controller.signal)
+      // على كل سلسلة (fetchUpcoming/fetchOverdue/fetchDone) — لازم الموك
+      // يدعمها زي أي حلقة تانية في السلسلة، وإلا بيرمي
+      // "...abortSignal is not a function" فعليًا (اكتشفناها في الـCI).
+      abortSignal: vi.fn(() => c),
       then: (resolve: (r: Result) => void) => resolve(get(key)),
     };
     return c;
