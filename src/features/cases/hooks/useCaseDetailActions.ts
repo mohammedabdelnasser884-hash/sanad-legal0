@@ -6,6 +6,8 @@ import { escapeHtml } from '../../../shared/lib/sanitize';
 import { safeUpdate, logActivity } from '../../../shared/lib/dataAccess';
 import { PDF_FONT_FAMILY, PDF_FONT_LINK } from '../../../shared/lib/pdf';
 import { loadOfficeSetting } from '../../../constants';
+import { createFetchGuard } from '../../../shared/lib/offlineGuard';
+import { recordError, recordSuccess } from '../../../systemHealth';
 import { formatArDate } from '../../../shared/ui/arabicLocale';
 import type { ClientRow, ProfileRow, CaseNoteRow } from '../../../types';
 import type { MappedCase } from '../../../hooks/useAppData';
@@ -97,27 +99,55 @@ export function useCaseDetailActions(
 
   const fetchSessions = useCallback(async () => {
     setLoadingSessions(true);
-    const { data } = await db.from('case_sessions').select('*').eq('case_id', caseData.id).order('session_date', { ascending: false });
-    setSessions(data || []);
-    const { data: nd } = await db.from('case_notes').select('*').eq('case_id', caseData.id).order('created_at', { ascending: false });
-    setNotes(nd || []);
-    const { data: dd } = await db.from('case_documents').select('*').eq('case_id', caseData.id).order('created_at', { ascending: false });
-    // ⚠️ case-docs بقى باكت private — نولّد رابط موقّع طازة لكل مستند.
-    const ddWithUrls: CaseDocWithUrl[] = await Promise.all((dd || []).map(async (d) => ({
-      ...d,
-      file_url: await resolveStorageUrl('case-docs', d.storage_path || d.file_url),
-    })));
-    setDocs(ddWithUrls);
-    // ⚡ NEW (مرحلة 8): case_parties بقت مضافة في database.types.ts (خطة
-    // تعدد الأطراف، مرحلة 1) — مفيش داعي لكاست 'as cases' تاني هنا. فشل
-    // الاستعلام (مشكلة اتصال) بيرجّع array فاضية بدل ما يمنع تحميل باقي
-    // التاب — InfoSection.tsx هيرجع لعرض الأعمدة القديمة تلقائيًا في الحالة دي.
-    const { data: pd, error: partiesErr } = await db.from('case_parties')
-      .select('*')
-      .eq('case_id', caseData.id)
-      .order('sort_order', { ascending: true });
-    setCaseParties(partiesErr ? [] : ((pd as unknown as CasePartyRow[]) || []));
-    setLoadingSessions(false);
+    // ⚡ FIX (تحليل شكوى "قسم المستندات/الأتعاب بيقعد يحمّل" — 9 أغسطس
+    // 2026): الدالة دي (جلسات + ملاحظات + مستندات + أطراف القضية) كانت
+    // بتنادي db.from(...) مباشرة من غير أي guard/timeout ولا try/catch —
+    // لو النت مقطوع، النداء يفضل معلّق للأبد (Supabase client معندوش
+    // timeout بتاعه)، ولو فشل فعلاً (TypeError: Failed to fetch) الخطأ
+    // كان بيطلع unhandled ويوصل لمعالج عام في systemHealth.ts بيسجّله
+    // بلقب عام غلط ("عملية في النظام") بدل لقب واضح، وده اللي كان بيبان
+    // في بانر الداشبورد. دلوقتي: نفس نمط useRemindersTab.ts/CalendarTab.tsx
+    // بالظبط — offline يوقف فورًا، أونلاين بطيء يتقفل بعد 8 ثواني، وأي
+    // فشل بيتسجل بلقب واضح (db_documents) بدل ما يفضل يحمّل للأبد أو
+    // يظهر برسالة غلط.
+    const guard = createFetchGuard();
+    if (guard.offline) {
+      recordError('db_documents', 'offline');
+      setLoadingSessions(false);
+      return;
+    }
+    try {
+      const { data, error: sessErr } = await db.from('case_sessions').select('*').eq('case_id', caseData.id).order('session_date', { ascending: false }).abortSignal(guard.controller.signal);
+      if (sessErr) throw sessErr;
+      setSessions(data || []);
+      const { data: nd } = await db.from('case_notes').select('*').eq('case_id', caseData.id).order('created_at', { ascending: false }).abortSignal(guard.controller.signal);
+      setNotes(nd || []);
+      const { data: dd, error: docsErr } = await db.from('case_documents').select('*').eq('case_id', caseData.id).order('created_at', { ascending: false }).abortSignal(guard.controller.signal);
+      if (docsErr) throw docsErr;
+      // ⚠️ case-docs بقى باكت private — نولّد رابط موقّع طازة لكل مستند.
+      const ddWithUrls: CaseDocWithUrl[] = await Promise.all((dd || []).map(async (d) => ({
+        ...d,
+        file_url: await resolveStorageUrl('case-docs', d.storage_path || d.file_url),
+      })));
+      setDocs(ddWithUrls);
+      // ⚡ NEW (مرحلة 8): case_parties بقت مضافة في database.types.ts (خطة
+      // تعدد الأطراف، مرحلة 1) — مفيش داعي لكاست 'as cases' تاني هنا. فشل
+      // الاستعلام (مشكلة اتصال) بيرجّع array فاضية بدل ما يمنع تحميل باقي
+      // التاب — InfoSection.tsx هيرجع لعرض الأعمدة القديمة تلقائيًا في الحالة دي.
+      const { data: pd, error: partiesErr } = await db.from('case_parties')
+        .select('*')
+        .eq('case_id', caseData.id)
+        .order('sort_order', { ascending: true })
+        .abortSignal(guard.controller.signal);
+      setCaseParties(partiesErr ? [] : ((pd as unknown as CasePartyRow[]) || []));
+      recordSuccess('db_documents');
+    } catch (err) {
+      const msg = guard.didTimeOut() ? 'timeout' : (err as { message?: string })?.message || 'fetch failed';
+      recordError('db_documents', msg);
+    } finally {
+      guard.cleanup();
+      setLoadingSessions(false);
+    }
   }, [caseData.id, setSessions, setDocs]);
 
   useEffect(() => { refetchAllRef.current = fetchSessions; }, [fetchSessions]);
