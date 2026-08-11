@@ -33,6 +33,15 @@ function makeMockDb() {
     const c = {
       eq: vi.fn(() => c),
       order: vi.fn(() => c),
+      // 🔧 FIX (تحليل لوجز CI — 11 أغسطس 2026): fetchSessions في
+      // useCaseDetailActions.ts بقت بتنادي .abortSignal(guard.controller.signal)
+      // في آخر السلسلة (فيكس التسريب/التعليق اللانهائي بتاريخ 9 أغسطس) —
+      // الموك هنا كان ناقصها، فالنداء كان بيرمي TypeError (".abortSignal is
+      // not a function") يُلقَط في catch الهوك، فـ setSessions/setNotes
+      // عمرهم ما اتنادوا (recordError بس)، وده اللي سبب فشل تيستين: تيست
+      // fetchSessions نفسه، وتيست handleUpdateNote (knownUpdatedAt بيبقى
+      // null لإن notes فضلت فاضية).
+      abortSignal: vi.fn(() => c),
       then: (resolve: (r: Result) => void) => resolve(get(key)),
     };
     return c;
