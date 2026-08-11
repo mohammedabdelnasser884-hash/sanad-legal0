@@ -116,7 +116,11 @@ const inputStyle = { fontFamily: 'Cairo,sans-serif' };
 
 export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAdded, onNotify, onOpenCreateClient, onOpenCreateClientForCase, onOpenCreateClientForParty, onOpenCreateClientForSessionParty }: {
     onClose: () => void;
-    onSaved: () => void;
+    // ⚡ FIX (تحليل لوجز E2E — 9 أغسطس 2026): بارامتر skipRefetch اختياري —
+    // بيتبعت true من مسار الحفظ أوفلاين (queued) عشان الاستدعاء في
+    // AppModals.tsx يتخطى fetchCases/fetchTodaySessions/fetchUpcomingSessions
+    // (هيفشل برضو وهيكتب فوق توست "الجلسة محفوظة محلياً" بتوست أوفلاين عام).
+    onSaved: (skipRefetch?: boolean) => void;
     onClientAdded?: () => void;
     onNotify?: (msg: string) => void;
     // ⚡ REMOVED (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة، المرحلة 6 — 9
@@ -390,7 +394,10 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                         true
                     );
                 }
-                onSaved();
+                // ⚡ FIX (تحليل لوجز E2E — 9 أغسطس 2026): onSaved(true) —
+                // نتخطى الريفريش الشبكي هنا؛ راجع تعليق onSaved في الأعلى
+                // وفي AppModals.tsx لسبب البارامتر.
+                onSaved(true);
                 draft.clearDraft();
                 onClose();
                 return;
