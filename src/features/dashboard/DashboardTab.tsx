@@ -59,6 +59,10 @@ interface DashboardTabProps {
   // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 3): زرار "✏️ عدّل من
   // ملف الموكل" جوه EditStandaloneModal (عبر StandaloneSessionDetailModal).
   onOpenClientProfile?: (client: MappedClient) => void;
+  // 🔒 FIX (نفس باگ CaseDetailView.tsx — 12 أغسطس 2026): DashboardTab
+  // مالوش وصول لـnav زي SessionsCalendar.tsx، فـApp.tsx بيحسبها
+  // (nav.isOpen('clientDetail')) ويمررها هنا جاهزة.
+  clientProfileOpen?: boolean;
   // ⚡ REMOVED (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة، المرحلة 6 — 9
   // أغسطس 2026): onOpenCreateClientForSessionParty وopenNewClientModal
   // كانوا بيتوصّلوا لـ StandaloneSessionDetailModal تحت، لكن دي بقت prop
@@ -82,7 +86,7 @@ function DashboardTab({
   setTab, setRemindersInitialFilter, setSessionsInitialTab,
   dbOnline, healthErrors, setHealthErrors,
   fetchTodaySessions, fetchUpcomingSessions, fetchMissedSessions,
-  onOpenClientProfile,
+  onOpenClientProfile, clientProfileOpen,
   countryCourts, countryCaseTypes,
 }: DashboardTabProps) {
 
@@ -558,6 +562,7 @@ function DashboardTab({
             onDone: () => { refreshAllSessionLists(); },
             clients,
             onOpenClientProfile,
+            clientProfileOpen,
             // ⚡ NEW (استرجاع ميزة "تحويل الجلسة المستقلة لقضية" + فتحها
             // فورًا — 12 أغسطس 2026): setSelectedCase موجودة أصلًا كـprop
             // في DashboardTab (نفس اللي بتفتح بيها القضايا من أي مكان تاني
