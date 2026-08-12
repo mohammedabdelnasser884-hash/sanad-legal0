@@ -6,15 +6,24 @@ import { I } from '../../../constants';
 import { Inp } from '@/shared/ui/Inp';
 import { Sel } from '@/shared/ui/Sel';
 import SessionUpdateModal from './SessionUpdateModal';
+import { COURT_LEVELS, onlyDigits, Field } from '../NewStandaloneSessionModal';
 import DeleteConfirmModal from '@/shared/modals/DeleteConfirmModal';
-// ⚡ CHANGED (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة، المرحلة 6 — 9
-// أغسطس 2026): useSessionLinking.ts بالكامل اتحذف (كان كود ميت 100% منذ
-// المرحلة 2 — آخر مستهلك ليه كان LinkSessionModal). SessionWithLegacyFields
-// بس هو اللي كان مستخدم فعليًا من الملف ده — اتنقل لـ types.ts.
+// ⚡ FIX (استرجاع ميزة "تحويل الجلسة المستقلة لقضية" — 11 أغسطس 2026):
+// التعليق القديم هنا كان بيقول useSessionLinking.ts (اللي كان بيوفر
+// زرار "تحويل لقضية"/"فتح ملف القضية" في الشاشة دي) كان كود ميت من
+// المرحلة 2 (بعد ما LinkSessionModal القديمة اتشالت) — ده صحيح تاريخيًا،
+// بس معناه العملي إن الميزة نفسها (مش بس الهوك) ضاعت من الواجهة من
+// وقتها، وماحدش لاحظ لحد دلوقتي. بدل ما نرجّع useSessionLinking.ts زي ما
+// كان (كان مبني حوالين LinkSessionModal اللي مش موجودة تاني)، الميزة
+// اترجعت هنا مباشرة (handleConvertToCase تحت) — بتستخدم نفس
+// buildCaseInsertData/linkSessionGroupToCase من caseSessionLinkingShared.ts
+// اللي useClientLinking.ts (فورم الإنشاء) بيستخدمها فعليًا، فمفيش نسخة
+// منطق تانية موازية. SessionWithLegacyFields لسه في types.ts زي ما هو.
 import type { SessionWithLegacyFields } from '../../../types';
 // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 6): كشف التعارض بين البيانات
 // الحرة في الجلسة وملف الموكل المختار وقت الربط اليدوي اللاحق.
-import { findClientDataMismatches, syncSessionIdentityToGroupSiblings, fetchSessionClientParties, unlinkClientFromSessionParty } from '../hooks/caseSessionLinkingShared';
+import { findClientDataMismatches, syncSessionIdentityToGroupSiblings, fetchSessionClientParties, unlinkClientFromSessionParty, makeOfflineTempId, buildCaseInsertData, linkSessionGroupToCase } from '../hooks/caseSessionLinkingShared';
+import { recalcNextHearing } from '@/shared/lib/dataAccess';
 // ⚡ NEW (خطة تعدد الأطراف، مرحلة 6.4، 23 يوليو 2026): نفس Component/هوك
 // مشترك مرحلة 5.1 (EditCaseModal.tsx) و6.1 (NewStandaloneSessionModal.tsx)
 // بالحرف — بدل حقلي "الموكل"/"الخصم" المفردين هنا كمان. استيراد
@@ -45,6 +54,7 @@ import {
 } from '@/shared/parties/partyDomainService';
 import type { CaseSessionRow, ClientRow } from '../../../types';
 import type { MappedCase } from '../../../hooks/useAppData';
+import { fetchMappedCaseById } from '../../../hooks/useAppData';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '../../../database.types';
 
@@ -112,14 +122,20 @@ interface StandaloneEditForm {
     case_type: string;
     case_type_custom: string;
     circuit_number: string;
+    // ⚡ FIX (فورم تعديل الجلسة المستقلة كان ناقص عن فورم الإنشاء — 11
+    // أغسطس 2026): court_level/session_hall/secretary_hall/secretary_name/
+    // secretary_mobile كانوا موجودين في Form (NewStandaloneSessionModal.tsx)
+    // وبيتسجلوا وقت الإنشاء، لكن غايبين هنا بالكامل — يعني بعد أول حفظ،
+    // محدش يقدر يعدّلهم تاني أبدًا. description/result اتعمّدنا ما نضيفهمش
+    // هنا لأنهم أصلًا معندهمش أي UI في فورم الإنشاء نفسه (result بيتسجل من
+    // مسار منفصل تمامًا: SessionUpdateModal.tsx "ما تم في الجلسة").
+    court_level: string;
     session_date: string;
     session_time: string;
-    // ⚡ CHANGED (مرحلة 6.4 — خطة تعدد الأطراف، 23 يوليو 2026): حقول
-    // الموكل/الخصم المفردة (plaintiff/plaintiff_role/plaintiff_national_id/
-    // plaintiff_power_of_attorney/defendant/defendant_role/
-    // defendant_national_id) اتشالت من هنا بالكامل — بقت جوه usePartyFields()
-    // تحت (array أطراف بلا حدود)، نفس تقليص EditCaseForm في EditCaseModal.tsx
-    // مرحلة 5.1 بالظبط.
+    session_hall: string;
+    secretary_hall: string;
+    secretary_name: string;
+    secretary_mobile: string;
     next_action: string;
 }
 
@@ -192,8 +208,13 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
         case_type: CASE_TYPES.includes(session.case_type as string) ? (session.case_type as string) : (session.case_type ? 'أخرى' : ''),
         case_type_custom: CASE_TYPES.includes(session.case_type as string) ? '' : (session.case_type || ''),
         circuit_number: session.circuit_number || '',
+        court_level: session.court_level || '',
         session_date: session.session_date || '',
         session_time: session.session_time || 'صباحي',
+        session_hall: session.session_hall || '',
+        secretary_hall: session.secretary_hall || '',
+        secretary_name: session.secretary_name || '',
+        secretary_mobile: session.secretary_mobile || '',
         next_action: session.next_action || '',
     });
     const [saving, setSaving] = useState(false);
@@ -499,8 +520,13 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
                 case_number: fullCaseNumber || null,
                 case_type: finalCaseType || null,
                 circuit_number: form.circuit_number || null,
+                court_level: form.court_level.trim() || null,
                 session_date: form.session_date,
                 session_time: form.session_time || null,
+                session_hall: form.session_hall || null,
+                secretary_hall: form.secretary_hall || null,
+                secretary_name: form.secretary_name || null,
+                secretary_mobile: form.secretary_mobile || null,
                 next_action: form.next_action || null,
             },
             knownUpdatedAt: session.updated_at || null,
@@ -602,6 +628,22 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
                         React.createElement(Inp, { label: 'الدائرة', value: form.circuit_number, onChange: set('circuit_number'), placeholder: 'الدائرة 7' })
                     ),
                     form.case_type === 'أخرى' && React.createElement(Inp, { label: 'نوع القضية (تفصيل)', value: form.case_type_custom, onChange: set('case_type_custom'), placeholder: 'أحوال شخصية' }),
+                    // ⚡ FIX (فورم التعديل الناقص — 11 أغسطس 2026): درجة
+                    // التقاضي كانت موجودة في فورم الإنشاء بس غايبة هنا.
+                    React.createElement(Field, { label: 'درجة التقاضي' },
+                        React.createElement('input', {
+                            value: form.court_level,
+                            onChange: set('court_level'),
+                            placeholder: 'اكتب درجة التقاضي',
+                            className: inputCls,
+                            style: inputStyle,
+                            list: 'edit-standalone-session-court-levels-list',
+                            'data-testid': 'edit-standalone-session-court-level',
+                        }),
+                        React.createElement('datalist', { id: 'edit-standalone-session-court-levels-list' },
+                            COURT_LEVELS.map((lvl: string) => React.createElement('option', { key: lvl, value: lvl }))
+                        )
+                    ),
                     React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
                         React.createElement('div', null,
                             React.createElement('label', { className: 'block text-[10px] font-bold text-slate-400 mb-1.5' }, 'تاريخ الجلسة', React.createElement('span', { className: 'text-rose-400 mr-0.5' }, ' *')),
@@ -634,6 +676,22 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
                     React.createElement(PartyFieldsGroup, { controller: partyFields, testIdPrefix: 'edit-standalone-session', renderPartyReadOnly, renderPartyExtra, getPartyState: (party: PartyFieldValue) => getPartyState(party, domainContext) }),
                     React.createElement('div', { className: 'border-t border-white/5 my-1' }),
                     React.createElement(Inp, { label: 'الإجراء القادم', value: form.next_action, onChange: set('next_action'), placeholder: 'مثال: تقديم مذكرة دفاع' }),
+                    // ⚡ FIX (فورم التعديل الناقص — 11 أغسطس 2026): الطابق
+                    // وقاعة الجلسة + بيانات سكرتير الجلسة كانوا موجودين في
+                    // فورم الإنشاء بس غايبين من فورم التعديل بالكامل.
+                    React.createElement(Inp, { label: 'الطابق وقاعة الجلسة', value: form.session_hall, onChange: set('session_hall'), placeholder: 'مثال: الدور الأول - قاعة 5' }),
+                    React.createElement(Inp, { label: 'قاعة سكرتير الجلسة', value: form.secretary_hall, onChange: set('secretary_hall'), placeholder: 'رقم أو اسم قاعة السكرتير' }),
+                    React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
+                        React.createElement(Inp, { label: 'اسم سكرتير الجلسة', value: form.secretary_name, onChange: set('secretary_name'), placeholder: 'اسم السكرتير' }),
+                        React.createElement(Inp, {
+                            label: 'موبايل السكرتير',
+                            value: form.secretary_mobile,
+                            onChange: (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, secretary_mobile: onlyDigits(e.target.value, 11) })),
+                            placeholder: 'رقم الموبايل',
+                            inputMode: 'numeric',
+                            maxLength: 11
+                        })
+                    ),
                     React.createElement('div', { className: 'h-4' })
                 ),
                 React.createElement('div', { className: 'px-5 py-4 border-t border-white/5 flex gap-3' },
@@ -665,6 +723,15 @@ interface StandaloneSessionDetailModalProps {
     // EditStandaloneModal، ونفتح تفاصيل الموكل من زرار "✏️ عدّل من ملف الموكل".
     clients?: ClientRow[];
     onOpenClientProfile?: (client: ClientRow) => void;
+    // ⚡ NEW (استرجاع ميزة "تحويل الجلسة المستقلة لقضية" — 12 أغسطس 2026):
+    // لو موجودة، بتتنادى بعد نجاح تحويل الجلسة لقضية (أونلاين بس — راجع
+    // تعليق handleConvertToCase) بالقضية الجديدة كاملة (MappedCase جاهزة
+    // عبر fetchMappedCaseById في useAppData.ts) عشان تفتح ملفها فورًا،
+    // بدل ما تسيب المستخدم يدوّر عليها بنفسه في تبويب القضايا. اختيارية
+    // عشان الشاشتين اللي بيستخدموا المودال ده (DashboardTab.tsx عبر
+    // setSelectedCase مباشرة، SessionsCalendar.tsx عبر onOpenCase الموجود
+    // أصلًا للقضايا المربوطة) يقدروا يمرروها بسهولة.
+    onOpenCase?: (c: MappedCase) => void;
     // ⚡ REMOVED (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة، المرحلة 6 — 9
     // أغسطس 2026): onOpenCreateClientForSessionParty وopenNewClientModal
     // كانوا هنا خدمة لـ LinkSessionModal (اتشال Phase 2) وزرار "➕ إنشاء
@@ -673,11 +740,14 @@ interface StandaloneSessionDetailModalProps {
     // وSessionsCalendar.tsx كمان.
 }
 
-function StandaloneSessionDetailModal({ session: partialSession, db, onClose, onDone, onNotify, onClientAdded, clients = [], onOpenClientProfile }: StandaloneSessionDetailModalProps) {
+function StandaloneSessionDetailModal({ session: partialSession, db, onClose, onDone, onNotify, onClientAdded, clients = [], onOpenClientProfile, onOpenCase }: StandaloneSessionDetailModalProps) {
     const [showUpdate, setShowUpdate] = useState(false);
     const [showEdit, setShowEdit] = useState(false);
     const [showConfirmDelete, setShowConfirmDelete] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    // ⚡ NEW (استرجاع ميزة "تحويل الجلسة المستقلة لقضية" — 11 أغسطس 2026)
+    const [showConvertConfirm, setShowConvertConfirm] = useState(false);
+    const [converting, setConverting] = useState(false);
     // ⚡ NEW (نقل زرار فك الربط من EditStandaloneModal لجنب سطر "👤 الموكل"
     // هنا مباشرة).
     const [showUnlinkConfirm, setShowUnlinkConfirm] = useState(false);
@@ -862,6 +932,88 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
             onClose();
         } catch { toast('❌ خطأ غير متوقع', true); }
         finally { setDeleting(false); setShowConfirmDelete(false); }
+    };
+
+    // ⚡ NEW (استرجاع ميزة "تحويل الجلسة المستقلة لقضية" — 11 أغسطس 2026):
+    // كانت متاحة قبل كده عبر LinkSessionModal (اتشالت من زمان) وهوكها
+    // useSessionLinking.ts (اتشال بعدها كـ"كود ميت" — راجع تعليق الإيمبورت
+    // فوق). بتستخدم نفس buildCaseInsertData/linkSessionGroupToCase اللي
+    // فورم الإنشاء (useClientLinking.ts) بيستخدمها فعليًا — منطق واحد بس.
+    // ⚠️ buildCaseInsertData (Phase F.3، 6 أغسطس) مبقتش بتكتب أعمدة
+    // plaintiff/defendant المفردة القديمة على جدول cases خالص — فمفيش
+    // داعي نحسب "الطرف الأساسي" هنا زي فورم الإنشاء، أطراف الدعوى الحقيقية
+    // (بأسمائها وأرقامها القومية) بتتنقل لوحدها عبر linkSessionGroupToCase
+    // (اللي بينادي movePartiesFromSessionToCase داخليًا لكل جلسة في نفس
+    // السلسلة). session.session_group_id (مش null زي فورم الإنشاء) بيتبعت
+    // هنا عشان لو الجلسة دي عضو في سلسلة "⚡ تحديث الجلسة"، كل السلسلة
+    // تتحول مع بعض دفعة واحدة (بدل ما جلسات تانية تفضل مستقلة غلط).
+    const handleConvertToCase = async () => {
+        setConverting(true);
+        try {
+            const caseTitle = session.title || session.case_number || 'قضية من جلسة مستقلة';
+            const offlineTempId = makeOfflineTempId();
+            const { error, offline, queued, data: insertedCase } = await window.__dbWrite({
+                type: 'INSERT',
+                table: 'cases',
+                data: buildCaseInsertData({
+                    court: session.court,
+                    caseNumber: session.case_number,
+                    caseType: session.case_type,
+                    circuitNumber: session.circuit_number,
+                    sessionHall: session.session_hall,
+                    sessionTime: session.session_time,
+                    courtLevel: session.court_level,
+                    secretaryHall: session.secretary_hall,
+                    secretaryName: session.secretary_name,
+                    secretaryMobile: session.secretary_mobile,
+                }, caseTitle, offlineTempId, session.client_id ?? null),
+                returning: true,
+            });
+            if (error) {
+                showErrorToast('case_create', error, 'تعذّر إنشاء القضية. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'إنشاء قضية');
+                return;
+            }
+            // نفس منطق useClientLinking.ts: أوفلاين، مفيش id حقيقي راجع —
+            // بنستخدم التمبيد نفسه كمرجع مؤقت لحد ما يتزامن.
+            const realOrTempCaseId = (offline && queued) ? offlineTempId : (insertedCase as { id: string } | null)?.id;
+            if (!realOrTempCaseId) {
+                showErrorToast('case_create', new Error('no id returned'), 'تعذّر إنشاء القضية. حاول مرة أخرى.', 'إنشاء قضية');
+                return;
+            }
+            const groupLinkResult = await linkSessionGroupToCase(
+                db, { id: session.id, session_group_id: session.session_group_id }, realOrTempCaseId, offline, queued, offlineTempId, caseTitle,
+            );
+            if (!groupLinkResult.ok && groupLinkResult.failedIds.includes(session.id)) {
+                showErrorToast('session_case_link', null, 'تم إنشاء القضية لكن تعذّر ربط الجلسة بها. حاول تحديث الصفحة.', 'ربط الجلسة بالقضية');
+                return;
+            }
+            if (offline && queued) {
+                toast('📥 القضية محفوظة محلياً — ستُضاف وتترّبط الجلسة بيها فور عودة الإنترنت');
+            } else if (!groupLinkResult.ok) {
+                toast('⚠️ تم إنشاء القضية وربط الجلسة، لكن حصل خطأ في نقل بعض أطراف الدعوى الإضافية — راجعها يدويًا', true);
+            } else {
+                // ⚡ NEW (فتح ملف القضية فورًا بعد التحويل — 12 أغسطس 2026):
+                // أونلاين بس (لو أوفلاين، realOrTempCaseId تمبيد محلي —
+                // مفيش صف حقيقي في cases نقدر نجيبه بيه لحد ما يتزامن).
+                const mapped = onOpenCase ? await fetchMappedCaseById(realOrTempCaseId) : null;
+                if (mapped) {
+                    toast('✅ تم تحويل الجلسة لقضية بنجاح');
+                    onOpenCase!(mapped);
+                } else {
+                    toast('✅ تم تحويل الجلسة لقضية بنجاح — هتلاقيها في تبويب القضايا');
+                }
+                // next_hearing للقضية الجديدة — أونلاين بس (أوفلاين هتتحسب
+                // تلقائيًا بعد المزامنة، نفس تعليق useClientLinking.ts).
+                await recalcNextHearing(db, realOrTempCaseId);
+            }
+            setShowConvertConfirm(false);
+            onDone();
+            onClose();
+        } catch {
+            toast('❌ حدث خطأ غير متوقع، حاول مرة أخرى', true);
+        } finally {
+            setConverting(false);
+        }
     };
 
     // ⚡ NEW: نفس منطق handleUnlink اللي كان جوه EditStandaloneModal بالظبط،
@@ -1050,6 +1202,16 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
 
             // ── Footer ──
             React.createElement('div', { className: 'px-5 pb-5 pt-3 border-t border-white/5 space-y-2' },
+                // ⚡ NEW (استرجاع ميزة "تحويل الجلسة المستقلة لقضية" — 11
+                // أغسطس 2026): زرار منفصل وواضح فوق "⚡ تحديث الجلسة" —
+                // إجراء كبير (بيعمل قضية جديدة ويحول الجلسة كلها ليها).
+                React.createElement('button', {
+                    onClick: () => setShowConvertConfirm(true),
+                    disabled: loadingFull,
+                    className: 'w-full py-2.5 rounded-2xl text-xs font-black text-premium-gold bg-premium-gold/10 border border-premium-gold/30 hover:bg-premium-gold/15 transition-all disabled:opacity-50',
+                    'data-testid': 'standalone-session-convert-to-case-trigger'
+                }, '🔁 تحويل الجلسة لقضية'),
+
                 // زر تحديث الجلسة — كبير ذهبي
                 React.createElement('button', {
                     onClick: () => setShowUpdate(true),
@@ -1097,6 +1259,36 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
             confirmTestId: 'standalone-session-delete-confirm',
             cancelTestId: 'standalone-session-delete-cancel',
         }), document.body),
+        // ⚡ NEW (استرجاع ميزة "تحويل الجلسة المستقلة لقضية" — 11 أغسطس
+        // 2026): تأكيد بسيط (مش DeleteConfirmModal — ده مش حذف، وماحدش
+        // محتاج يكتب اسم الجلسة عشان يأكد)، نفس نمط تأكيد الحذف البسيط
+        // المستخدم في CaseDetailView.tsx.
+        showConvertConfirm && createPortal(
+            React.createElement('div', {
+                className: 'fixed inset-0 z-[95] flex items-center justify-center bg-black/80 backdrop-blur-sm p-5',
+                onClick: (e: React.MouseEvent<HTMLDivElement>) => { if (e.target === e.currentTarget && !converting) setShowConvertConfirm(false); }
+            },
+                React.createElement('div', { className: 'w-full max-w-sm bg-premium-card border border-white/10 rounded-3xl p-6 slide-up shadow-2xl space-y-4' },
+                    React.createElement('h3', { className: 'text-sm font-black text-white' }, '🔁 تحويل الجلسة لقضية'),
+                    React.createElement('p', { className: 'text-xs text-slate-400 leading-relaxed' },
+                        'هيتعمل ملف قضية جديد ببيانات الجلسة دي (المحكمة/رقم القضية/الأطراف)، وهتترّبط بيها الجلسة تلقائيًا. لو الجلسة دي جزء من سلسلة "⚡ تحديث"، كل السلسلة هتترّبط بنفس القضية.'
+                    ),
+                    React.createElement('div', { className: 'flex gap-3' },
+                        React.createElement('button', {
+                            onClick: handleConvertToCase,
+                            disabled: converting,
+                            'data-testid': 'standalone-session-convert-to-case-confirm',
+                            className: 'flex-1 py-3 bg-premium-gold text-black rounded-xl text-xs font-black active:scale-95 transition-all disabled:opacity-60'
+                        }, converting ? '⏳ جاري التحويل...' : 'نعم، حوّلها لقضية'),
+                        React.createElement('button', {
+                            onClick: () => setShowConvertConfirm(false),
+                            disabled: converting,
+                            'data-testid': 'standalone-session-convert-to-case-cancel',
+                            className: 'flex-1 py-3 bg-white/5 text-slate-300 rounded-xl text-xs font-black active:scale-95 transition-all disabled:opacity-60'
+                        }, 'إلغاء')
+                    )
+                )
+            ), document.body),
         showEdit && React.createElement(EditStandaloneModal, {
             session, db,
             onClose: () => setShowEdit(false),
