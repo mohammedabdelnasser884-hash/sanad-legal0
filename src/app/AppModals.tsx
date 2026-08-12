@@ -366,7 +366,16 @@ function AppModals({
             // modalStack كأثر جانبي لأي تبديل تاب — فمودال الموكل اللي
             // فتحناه لسه كان بيتقفل فورًا تاني. المودال بيتعرض فوق أي تاب
             // بغض النظر عنه، فمفيش داعي لتبديل التاب أصلًا هنا.
-            onOpenClientProfile: (c) => { nav.closeModal('caseDetail'); setSelectedClient(c as MappedClient, true); },
+            // 🔒 FIX (12 أغسطس 2026 — نفس اليوم، تكملة الفيكس فوق): كان
+            // لسه فيه nav.closeModal('caseDetail') هنا (فضلت من قبل فيكس
+            // setTab) — كانت بتقفل مودال تفاصيل/تعديل القضية بالكامل قبل
+            // فتح مودال الموكل. modalStack أصلاً بيدعم أكتر من مودال مفتوح
+            // فوق بعض (راجع useNavigation.ts)، فمفيش داعي لقفل caseDetail
+            // خالص — نفس المنطق اللي اتطبق في onOpenClient بتاع
+            // UniversalSearchModal فوق بالظبط. من غير الفيكس ده، قفل مودال
+            // الموكل (حفظ أو إلغاء) كان بيرجّع المستخدم للتاب الرئيسي بدل
+            // ما يرجعله فورم تعديل القضية اللي كان شغال عليه.
+            onOpenClientProfile: (c) => { setSelectedClient(c as MappedClient, true); },
         }),
     );
 }
