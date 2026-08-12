@@ -28,6 +28,13 @@ test('قضية متعددة الأطراف ببيانات سليمة (مسمى �
   await page.getByTestId('nav-cases').click();
   await page.getByTestId('new-case-button').click();
   await page.getByTestId('new-case-title').fill(caseTitle);
+  // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): بيانات القيد الرسمي بقت إجبارية.
+  await page.getByTestId('new-case-court').fill('محكمة اختبار E2E');
+  await page.getByTestId('new-case-number').fill('100');
+  await page.getByTestId('new-case-year').fill('2026');
+  await page.getByTestId('new-case-type').fill('مدني');
+  await page.getByTestId('new-case-circuit').fill('1');
+  await page.getByTestId('new-case-court-level').fill('ابتدائي');
 
   // مدعي أول (موكلنا ⭐) + مدعي تاني، مع المسمى القانوني الجامع مكتوب —
   // بيانات سليمة بالكامل (نفس نمط case-parties-and-sessions.spec.ts).
