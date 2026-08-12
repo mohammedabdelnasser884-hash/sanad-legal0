@@ -287,6 +287,10 @@ function AppModals({
             onOpenCreateClientForCase: handleOpenCreateClientForSessionCase,
             onOpenCreateClientForParty: handleOpenCreateClientForSessionParty,
             onOpenCreateClientForSessionParty: handleOpenCreateClientForSessionPartyOnly,
+            // ⚡ NEW (توحيد "المحكمة"/"نوع القضية" مع فورمي القضية — 12
+            // أغسطس 2026): نفس props بالظبط اللي فوق بتتبعت لـNewCaseModal.
+            countryCourts: COUNTRY_CONFIGS[country]?.courts,
+            countryCaseTypes: COUNTRY_CONFIGS[country]?.caseTypes,
         }),
         showLawyerModal && React.createElement(UserFormModal, { onClose: () => setShowLawyerModal(false), onSave: handleSaveLawyer, loading: savingLawyer }),
         showClientModal && React.createElement(NewClientModal, {
