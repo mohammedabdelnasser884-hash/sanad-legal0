@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { login, createClient, expectToast } from './utils';
+import { login, createClient, expectToast, uniquePoa } from './utils';
 
 // المرحلة 1 من خطة تنفيذ اختبارات E2E المقسمة — الموكلين (Tier 1).
 // أولوية قصوى لأنها تغطية مباشرة لباج حقيقي حصل في الإنتاج (تكرار موكل
@@ -32,9 +32,13 @@ test.describe('الموكلين — إضافة', () => {
     // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): بيانات التوكيل بقت إجبارية —
     // من غيرها التست هيقف على توست التوكيل قبل ما يوصل خالص لفحص تكرار
     // الرقم القومي اللي هو موضوع التست ده.
-    await page.getByTestId('new-client-poa-number').fill('1234');
-    await page.getByTestId('new-client-poa-letters').fill('أ');
-    await page.getByTestId('new-client-poa-year').fill('2026');
+    // 🔒 FIX (تحليل لوجز E2E — 12 أغسطس 2026، تشغيلة تانية): uniquePoa()
+    // بدل القيمة الثابتة — راجع تعليقها الكامل في utils.ts (باج تكرار
+    // بيانات التوكيل، نفس نمط باج تكرار رقم القضية).
+    const poa1 = uniquePoa();
+    await page.getByTestId('new-client-poa-number').fill(poa1.number);
+    await page.getByTestId('new-client-poa-letters').fill(poa1.letters);
+    await page.getByTestId('new-client-poa-year').fill(poa1.year);
     await page.getByTestId('save-client-button').click();
 
     await expectToast(page, '⚠️ الرقم القومي موجود بالفعل لموكل مسجل من قبل');
@@ -58,9 +62,13 @@ test.describe('الموكلين — إضافة', () => {
     // قريبتين). آخر 14 خانة بدل الأول.
     await page.getByTestId('new-client-national-id').fill(`2900101${Date.now()}`.slice(-14));
     // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): بيانات التوكيل بقت إجبارية.
-    await page.getByTestId('new-client-poa-number').fill('1234');
-    await page.getByTestId('new-client-poa-letters').fill('أ');
-    await page.getByTestId('new-client-poa-year').fill('2026');
+    // 🔒 FIX (تحليل لوجز E2E — 12 أغسطس 2026، تشغيلة تانية): uniquePoa()
+    // بدل القيمة الثابتة — راجع تعليقها الكامل في utils.ts (باج تكرار
+    // بيانات التوكيل، نفس نمط باج تكرار رقم القضية).
+    const poa2 = uniquePoa();
+    await page.getByTestId('new-client-poa-number').fill(poa2.number);
+    await page.getByTestId('new-client-poa-letters').fill(poa2.letters);
+    await page.getByTestId('new-client-poa-year').fill(poa2.year);
 
     // بنضغط الزرار مرتين ورا بعض جوه نفس الـtask (من غير أي فاصل زمني
     // حقيقي بين الضغطتين) عشان نتأكد إن الحماية شغالة حتى لو الضغطتين
