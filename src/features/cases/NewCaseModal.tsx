@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from '../../shared/lib/notifications';
+import { onlyDigits, normalizeArabicDigits } from '../../shared/lib/sanitize';
 import { I } from '../../constants';
 import { Inp } from '@/shared/ui/Inp';
 import { Sel } from '@/shared/ui/Sel';
@@ -244,9 +245,9 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
                 React.createElement('div',null,
                     React.createElement('label',{className:"block text-[10px] font-bold text-slate-400 mb-1.5"},"رقم الدعوى الرسمي",React.createElement('span',{className:"text-rose-400 mr-1"},"*")),
                     React.createElement('div',{className:"flex gap-2 items-center"},
-                        React.createElement('input',{value:form.caseNum,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('caseNum',e.target.value),placeholder:"رقم الدعوى",className:"flex-1 p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600 text-center",style:inpStyle,'data-testid':'new-case-number'}),
+                        React.createElement('input',{value:form.caseNum,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('caseNum',normalizeArabicDigits(e.target.value)),placeholder:"رقم الدعوى",className:"flex-1 p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600 text-center",style:inpStyle,'data-testid':'new-case-number'}),
                         React.createElement('span',{className:"text-slate-500 font-black text-sm shrink-0"},"/"),
-                        React.createElement('input',{value:form.caseYear,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('caseYear',e.target.value),placeholder:"السنة",maxLength:4,className:"w-24 p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600 text-center",style:inpStyle,'data-testid':'new-case-year'})
+                        React.createElement('input',{value:form.caseYear,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('caseYear',normalizeArabicDigits(e.target.value)),placeholder:"السنة",maxLength:4,className:"w-24 p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600 text-center",style:inpStyle,'data-testid':'new-case-year'})
                     )
                 ),
 
@@ -270,7 +271,7 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
                     ),
                     React.createElement('div',null,
                         React.createElement('label',{className:"block text-[10px] font-bold text-slate-400 mb-1.5"},"رقم الدائرة",React.createElement('span',{className:"text-rose-400 mr-1"},"*")),
-                        React.createElement('input',{value:form.circuit_number,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('circuit_number',e.target.value),placeholder:"مثال: 12 تجاري",className:inputCls,style:inpStyle,'data-testid':'new-case-circuit'})
+                        React.createElement('input',{value:form.circuit_number,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('circuit_number',normalizeArabicDigits(e.target.value)),placeholder:"مثال: 12 تجاري",className:inputCls,style:inpStyle,'data-testid':'new-case-circuit'})
                     )
                 ),
 
@@ -336,7 +337,7 @@ function NewCaseModal({onClose,onSave,loading,lawyers,isAdmin,clients,countryCou
                     ),
                     React.createElement('div',null,
                         React.createElement('label',{className:"block text-[10px] font-bold text-slate-400 mb-1.5"},"موبايل سكرتير الجلسة"),
-                        React.createElement('input',{value:form.secretary_mobile,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('secretary_mobile',e.target.value.replace(/\D/g,'').slice(0,11)),placeholder:"رقم الموبايل",inputMode:"numeric",maxLength:11,className:inputCls,style:inpStyle})
+                        React.createElement('input',{value:form.secretary_mobile,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('secretary_mobile',onlyDigits(e.target.value,11)),placeholder:"رقم الموبايل",inputMode:"numeric",maxLength:11,className:inputCls,style:inpStyle})
                     )
                 ),
 
