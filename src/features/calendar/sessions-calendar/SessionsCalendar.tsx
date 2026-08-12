@@ -122,6 +122,11 @@ function SessionsCalendar({ cases, clients, onOpenCase, onOpenReminders, onClien
             onClientAdded,
             clients,
             onOpenClientProfile,
+            // ⚡ NEW (استرجاع ميزة "تحويل الجلسة المستقلة لقضية" + فتحها
+            // فورًا — 12 أغسطس 2026): onOpenCase موجودة أصلًا كـprop
+            // مطلوبة من الأعلى (App.tsx) لفتح قضية مربوطة من كارت الجلسة
+            // — بنعيد استخدامها هنا بالظبط بعد تحويل جلسة مستقلة لقضية.
+            onOpenCase,
         }),
         React.createElement('div', { className: "space-y-2 fade-in" },
 
