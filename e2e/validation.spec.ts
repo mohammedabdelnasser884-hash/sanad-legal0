@@ -105,6 +105,10 @@ test.describe('فاليديشن الحقول المطلوبة', () => {
     // بتسيب رقم قومي شبه ثابت لمدة ~16-17 دقيقة (تكرار حقيقي بين تشغيلتين
     // قريبتين). آخر 14 خانة بدل الأول.
     await page.getByTestId('new-client-national-id').fill(`2900101${Date.now()}`.slice(-14));
+    // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): بيانات التوكيل بقت إجبارية.
+    await page.getByTestId('new-client-poa-number').fill('1234');
+    await page.getByTestId('new-client-poa-letters').fill('أ');
+    await page.getByTestId('new-client-poa-year').fill('2026');
     await page.getByTestId('save-client-button').click();
 
     const newClientCard = page.getByTestId('client-card').filter({ hasText: clientName });
