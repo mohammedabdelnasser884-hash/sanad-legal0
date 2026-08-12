@@ -29,13 +29,34 @@ export function validatePhone(phone: string): string | null {
 /**
  * يحوّل رقم هاتف (بأي صيغة: مسافات / شرطات / + / أرقام محلية) لصيغة أرقام
  * فقط صالحة لروابط wa.me — نقطة موحّدة بدل تكرار regex التنظيف في كل مكوّن.
- * ⚠️ الدالة دي بتشيل غير الأرقام بس، ومفيهاش أي منطق تحقق أو كود دولة —
+ * بيتعامل مع الأرقام المصرية المحلية (01xxxxxxxxx) بإضافة كود الدولة 20
+ * تلقائيًا بعد شيل الصفر، عشان واتساب يقدر يلاقي الرقم صح.
+ * ⚠️ الدالة دي مفيهاش منطق تحقق كامل من صحة الرقم —
  * استخدم validatePhone لو محتاج تتأكد إن الرقم سليم أصلاً.
- * @returns سلسلة أرقام فقط، أو '' لو الإدخال فاضي
+ * @returns سلسلة أرقام بكود الدولة، أو '' لو الإدخال فاضي
  */
 export function formatPhoneForWhatsApp(phone: string | null | undefined): string {
     if (!phone) return '';
-    return phone.replace(/\D/g, '');
+
+    // إزالة كل شيء ما عدا الأرقام
+    let digits = phone.replace(/\D/g, '');
+    if (!digits) return '';
+
+    // لو الرقم مصري محلي: بيبدأ بـ 0 وطوله 11 رقم (مثال: 01022150151)
+    // نشيل الصفر ونضيف كود مصر 20 في الأول
+    if (digits.startsWith('0') && digits.length === 11) {
+        digits = '20' + digits.slice(1);
+    }
+    // لو الرقم مصري بدون الصفر وبدون كود الدولة (10 أرقام يبدأ بـ 10/11/12/15)
+    else if (/^(10|11|12|15)\d{8}$/.test(digits)) {
+        digits = '20' + digits;
+    }
+    // لو مكتوب بالفعل بكود الدولة مكرر بالغلط (00201...) نظفه لصيغة قياسية
+    else if (digits.startsWith('0020')) {
+        digits = digits.slice(2);
+    }
+
+    return digits;
 }
 
 /**
