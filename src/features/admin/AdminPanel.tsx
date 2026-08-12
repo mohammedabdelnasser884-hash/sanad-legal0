@@ -69,8 +69,18 @@ interface AdminPanelProps {
     nav: NavigationState;
 }
 
+// ⚠️ حساب السوبر أدمن الوحيد المسموح له برؤية/فتح "المكتبة القانونية" و"بوابة إدارة المكاتب"
+// أي تعديل هنا لازم يكون مقصودًا — ده الحاجز الوحيد اللي بيمنع باقي المكاتب من رؤية القسمين دول
+const SUPER_ADMIN_EMAIL = 'm.gemy4231@gmail.com';
+
 export default function AdminPanel({ profile, lawyers, clients, fetchLawyers, country, onCountryChange, nav }: AdminPanelProps) {
   const [section, setSection] = useState<SectionId>(null);
+  const isSuperAdminUser = (profile?.email || '').trim().toLowerCase() === SUPER_ADMIN_EMAIL;
+
+  // لو المستخدم مش السوبر أدمن وحصل أي شكل حصل خلاه واقف على قسم محجوب عليه، اقفله فورًا
+  useEffect(() => {
+    if (!isSuperAdminUser && section === 'legal_library') setSection(null);
+  }, [isSuperAdminUser, section]);
 
   // ── قفل الـ scroll ──
   useEffect(() => {
@@ -416,8 +426,8 @@ export default function AdminPanel({ profile, lawyers, clients, fetchLawyers, co
         }})
       ),
 
-      // صف 5: المكتبة القانونية — عريض
-      React.createElement('button',{
+      // صف 5: المكتبة القانونية — عريض (مقصورة على السوبر أدمن فقط)
+      isSuperAdminUser && React.createElement('button',{
         key:'legal_library',
         onClick:()=>setSection('legal_library'),
         'data-testid': 'admin-section-legal_library',
@@ -458,8 +468,8 @@ export default function AdminPanel({ profile, lawyers, clients, fetchLawyers, co
       )
     ),
 
-    // ── بوابة إدارة المكاتب المشتركة ──
-    React.createElement('button',{
+    // ── بوابة إدارة المكاتب المشتركة (مقصورة على السوبر أدمن فقط) ──
+    isSuperAdminUser && React.createElement('button',{
       onClick:()=> window.open('/offices-portal.html', '_blank'),
       className:'active:scale-[0.97] transition-all text-right w-full',
       style:{
@@ -603,7 +613,7 @@ export default function AdminPanel({ profile, lawyers, clients, fetchLawyers, co
             'data-testid': 'admin-portal-new-button',
             className:"flex items-center gap-1 bg-gradient-to-tr from-[#C9A84C] to-[#E8C97A] text-white px-3 py-2 rounded-xl text-xs font-black active:scale-95 transition-transform"
           }, React.createElement(I.Plus), "وصول جديد"),
-          section === 'legal_library' && React.createElement('button',{
+          section === 'legal_library' && isSuperAdminUser && React.createElement('button',{
             onClick:()=>{ setEditingLaw(null); setShowLawModal(true); },
             'data-testid': 'admin-law-new-button',
             className:"flex items-center gap-1 bg-gradient-to-tr from-teal-500 to-teal-400 text-white px-3 py-2 rounded-xl text-xs font-black active:scale-95 transition-transform"
@@ -647,7 +657,7 @@ export default function AdminPanel({ profile, lawyers, clients, fetchLawyers, co
     // ══════════════════════════
     //  SECTION: المكتبة القانونية
     // ══════════════════════════
-    section === 'legal_library' && React.createElement(LegalLibrarySection, { loadingLaws, laws, legalCategories, processingLaw, handleProcessLaw, setEditingLaw, setShowLawModal, setConfirmDeleteLaw }),
+    section === 'legal_library' && isSuperAdminUser && React.createElement(LegalLibrarySection, { loadingLaws, laws, legalCategories, processingLaw, handleProcessLaw, setEditingLaw, setShowLawModal, setConfirmDeleteLaw }),
 
     // ══════════════════════════
     //  SECTION: الأرشيف (المرحلة 4 — قضايا + موكلين + أتعاب)
