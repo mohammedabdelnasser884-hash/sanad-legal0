@@ -29,6 +29,24 @@ export function validateFullNameParts(name: string): string | null {
     return null;
 }
 
+/**
+ * يتحقق إن "بيانات التوكيل" مكتملة (رقم + حرف + سنة على الأقل — مكتب
+ * التوثيق مش شرط) — نفس فكرة validateFullNameParts، نقطة واحدة تُستخدم
+ * في كل مكان بيضيف موكل جديد (قسم الموكلين مباشرة/طرف قضية/جلسة مستقلة)
+ * عشان نضمن إن أي موكل بيتضاف للنظام معاه رقم توكيل حقيقي، مش بس اسم
+ * ورقم قومي. القيمة القديمة الحرة (parsePoaString بترجعها كلها في
+ * office) بتفشل الفحص ده عمدًا — موكل *جديد* لازم يستخدم الصيغة
+ * المنظّمة الجديدة، مش نص حر.
+ * @returns null لو سليم، أو رسالة خطأ بالعربي لو ناقص
+ */
+export function validatePowerOfAttorney(cr_number: string): string | null {
+    const parsed = parsePoaString(cr_number);
+    if (!parsed.number || !parsed.letters || !parsed.year) {
+        return '⚠️ بيانات التوكيل إجبارية — يرجى إدخال رقم التوكيل وحرفه وسنته على الأقل';
+    }
+    return null;
+}
+
 // ── هروب آمن لقيمة داخل .ilike() جوه .or() بتاع PostgREST ──
 // (نفس منطق ilikeOrClause في sanitize.ts، بس من غير % — مطابقة تامة
 // case-insensitive، مش "يحتوي على")
