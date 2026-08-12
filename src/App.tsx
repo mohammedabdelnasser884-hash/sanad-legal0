@@ -53,6 +53,7 @@ function App() {
     const showClientModal = nav.isOpen('newClient');
     const showSearch      = nav.isOpen('search');
     const showAI          = nav.isOpen('ai');
+    const showAIComingSoon = nav.isOpen('aiComingSoon');
 
     const setShowCaseModal   = useCallback((v: boolean) => v ? nav.openModal('newCase')    : nav.closeModal('newCase'),    [nav]);
     const setShowLawyerModal = useCallback((v: boolean) => v ? nav.openModal('newLawyer')  : nav.closeModal('newLawyer'),  [nav]);
@@ -73,6 +74,21 @@ function App() {
     }, [nav]);
     const setShowSearch      = useCallback((v: boolean) => v ? nav.openModal('search')     : nav.closeModal('search'),     [nav]);
     const setShowAI          = useCallback((v: boolean) => v ? nav.openModal('ai')         : nav.closeModal('ai'),         [nav]);
+    const setShowAIComingSoon = useCallback((v: boolean) => v ? nav.openModal('aiComingSoon') : nav.closeModal('aiComingSoon'), [nav]);
+    // ⚡ NEW (قفل قسم الـAI مؤقتًا — 12 أغسطس 2026): قسم المساعد الذكي مقفول
+    // دلوقتي لكل المستخدمين، وبيتفتح بدل منه مودال "قريبًا" — ما عدا حساب
+    // السوبر أدمن الوحيد (m.gemy4231@gmail.com) اللي بيفتح القسم الحقيقي
+    // عادي زي ما هو. نفس نمط SUPER_ADMIN_EMAIL الموجود في AdminPanel.tsx.
+    const AI_SUPER_ADMIN_EMAIL = 'm.gemy4231@gmail.com';
+    const isAISuperAdmin = (profile?.email || '').trim().toLowerCase() === AI_SUPER_ADMIN_EMAIL;
+    // بيتبعت لـCommandDock بدل setShowAI الحقيقي: بيسمح بفتح القسم الفعلي
+    // للسوبر أدمن بس، ولأي حد تاني بيفتح مودال "قريبًا". setShowAI الحقيقي
+    // فاضل زي ما هو وبيتبعت لـAppModals عادي (onClose بتاع AILegalAssistant
+    // لسه محتاجاه، وبرضو ممكن يتفتح مباشرة لو احتجنا مستقبلًا).
+    const handleAIButtonClick = useCallback((v: boolean) => {
+        if (v && !isAISuperAdmin) { setShowAIComingSoon(true); return; }
+        setShowAI(v);
+    }, [isAISuperAdmin, setShowAI, setShowAIComingSoon]);
     const showNewSessionModal    = nav.isOpen('newSession');
     const setShowNewSessionModal = useCallback((v: boolean) => v ? nav.openModal('newSession') : nav.closeModal('newSession'), [nav]);
     // ⚡ [جديد] بيتزوّد بعد حفظ جلسة مستقلة جديدة، عشان SessionsCalendar
@@ -478,7 +494,7 @@ function App() {
         // ── COMMAND DOCK ──────────────────────────────────────────────────────
         React.createElement(CommandDock, {
             tab, setTab, showMore, setShowMore, isAdmin, navRef,
-            setShowAI, setSessionsInitialTab, setRemindersInitialFilter,
+            setShowAI: handleAIButtonClick, setSessionsInitialTab, setRemindersInitialFilter,
         }),
 
         // ── Modals ────────────────────────────────────────────
@@ -486,11 +502,11 @@ function App() {
             // ⚡ FIX (8 أغسطس 2026): clientsWithExtras بدل clients الخام —
             // راجع تعليق useAppData.ts/setSelectedCase فوق.
             cases, casesWithExtras, ensureCasesLoaded, clients: clientsWithExtras, ensureClientsLoaded, lawyers, profile, country, isAdmin, casesFilter, nav,
-            showSearch, showAI, showCaseModal, showNewSessionModal,
+            showSearch, showAI, showAIComingSoon, showCaseModal, showNewSessionModal,
             showLawyerModal, showClientModal, savingCase, savingLawyer, savingClient,
             deleteConfirm, selectedClient, selectedClientEditMode, selectedCase, selectedCaseInitialTab,
             clientModalContext, openNewClientModal,
-            setShowSearch, setShowAI, setShowCaseModal, setShowNewSessionModal,
+            setShowSearch, setShowAI, setShowAIComingSoon, setShowCaseModal, setShowNewSessionModal,
             setShowLawyerModal, setShowClientModal, setTab,
             setSelectedCase, setSelectedClient,
             _setDeleteConfirm, _setSelectedClient, _setSelectedCase,
