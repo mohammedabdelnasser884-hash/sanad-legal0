@@ -24,7 +24,7 @@ function AIComingSoonModal({ onClose }: AIComingSoonModalProps) {
             }, React.createElement(I.AI, { cls: 'w-8 h-8 text-[#070d1a]' })),
             React.createElement('h3', { className: 'text-base font-black text-white' }, 'المساعد الذكي قريبًا'),
             React.createElement('p', { className: 'text-xs text-slate-400 font-bold leading-relaxed' },
-                'إحنا بنجهّز قسم الذكاء الاصطناعي دلوقتي عشان يطلع لكم بأفضل صورة. تابعونا، هيتفتح قريبًا إن شاء الله.'
+                'قسم المساعد الذكي قيد التطوير حاليًا ضمن خطتنا لتحسين تجربتكم على المنصة. ترقّبوا إطلاقه قريبًا.'
             ),
             React.createElement('button', {
                 onClick: onClose,
