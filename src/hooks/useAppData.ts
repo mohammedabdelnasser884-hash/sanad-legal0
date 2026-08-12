@@ -181,6 +181,29 @@ function mapCaseRow(
     };
 }
 
+// ⚡ NEW (استرجاع ميزة "تحويل الجلسة المستقلة لقضية" + فتحها بعد التحويل
+// مباشرة — 12 أغسطس 2026): نسخة "قضية واحدة بس" من ensureCasesLoaded تحت
+// (بتحدّث الـstate مش بترجع القيمة، فمش مناسبة لمكان محتاج يفتح القضية
+// فورًا بعد إنشائها). هنا بترجع MappedCase جاهزة مباشرة (أو null لو
+// فشلت)، بنفس mapCaseRow/buildNearestSessionMap/fetchPartiesMapByCaseIds
+// المستخدمين في كل مكان تاني — نفس شكل العرض بالظبط، مفيش نسخة تانية من
+// منطق التحويل. الـcaller (StandaloneSessionDetailModal.tsx) بيستدعيها
+// أونلاين بس بعد نجاح تحويل جلسة مستقلة لقضية.
+export async function fetchMappedCaseById(caseId: string): Promise<MappedCase | null> {
+    const { data, error } = await db.from('cases').select('*').eq('id', caseId).maybeSingle();
+    if (error || !data) { recordError('db_case_by_id', error?.message); return null; }
+    const row = data as CaseRow;
+    let sessionsMap: { [k: string]: string } = {};
+    const { data: sessionsData, error: sessErr } = await db
+        .from('case_sessions')
+        .select('case_id,session_date')
+        .eq('case_id', caseId);
+    if (sessErr) recordError('db_sessions_by_case_ids', sessErr.message);
+    else sessionsMap = buildNearestSessionMap(sessionsData || []);
+    const partiesMap = await fetchPartiesMapByCaseIds([caseId]);
+    return mapCaseRow(row, sessionsMap, partiesMap);
+}
+
 // ─────────────────────────────────────────────────────────
 //  ⚡ NEW (فيكس "نظام الأوفلاين ملوش قيمة" — 9 أغسطس 2026): بعد فيكس
 //  useAuthProfile.ts (المستخدم بقى يقدر يدخل التطبيق أوف لاين)، لسه
