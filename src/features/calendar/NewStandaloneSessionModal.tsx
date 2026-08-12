@@ -264,6 +264,16 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
             toast('⚠️ يجب ملء الحقول الإجبارية المحددة بعلامة (*)', true);
             return;
         }
+        // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): بيانات القضية (المحكمة/رقم
+        // القضية/السنة/نوع القضية/الدائرة/درجة التقاضي) بقت إجبارية —
+        // نفس فحوصات NewCaseModal.tsx/EditCaseModal.tsx بالحرف، مكررة هنا
+        // وفي StandaloneSessionDetailModal.tsx (فورم التعديل).
+        if (!form.court.trim()) { toast('⚠️ حقل "المحكمة" مطلوب', true); return; }
+        if (!form.case_number.trim()) { toast('⚠️ حقل "رقم القضية" مطلوب', true); return; }
+        if (!form.case_year.trim()) { toast('⚠️ حقل "السنة" مطلوب', true); return; }
+        if (!form.case_type.trim()) { toast('⚠️ حقل "نوع القضية" مطلوب', true); return; }
+        if (!form.circuit_number.trim()) { toast('⚠️ حقل "الدائرة" مطلوب', true); return; }
+        if (!form.court_level.trim()) { toast('⚠️ حقل "درجة التقاضي" مطلوب', true); return; }
         // ⚡ CHANGED (مرحلة 6.1 — خطة تعدد الأطراف): فاليديشن أطراف
         // الجلسة كلها بقت من casePartiesValidation.ts (نفس القواعد
         // المطبّقة في NewCaseModal.tsx مرحلة 4.1: اسم/صفة كل طرف،
@@ -680,7 +690,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                 // المحكمة — نص حر، مع datalist للاقتراح من قايمة محاكم
                 // الدولة لو موجودة — نفس فيكس "المحكمة المختصة" في
                 // NewCaseModal.tsx بالحرف (12 أغسطس 2026).
-                React.createElement(Field, { label: 'المحكمة' },
+                React.createElement(Field, { label: 'المحكمة', required: true },
                     React.createElement('input', {
                         value: form.court,
                         onChange: set('court'),
@@ -688,6 +698,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                         className: inputCls,
                         style: inputStyle,
                         list: (countryCourts && countryCourts.length > 0) ? 'new-session-courts-list' : undefined,
+                        'data-testid': 'new-session-court',
                     }),
                     countryCourts && countryCourts.length > 0 && React.createElement('datalist', { id: 'new-session-courts-list' },
                         countryCourts.map((c: string) => React.createElement('option', { key: c, value: c }))
@@ -708,9 +719,11 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                 React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
                     React.createElement(Inp, {
                         label: 'رقم القضية',
+                        required: true,
                         value: form.case_number,
                         onChange: set('case_number'),
-                        placeholder: 'مثال: 1234'
+                        placeholder: 'مثال: 1234',
+                        'data-testid': 'new-session-case-number'
                     }),
                     React.createElement(Inp, {
                         // ⚡ NEW (مرحلة 4 — توحيد قيد حقل "السنة"، 6 أغسطس 2026): كان
@@ -721,10 +734,12 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                         // الشامل، فقرة 1) — "زي فورم القضية بالظبط" يعني القيد الفعلي
                         // الموجود هناك، مش قيد أشد منه.
                         label: 'السنة',
+                        required: true,
                         value: form.case_year,
                         onChange: set('case_year'),
                         placeholder: 'مثال: 2024',
                         maxLength: 4,
+                        'data-testid': 'new-session-case-year'
                     })
                 ),
 
@@ -734,7 +749,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                 // اختيار "أخرى" الأول قبل الكتابة الحرة — نفس فيكس "تصنيف
                 // الدعوى" في NewCaseModal.tsx بالحرف (12 أغسطس 2026).
                 React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
-                    React.createElement(Field, { label: 'نوع القضية' },
+                    React.createElement(Field, { label: 'نوع القضية', required: true },
                         React.createElement('input', {
                             value: form.case_type,
                             onChange: set('case_type'),
@@ -742,6 +757,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                             className: inputCls,
                             style: inputStyle,
                             list: 'new-session-case-types-list',
+                            'data-testid': 'new-session-case-type',
                         }),
                         React.createElement('datalist', { id: 'new-session-case-types-list' },
                             (countryCaseTypes && countryCaseTypes.length > 0 ? countryCaseTypes : CASE_TYPES).map((t: string) => React.createElement('option', { key: t, value: t }))
@@ -749,9 +765,11 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                     ),
                     React.createElement(Inp, {
                         label: 'الدائرة',
+                        required: true,
                         value: form.circuit_number,
                         onChange: set('circuit_number'),
-                        placeholder: 'مثال: الدائرة 7'
+                        placeholder: 'مثال: الدائرة 7',
+                        'data-testid': 'new-session-circuit'
                     })
                 )
                 ),
@@ -759,7 +777,7 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                 // درجة التقاضي — نص حر مع اقتراحات (نفس نمط "المحكمة
                 // المختصة"/"تصنيف الدعوى")، بدل أزرار اختيار مقفولة —
                 // ⚡ CHANGED (طلب مباشر — 9 أغسطس 2026).
-                React.createElement(Field, { label: 'درجة التقاضي' },
+                React.createElement(Field, { label: 'درجة التقاضي', required: true },
                     React.createElement('input', {
                         value: form.court_level,
                         onChange: set('court_level'),
