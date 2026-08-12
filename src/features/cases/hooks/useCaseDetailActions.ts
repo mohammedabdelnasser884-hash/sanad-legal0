@@ -201,6 +201,15 @@ export function useCaseDetailActions(
     const safeCaseNum = escapeHtml(caseNum);
     const safeCaseType = escapeHtml(caseData.type || '—');
     const safeCaseCourt = escapeHtml(caseData.court || '—');
+    // 🔒 FIX (رقم الدايرة مش بيظهر في تقرير القضية — 12 أغسطس 2026): رقم
+    // الدايرة (circuit_number) ودرجة التقاضي (court_level) متسجلين على
+    // القضية فعليًا (نفس الحقول المعروضة في InfoSection.tsx) لكن تقرير
+    // الـPDF ده مكانش بيعرضهم خالص — مش حقول جديدة، كانوا موجودين في
+    // MappedCase من الأول، بس القسم اللي بيبني الهيدر هنا كان ناسيهم.
+    // زي InfoSection.tsx بالظبط، بيظهروا بس لو متسجلين (مفيش قيمة فاضية
+    // في التقرير).
+    const safeCourtLevel = escapeHtml(caseData.court_level || '');
+    const safeCircuitNumber = escapeHtml(caseData.circuit_number || '');
     const safeClientName = escapeHtml(client?.full_name || '—');
     // ⚡ FIX: نفس مبدأ CaseDetailView.tsx/InfoSection.tsx — نقرا الصفة من
     // عمود plaintiff_role/defendant_role المخصص، ونرجع لـ regex بس كـ
@@ -356,6 +365,8 @@ ${PDF_FONT_LINK}
       <div class="header-field"><label>رقم القيد</label><span>${safeCaseNum}</span></div>
       <div class="header-field"><label>نوع القضية</label><span>${safeCaseType}</span></div>
       <div class="header-field"><label>المحكمة</label><span>${safeCaseCourt}</span></div>
+      ${safeCourtLevel ? `<div class="header-field"><label>درجة التقاضي</label><span>${safeCourtLevel}</span></div>` : ''}
+      ${safeCircuitNumber ? `<div class="header-field"><label>رقم الدائرة</label><span>${safeCircuitNumber}</span></div>` : ''}
       <div class="header-field"><label>الموكل</label><span>${safeClientName}</span></div>
       ${!hasCaseParties && plaintiffParty ? `<div class="header-field"><label>${safePlaintiffLabel}</label><span>${safePlaintiffName}</span></div>` : ''}
       ${!hasCaseParties && defendantParty ? `<div class="header-field"><label>${safeDefendantLabel}</label><span>${safeDefendantName}</span></div>` : ''}
