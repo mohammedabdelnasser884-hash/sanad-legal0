@@ -131,16 +131,28 @@ export interface CaseInsertSourceFields {
 // ⚡ CHANGED (خطة تفكيك legacy columns — Phase F.3، 6 أغسطس 2026): وقّفنا
 // كتابة plaintiff/plaintiff_role/plaintiff_national_id/
 // plaintiff_power_of_attorney/plaintiff_address/defendant/defendant_role/
-// defendant_national_id/plaintiff_legal_title/defendant_legal_title هنا
-// خالص — نفس قرار F.1 بالحرف (useCaseActions.ts، مسار إنشاء قضية عادية)
-// لكن هنا لمسار "تحويل جلسة مستقلة لقضية" (buildCaseInsertData مستخدمة في
-// useClientLinking.ts وuseSessionLinking.ts معًا). أطراف الدعوى الحقيقيين
-// بينتقلوا فعليًا لـcase_parties عبر movePartiesFromSessionToCase/
-// linkSessionGroupToCase (بينادوا بعد نجاح الـ INSERT ده مباشرة في كل
-// caller) — كل شاشات العرض بقت بتقرا من هناك بس (مراحل B.1-B.4). الحقول
-// المقابلة في CaseInsertSourceFields فوق فضلت زي ما هي (مش شالين الـ
-// interface) — الـ callers لسه بيبعتوها من غير أي تعديل، بس بقت بتتجاهل
-// هنا بدل ما تتكتب على عمود.
+// defendant_national_id هنا خالص — نفس قرار F.1 بالحرف (useCaseActions.ts،
+// مسار إنشاء قضية عادية) لكن هنا لمسار "تحويل جلسة مستقلة لقضية"
+// (buildCaseInsertData مستخدمة في useClientLinking.ts وuseSessionLinking.ts
+// معًا). أطراف الدعوى الحقيقيين بينتقلوا فعليًا لـcase_parties عبر
+// movePartiesFromSessionToCase/linkSessionGroupToCase (بينادوا بعد نجاح
+// الـ INSERT ده مباشرة في كل caller) — كل شاشات العرض بقت بتقرا من هناك
+// بس (مراحل B.1-B.4). الحقول المقابلة في CaseInsertSourceFields فوق فضلت
+// زي ما هي (مش شالين الـ interface) — الـ callers لسه بيبعتوها من غير أي
+// تعديل، بس بقت بتتجاهل هنا بدل ما تتكتب على عمود.
+// 🔒 FIX (المسمى القانوني الجامع بيتمسح بعد تحويل جلسة لقضية — 12 أغسطس
+// 2026): plaintiff_legal_title/defendant_legal_title كانوا متضمنين غلط في
+// القايمة اللي بتتوقف كتابتها فوق — الـ F.1 الأصلية (useCaseActions.ts)
+// كانت غلط في نفس النقطة وانصلحت بعدين (راجع "E2E log fix session — 8
+// أغسطس 2026"، checklist-section.spec.ts)، لكن الفيكس ده اتعمل بس في
+// useCaseActions.ts/useAppData.ts ومنساش يتطبّق هنا. عمودي المسمى القانوني
+// مش legacy ولا بديل عنهم case_parties — دول عمودين على مستوى القضية نفسها
+// (لكل الجهة، مش لكل شخص)، ولسه مصدر البيانات اللي بتقرا منه
+// ChecklistSection.tsx/InfoSection.tsx/CaseDetailView.tsx/CasesTab.tsx/
+// CaseSummary.tsx/CaseDataExtract.tsx/AILegalAssistant.tsx. لما جلسة مستقلة
+// بتتحول لقضية، القضية الجديدة كانت بتتعمل من غير القيمتين دول خالص — فيرجعوا
+// فاضيين حتى لو كانوا متسجلين في الجلسة الأصلية، ولازم تتعمل من تعديل
+// القضية يدويًا تاني.
 export function buildCaseInsertData(
   fields: CaseInsertSourceFields,
   caseTitle: string,
@@ -161,6 +173,8 @@ export function buildCaseInsertData(
     secretary_hall: fields.secretaryHall || null,
     secretary_name: fields.secretaryName || null,
     secretary_mobile: fields.secretaryMobile || null,
+    plaintiff_legal_title: fields.plaintiffLegalTitle || null,
+    defendant_legal_title: fields.defendantLegalTitle || null,
     status: 'نشطة',
     ...(existingClientId !== undefined ? { client_id: existingClientId || null } : {}),
     _offlineTempId: offlineTempId,
