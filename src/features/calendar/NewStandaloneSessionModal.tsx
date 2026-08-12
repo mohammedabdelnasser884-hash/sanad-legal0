@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from '../../shared/lib/notifications';
-import { escapeTelegramHtml } from '../../shared/lib/sanitize';
+import { escapeTelegramHtml, onlyDigits, normalizeArabicDigits } from '../../shared/lib/sanitize';
 import { logActivity } from '../../shared/lib/dataAccess';
 import { db } from '../../supabaseClient';
 import { showErrorToast } from '../../shared/lib/errorReporting';
@@ -93,8 +93,11 @@ const EMPTY: Form = {
 // "درجة التقاضي"/"موبايل السكرتير" اللي كانت ناقصة من فورم التعديل.
 export const COURT_LEVELS = ['ابتدائي', 'استئناف', 'نقض'];
 
-// أرقام بس، وبالظبط 14 رقم — بيتقص أي حرف مش رقم أول بأول
-export const onlyDigits = (v: string, max = 14) => v.replace(/\D/g, '').slice(0, max);
+// 🔢 onlyDigits (أرقام بس، وبالظبط 14 رقم افتراضيًا) بقت موحّدة في
+// shared/lib/sanitize.ts (بتطبّع الأرقام العربية الشرقية لإنجليزية
+// أول ما بتوصل، 12 أغسطس 2026) — بنعيد تصديرها هنا عشان
+// StandaloneSessionDetailModal.tsx بيستوردها من هذا الملف.
+export { onlyDigits };
 
 function SectionTitle({ children }: { children: string }) {
     return React.createElement('p', {
@@ -223,7 +226,12 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
     const currentPartyName = partyList.length > 0 ? (partyList[partyIndex]?.name || null) : (savedFormData?.form.plaintiff || null);
     const onSkipOrClose = partyList.length > 0 ? handleSkipParty : onClose;
 
-    const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((f: Form) => ({ ...f, [k]: e.target.value }));
+    // 🔢 FIX (تطبيع الأرقام العربية في كل حقول الفورم — 12 أغسطس 2026):
+    // set() هي الـsetter العام لمعظم حقول الفورم (المحكمة/رقم القضية/
+    // السنة/الدائرة/قاعة السكرتير...). بنطبّع أي رقم عربي (٠-٩) لإنجليزي
+    // تلقائيًا أول ما يتكتب، عشان يتوحّد شكل البيانات المخزّنة (بحث/فرز/
+    // روابط واتساب/تصدير iCal) بدل ما يفضل يعتمد على كل حقل يعالج نفسه.
+    const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((f: Form) => ({ ...f, [k]: normalizeArabicDigits(e.target.value) }));
 
     useEffect(() => {
         if (!draft.restoredDraft) return;
