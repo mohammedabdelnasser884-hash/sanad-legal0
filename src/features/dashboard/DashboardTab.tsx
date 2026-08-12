@@ -552,6 +552,11 @@ function DashboardTab({
             onDone: () => { refreshAllSessionLists(); },
             clients,
             onOpenClientProfile,
+            // ⚡ NEW (استرجاع ميزة "تحويل الجلسة المستقلة لقضية" + فتحها
+            // فورًا — 12 أغسطس 2026): setSelectedCase موجودة أصلًا كـprop
+            // في DashboardTab (نفس اللي بتفتح بيها القضايا من أي مكان تاني
+            // في الداشبورد).
+            onOpenCase: (c: MappedCase) => setSelectedCase(c, 'timeline'),
         }),
         Dashboard
   );
