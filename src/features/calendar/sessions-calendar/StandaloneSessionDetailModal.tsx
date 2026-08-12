@@ -23,6 +23,7 @@ import type { SessionWithLegacyFields } from '../../../types';
 // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 6): كشف التعارض بين البيانات
 // الحرة في الجلسة وملف الموكل المختار وقت الربط اليدوي اللاحق.
 import { findClientDataMismatches, syncSessionIdentityToGroupSiblings, fetchSessionClientParties, unlinkClientFromSessionParty, makeOfflineTempId, buildCaseInsertData, linkSessionGroupToCase } from '../hooks/caseSessionLinkingShared';
+import { checkCaseNumberDuplicate } from '@/shared/lib/caseValidation';
 import { recalcNextHearing } from '@/shared/lib/dataAccess';
 // ⚡ NEW (خطة تعدد الأطراف، مرحلة 6.4، 23 يوليو 2026): نفس Component/هوك
 // مشترك مرحلة 5.1 (EditCaseModal.tsx) و6.1 (NewStandaloneSessionModal.tsx)
@@ -951,6 +952,23 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
         setConverting(true);
         try {
             const caseTitle = session.title || session.case_number || 'قضية من جلسة مستقلة';
+            // 🔒 FIX (خلل: تعذّر إنشاء القضية — idx_cases_tenant_case_number_unique،
+            // 12 أغسطس 2026): نفس الفيكس المطبّق في useClientLinking.ts
+            // (handleLinkCase) — هنا كمان كان مفيش فحص تكرار رقم القيد قبل
+            // الـ INSERT، فرقم قيد مسجل بالفعل لقضية بنفس المحكمة والنوع
+            // كان بيوصّل لرسالة Postgres خام غير مفهومة للمستخدم بدل رسالة
+            // واضحة زي باقي مسارات إنشاء القضية.
+            let caseDup;
+            try {
+                caseDup = await checkCaseNumberDuplicate(db, session.case_number, session.court_level, session.case_type);
+            } catch (e) {
+                showErrorToast('case_number_duplicate_check', e, 'تعذّر التحقق من رقم القيد. حاول مرة أخرى.', 'تحويل جلسة لقضية');
+                return;
+            }
+            if (caseDup.duplicate) {
+                toast(caseDup.message!, true);
+                return;
+            }
             const offlineTempId = makeOfflineTempId();
             const { error, offline, queued, data: insertedCase } = await window.__dbWrite({
                 type: 'INSERT',
@@ -970,7 +988,14 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
                 returning: true,
             });
             if (error) {
-                showErrorToast('case_create', error, 'تعذّر إنشاء القضية. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'إنشاء قضية');
+                // 🔒 FIX (نفس الفيكس فوق): خط دفاع أخير لو الفحص المسبق فوّت حالة
+                // (سباق بين تبويبين، إلخ) — نفس رسالة useCaseActions.ts/
+                // useClientLinking.ts بالظبط بدل الرسالة العامة.
+                if ((error as { code?: string }).code === '23505') {
+                    toast('⚠️ رقم القيد ده مسجل بالفعل لقضية موجودة', true);
+                } else {
+                    showErrorToast('case_create', error, 'تعذّر إنشاء القضية. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'إنشاء قضية');
+                }
                 return;
             }
             // نفس منطق useClientLinking.ts: أوفلاين، مفيش id حقيقي راجع —
