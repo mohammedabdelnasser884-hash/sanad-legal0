@@ -64,6 +64,11 @@ interface DashboardTabProps {
   // كانوا بيتوصّلوا لـ StandaloneSessionDetailModal تحت، لكن دي بقت prop
   // بلا استخدام داخلي فيها من المراحل السابقة (2 و3) — الاتنين اتشالوا
   // من StandaloneSessionDetailModalProps نفسها، فمفيش داعي نمررهم هنا.
+  // ⚡ NEW (توحيد "المحكمة"/"نوع القضية" مع فورمي القضية — 12 أغسطس 2026):
+  // بيتمرروا لـStandaloneSessionDetailModal تحت — نفس props اللي App.tsx
+  // بيبعتها لـNewCaseModal.tsx (COUNTRY_CONFIGS[country]).
+  countryCourts?: string[];
+  countryCaseTypes?: string[];
 }
 
 function DashboardTab({
@@ -78,6 +83,7 @@ function DashboardTab({
   dbOnline, healthErrors, setHealthErrors,
   fetchTodaySessions, fetchUpcomingSessions, fetchMissedSessions,
   onOpenClientProfile,
+  countryCourts, countryCaseTypes,
 }: DashboardTabProps) {
 
     // ── جلسة مستقلة مفتوحة حالياً (لعرض المودال) ──
@@ -557,6 +563,8 @@ function DashboardTab({
             // في DashboardTab (نفس اللي بتفتح بيها القضايا من أي مكان تاني
             // في الداشبورد).
             onOpenCase: (c: MappedCase) => setSelectedCase(c, 'timeline'),
+            countryCourts,
+            countryCaseTypes,
         }),
         Dashboard
   );
