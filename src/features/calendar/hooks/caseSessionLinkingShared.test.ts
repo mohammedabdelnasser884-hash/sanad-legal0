@@ -119,12 +119,17 @@ describe('buildCaseInsertData', () => {
       secretary_hall: 'أمين سر 1',
       secretary_name: 'محمود',
       secretary_mobile: '0100000000',
+      plaintiff_legal_title: null,
+      defendant_legal_title: null,
       status: 'نشطة',
       _offlineTempId: 'tmp-1',
     });
   });
 
-  // 🆕 (F.3 — 6 أغسطس 2026): buildCaseInsertData بقى مابيكتبش أي عمود legacy خالص
+  // 🆕 (F.3 — 6 أغسطس 2026): buildCaseInsertData بقى مابيكتبش أعمدة legacy
+  // القديمة (plaintiff/defendant وتوابعهم — الأشخاص الحقيقيين بيتنقلوا
+  // لـcase_parties بس). plaintiff_legal_title/defendant_legal_title اتشالوا
+  // من القايمة دي — راجع الفيكس تحت (12 أغسطس 2026)، دول مش legacy.
   it('F.3: صفر أعمدة legacy (plaintiff/defendant وتوابعهم) في الناتج، حتى لو الحقول جاية في fields', () => {
     const result = buildCaseInsertData(baseFields, 'عنوان القضية', 'tmp-legacy');
     expect(result).not.toHaveProperty('plaintiff');
@@ -135,8 +140,6 @@ describe('buildCaseInsertData', () => {
     expect(result).not.toHaveProperty('defendant');
     expect(result).not.toHaveProperty('defendant_role');
     expect(result).not.toHaveProperty('defendant_national_id');
-    expect(result).not.toHaveProperty('plaintiff_legal_title');
-    expect(result).not.toHaveProperty('defendant_legal_title');
   });
 
   it('لو existingClientId اتبعت (مسار جلسة محفوظة بالفعل)، عمود client_id بيتبعت حتى لو null', () => {
@@ -155,16 +158,25 @@ describe('buildCaseInsertData', () => {
     expect(result).not.toHaveProperty('plaintiff');
   });
 
-  // 🔁 (F.3 — 6 أغسطس 2026): استبدال اختبار "plaintiffLegalTitle بيتكتب على عمود"
-  // القديم — دلوقتي plaintiffLegalTitle/defendantLegalTitle بيتم تجاهلهم في
-  // buildCaseInsertData خالص حتى لو اتبعتوا في fields (مفيش عمود يتكتبوا عليه بعد النهاردة)
-  it('F.3: plaintiffLegalTitle/defendantLegalTitle متبعتين في fields بس بيتجاهلوا في buildCaseInsertData (مفيش عمود legacy يتكتبوا عليه)', () => {
+  // 🔒 FIX (المسمى القانوني الجامع بيتمسح بعد تحويل جلسة لقضية — 12 أغسطس
+  // 2026): الاختبار القديم هنا (F.3، 6 أغسطس) كان بيتأكد إن القيمتين
+  // بيتجاهلوا — ده كان تسجيل للباج نفسه، مش سلوك صحيح. plaintiff_legal_title/
+  // defendant_legal_title مش legacy (عمودين نشطين على مستوى القضية، لسه
+  // مصدر البيانات اللي بتقرا منه شاشات كتير — راجع تعليق buildCaseInsertData)،
+  // فلازم يتكتبوا فعليًا زي أي حقل تاني.
+  it('plaintiffLegalTitle/defendantLegalTitle بيتكتبوا فعليًا على plaintiff_legal_title/defendant_legal_title', () => {
     const result = buildCaseInsertData(
       { ...baseFields, plaintiffLegalTitle: 'ورثة المرحوم أحمد علي', defendantLegalTitle: 'الشركاء في شركة كذا' },
       'عنوان القضية', 'tmp-5',
     );
-    expect(result).not.toHaveProperty('plaintiff_legal_title');
-    expect(result).not.toHaveProperty('defendant_legal_title');
+    expect(result).toHaveProperty('plaintiff_legal_title', 'ورثة المرحوم أحمد علي');
+    expect(result).toHaveProperty('defendant_legal_title', 'الشركاء في شركة كذا');
+  });
+
+  it('لو plaintiffLegalTitle/defendantLegalTitle مش متبعتين، بيترجعوا null بدل ما يتفقدوا', () => {
+    const result = buildCaseInsertData(baseFields, 'عنوان القضية', 'tmp-6');
+    expect(result).toHaveProperty('plaintiff_legal_title', null);
+    expect(result).toHaveProperty('defendant_legal_title', null);
   });
 });
 
