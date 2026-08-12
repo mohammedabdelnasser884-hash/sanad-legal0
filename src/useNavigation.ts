@@ -32,6 +32,7 @@ export type TabName =
 export type ModalName =
   | 'search'
   | 'ai'
+  | 'aiComingSoon'
   | 'settings'
   | 'newCase'
   | 'newClient'
