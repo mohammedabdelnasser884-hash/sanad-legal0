@@ -1,5 +1,5 @@
 import { toast } from '../../../shared/lib/notifications';
-import { validateFullNameParts, checkClientDuplicate } from '../../../shared/lib/clientValidation';
+import { validateFullNameParts, validatePowerOfAttorney, checkClientDuplicate } from '../../../shared/lib/clientValidation';
 import { validateUploadFile, resolveStorageUrl } from '../../../shared/lib/storage';
 import { escapeTelegramHtml } from '../../../shared/lib/sanitize';
 import { safeUpdate, logActivity } from '../../../shared/lib/dataAccess';
@@ -148,7 +148,19 @@ export function useClientActions(params: {
         }
         const nameErr = validateFullNameParts(form.full_name);
         if (nameErr) { toast(nameErr, true); return false; }
-        // 🔒 FIX (تقرير الموثوقية — نتيجة 0): الزرار بيتقفل هنا فورًا، قبل
+        // ⚡ NEW (12 أغسطس 2026 — بيانات التوكيل إجبارية عند إنشاء موكل
+        // جديد): الفحص هنا هو الجيت الحقيقي قبل أي INSERT فعلي — موجود
+        // كمان في NewClientModal.tsx كتحقق فوري (toast سريع من غير
+        // استنى الشبكة)، بس ده اللي بيمنع أي موكل جديد يتسجل من غير
+        // رقم توكيل حتى لو حصل استدعاء لـhandleSaveClient من مكان تاني
+        // مستقبلًا من غير ما يعدي على فحص الفورم. ⚠️ الفحص ده مقصود إنه
+        // هنا بس (INSERT) مش في handleUpdateClient تحت (UPDATE) — موكلين
+        // قدام موجودين اتسجلوا قبل القرار ده وممكن يكون مفيش عندهم رقم
+        // توكيل، وإجبار الفحص على التعديل كان هيقفل تعديل أي حاجة تانية
+        // في ملفاتهم (هاتف/عنوان/ملاحظات) لحد ما يوفروا رقم توكيل مش
+        // موجود أصلاً عندهم في الواقع.
+        const poaErr = validatePowerOfAttorney(form.cr_number);
+        if (poaErr) { toast(poaErr, true); return false; }
         // فحص التكرار اللي هو استعلام على النت وممكن ياخد وقت لو النت
         // بطيء. قبل الفيكس ده كان setSavingClient(true) بعد الفحص، فلو
         // النت هيس والمستخدم ضغط "إضافة" أكتر من مرة، كل ضغطة كانت
