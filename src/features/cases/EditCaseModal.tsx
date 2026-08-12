@@ -450,11 +450,28 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
         }
     };
 
-    // سلوت "ربط بموكل من النظام" + "إنشاء موكل جديد" فوق اسم أي طرف عليه ⭐
-    // *وغير* الموكل الأصلي المقفول (ده بيتقفل بالكامل من renderPartyReadOnly
-    // فوق، مفيش داعي يتعرض له سلوت الربط أصلاً).
+    // ⚡ CHANGED (توحيد تجربة الطرف الأساسي/الثانوي — 12 أغسطس 2026): الطرف
+    // الأساسي (party.id === linkedPartyId) كان بيرجع null بالكامل من هنا —
+    // يعني مفيش زرار "عدّل من ملف الموكل" ليه أصلاً، بعكس أي طرف ثانوي
+    // مربوط. الفرق في مصدر الربط (cases.client_id قديم مقابل
+    // case_parties.client_id) مش المفروض يترجم لفرق في تجربة المستخدم —
+    // فبقى عنده فرع مختصر تحت بيوريله بس زرار "عدّل من ملف الموكل"، من
+    // غير دروب-داون الربط/فك الربط (ده مش منطقي للطرف الأساسي؛ فك ربط
+    // القضية بموكلها الأساسي لسه بيتم من تاب البيانات زي ما هو موثّق).
     const renderPartyExtra = (party: PartyFieldValue) => {
-        if(!party.is_client || party.id === linkedPartyId) return null;
+        if (party.id === linkedPartyId) {
+            if (!party.is_client || !onOpenClientProfile || !linkedClient) return null;
+            return React.createElement('div', { className: 'flex items-center justify-between' },
+                React.createElement('p', { className: 'text-[9px] text-slate-500' }, '🟢 موكل المكتب — بيانات هذا الطرف بتتقرا من ملف الموكل'),
+                React.createElement('button', {
+                    type: 'button',
+                    onClick: () => onOpenClientProfile(linkedClient),
+                    className: 'text-[9px] font-black text-premium-gold shrink-0',
+                    'data-testid': `edit-case-open-client-profile-${party.id}`,
+                }, '✏️ عدّل من ملف الموكل')
+            );
+        }
+        if(!party.is_client) return null;
         // ⚡ CHANGED (المرحلة 2 — إصلاح باگ 5.1): الحالة الموحّدة بدل فحص
         // client_id/linkedPartyClient المتفرق. طرف LINKED/PRIMARY_CLIENT
         // بياناته مقفولة ("عدّل من ملف الموكل" يظهر). طرف ORPHAN_PARTY
