@@ -174,6 +174,7 @@ export function PartyFields({
             value: party.power_of_attorney,
             onChange: (v: string) => onChange('power_of_attorney', v),
             readOnly,
+            testIdPrefix: tid('poa'),
         })
     );
 }
