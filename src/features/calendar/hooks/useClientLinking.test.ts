@@ -52,6 +52,27 @@ function makeMockDb() {
         })),
       };
     }
+    // 🔒 FIX (خلل: تعذّر إنشاء القضية — idx_cases_tenant_case_number_unique،
+    // 12 أغسطس 2026): handleLinkCase بقى بينادي checkCaseNumberDuplicate
+    // (caseValidation.ts) قبل الـINSERT — استعلام db.from('cases').select(...)
+    // .is('deleted_at', null).or(...) [.neq(...) اختياري]. افتراضيًا بيرجع
+    // [] (مفيش تكرار) عشان التستات القديمة (اللي مبتغطيش سيناريو التكرار)
+    // تفضل شغالة بنفس السلوك المتوقع من غير ما تتلمس.
+    if (table === 'cases') {
+      const makeAwaitableWithNeq = () => {
+        const promise = Promise.resolve(get('cases:select', { data: [], error: null }));
+        return Object.assign(promise, {
+          neq: vi.fn(() => Promise.resolve(get('cases:select', { data: [], error: null }))),
+        });
+      };
+      return {
+        select: vi.fn(() => ({
+          is: vi.fn(() => ({
+            or: vi.fn(() => makeAwaitableWithNeq()),
+          })),
+        })),
+      };
+    }
     if (table === 'case_parties') {
       // ⚡ NEW (خطة تعدد الأطراف، 7.1/7.2): fetchSessionClientParties
       // بتستخدم .select().eq().eq().order(...)، وmovePartiesFromSessionToCase
