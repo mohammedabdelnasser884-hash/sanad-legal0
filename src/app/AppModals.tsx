@@ -16,6 +16,7 @@ import UserFormModal from '@/features/admin/users/UserFormModal';
 import ClientDetailModal from '../features/clients/ClientDetailModal';
 import UniversalSearchModal from '../shared/modals/UniversalSearchModal';
 import AILegalAssistant from '../features/ai/AILegalAssistant';
+import AIComingSoonModal from '../shared/modals/AIComingSoonModal';
 import DeleteConfirmModal from '@/shared/modals/DeleteConfirmModal';
 import NewStandaloneSessionModal from '../features/calendar/NewStandaloneSessionModal';
 import CaseDetailView from '../features/cases/CaseDetailView';
@@ -46,6 +47,7 @@ interface AppModalsProps {
     // ── حالات إظهار المودالات ──
     showSearch: boolean;
     showAI: boolean;
+    showAIComingSoon: boolean;
     showCaseModal: boolean;
     showNewSessionModal: boolean;
     showLawyerModal: boolean;
@@ -66,6 +68,7 @@ interface AppModalsProps {
     // ── setters ──
     setShowSearch: (v: boolean) => void;
     setShowAI: (v: boolean) => void;
+    setShowAIComingSoon: (v: boolean) => void;
     setShowCaseModal: (v: boolean) => void;
     setShowNewSessionModal: (v: boolean) => void;
     setShowLawyerModal: (v: boolean) => void;
@@ -156,11 +159,11 @@ interface AppModalsProps {
 // ─────────────────────────────────────────────────────────
 function AppModals({
     cases, casesWithExtras, ensureCasesLoaded, clients, ensureClientsLoaded, lawyers, profile, country, isAdmin, casesFilter, nav,
-    showSearch, showAI, showCaseModal, showNewSessionModal,
+    showSearch, showAI, showAIComingSoon, showCaseModal, showNewSessionModal,
     showLawyerModal, showClientModal, savingCase, savingLawyer, savingClient,
     deleteConfirm, selectedClient, selectedClientEditMode, selectedCase, selectedCaseInitialTab,
     clientModalContext, openNewClientModal,
-    setShowSearch, setShowAI, setShowCaseModal, setShowNewSessionModal,
+    setShowSearch, setShowAI, setShowAIComingSoon, setShowCaseModal, setShowNewSessionModal,
     setShowLawyerModal, setShowClientModal, setTab,
     setSelectedCase, setSelectedClient, _setDeleteConfirm, _setSelectedClient, _setSelectedCase,
     setCases, setCasesFilter, setCasesPage,
@@ -243,6 +246,10 @@ function AppModals({
             onOpenClient: (c) => { setSelectedClient(c as MappedClient); }
         }),
         showAI && createPortal(React.createElement(AILegalAssistant, { onClose: () => setShowAI(false), cases, clients, profile, country }), document.body),
+        // ⚡ NEW (قفل قسم الـAI مؤقتًا — 12 أغسطس 2026): بيتفتح بدل القسم
+        // الحقيقي لكل المستخدمين ما عدا السوبر أدمن — راجع handleAIButtonClick
+        // في App.tsx.
+        showAIComingSoon && createPortal(React.createElement(AIComingSoonModal, { onClose: () => setShowAIComingSoon(false) }), document.body),
         deleteConfirm && nav.isOpen('delete') && createPortal(React.createElement(DeleteConfirmModal, {
             title: deleteConfirm.title, itemName: deleteConfirm.name, itemType: deleteConfirm.itemType,
             // ⚠️ mode ميتبعتش افتراض ثابت هنا: لو deleteConfirm.mode مش متحدد
