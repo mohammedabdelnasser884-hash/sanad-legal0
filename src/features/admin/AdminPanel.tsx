@@ -471,6 +471,7 @@ export default function AdminPanel({ profile, lawyers, clients, fetchLawyers, co
     // ── بوابة إدارة المكاتب المشتركة (مقصورة على السوبر أدمن فقط) ──
     isSuperAdminUser && React.createElement('button',{
       onClick:()=> window.open('/offices-portal.html', '_blank'),
+      'data-testid': 'admin-offices-portal-link',
       className:'active:scale-[0.97] transition-all text-right w-full',
       style:{
         gridColumn:'span 2',
