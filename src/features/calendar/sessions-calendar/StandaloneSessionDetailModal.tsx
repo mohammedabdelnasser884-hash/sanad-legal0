@@ -7,6 +7,7 @@ import { Inp } from '@/shared/ui/Inp';
 import { Sel } from '@/shared/ui/Sel';
 import SessionUpdateModal from './SessionUpdateModal';
 import { COURT_LEVELS, onlyDigits, Field } from '../NewStandaloneSessionModal';
+import { normalizeArabicDigits } from '../../../shared/lib/sanitize';
 import DeleteConfirmModal from '@/shared/modals/DeleteConfirmModal';
 // ⚡ FIX (استرجاع ميزة "تحويل الجلسة المستقلة لقضية" — 11 أغسطس 2026):
 // التعليق القديم هنا كان بيقول useSessionLinking.ts (اللي كان بيوفر
@@ -226,7 +227,11 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
         next_action: session.next_action || '',
     });
     const [saving, setSaving] = useState(false);
-    const set = (k: keyof StandaloneEditForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
+    // 🔢 FIX (تطبيع الأرقام العربية عند التعديل — 12 أغسطس 2026): نفس فيكس
+    // NewStandaloneSessionModal.tsx — set() هنا مستخدمة لمعظم حقول فورم
+    // تعديل الجلسة المستقلة (رقم القضية/السنة/الدائرة...)، فبنحوّل أي رقم
+    // عربي (٠-٩) لإنجليزي تلقائيًا وقت الكتابة.
+    const set = (k: keyof StandaloneEditForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((f) => ({ ...f, [k]: normalizeArabicDigits(e.target.value) }));
 
     // ⚡ NEW (مرحلة 6.4 — خطة تعدد الأطراف): array أطراف الجلسة (مدعين
     // ومدعى عليهم، بلا حدود) بدل حقلي "الموكل"/"الخصم" المفردين القدامى —
