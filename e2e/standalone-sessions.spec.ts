@@ -46,6 +46,13 @@ test('2) إنشاء جلسة مستقلة بأكتر من طرف — فاليد�
   await page.getByTestId('calendar-new-session-button').click();
   await page.getByTestId('new-session-modal').waitFor({ state: 'visible', timeout: 10_000 });
   await page.getByTestId('new-session-title').fill(title);
+  // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): بيانات القيد الرسمي بقت إجبارية.
+  await page.getByTestId('new-session-court').fill('محكمة اختبار E2E');
+  await page.getByTestId('new-session-case-number').fill('100');
+  await page.getByTestId('new-session-case-year').fill('2026');
+  await page.getByTestId('new-session-case-type').fill('مدني');
+  await page.getByTestId('new-session-circuit').fill('1');
+  await page.getByTestId('new-standalone-session-court-level').fill('ابتدائي');
   const today = new Date().toISOString().slice(0, 10);
   await page.getByTestId('new-session-date').fill(today);
 
@@ -104,6 +111,13 @@ test('3) مودال "تحويل لقضية؟" — إنشاء قضية من بي�
   await page.getByTestId('calendar-new-session-button').click();
   await page.getByTestId('new-session-modal').waitFor({ state: 'visible', timeout: 10_000 });
   await page.getByTestId('new-session-title').fill(title);
+  // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): بيانات القيد الرسمي بقت إجبارية.
+  await page.getByTestId('new-session-court').fill('محكمة اختبار E2E');
+  await page.getByTestId('new-session-case-number').fill('100');
+  await page.getByTestId('new-session-case-year').fill('2026');
+  await page.getByTestId('new-session-case-type').fill('مدني');
+  await page.getByTestId('new-session-circuit').fill('1');
+  await page.getByTestId('new-standalone-session-court-level').fill('ابتدائي');
   const today = new Date().toISOString().slice(0, 10);
   await page.getByTestId('new-session-date').fill(today);
   await page.getByTestId('party-side-card-plaintiff').click();
@@ -156,6 +170,13 @@ test('4) حفظ الجلسة المستقلة أوفلاين', async ({ page, co
   await page.getByTestId('calendar-new-session-button').click();
   await page.getByTestId('new-session-modal').waitFor({ state: 'visible', timeout: 10_000 });
   await page.getByTestId('new-session-title').fill(title);
+  // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): بيانات القيد الرسمي بقت إجبارية.
+  await page.getByTestId('new-session-court').fill('محكمة اختبار E2E');
+  await page.getByTestId('new-session-case-number').fill('100');
+  await page.getByTestId('new-session-case-year').fill('2026');
+  await page.getByTestId('new-session-case-type').fill('مدني');
+  await page.getByTestId('new-session-circuit').fill('1');
+  await page.getByTestId('new-standalone-session-court-level').fill('ابتدائي');
   const today = new Date().toISOString().slice(0, 10);
   await page.getByTestId('new-session-date').fill(today);
   await page.getByTestId('party-side-card-plaintiff').click();
