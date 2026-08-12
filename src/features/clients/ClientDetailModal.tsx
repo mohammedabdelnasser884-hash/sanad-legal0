@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { I } from '../../constants';
 import { formatPhoneForWhatsApp } from '../../shared/lib/validation';
 import { useResolvedStorageUrl } from '../../shared/lib/storage';
@@ -29,6 +29,24 @@ function ClientDetailModal({client:c, cases, onClose, onDelete, onEdit, onOpenCa
     const typeLabel=c.type==='individual'?'فرد':c.type==='company'?'شركة':c.type==='government'?'جهة حكومية':c.type||'فرد';
     const [imgViewer,setImgViewer]=useState<string|null>(null);
     const [showEditClient, setShowEditClient]=useState(initialEditMode);
+    // 🔒 FIX (باگ "رجوع/إلغاء/حفظ من فورم تعديل الموكل مش بيرجّع فورم
+    // تعديل القضية — بيرجّع الصفحة الرئيسية، ومودال عرض بيانات الموكل
+    // بيفضل مفتوح في الخلفية"، 12 أغسطس 2026): لو جينا هنا مباشرة في وضع
+    // التعديل (initialEditMode — يعني عن طريق زرار "✏️ عدّل من ملف
+    // الموكل" جوه فورم قضية/جلسة)، قفل فورم التعديل (بأي طريقة: ✕/
+    // overlay/رجوع فعلي/إلغاء/حفظ ناجح) لازم يقفل مودال "عرض بيانات
+    // الموكل" كله (onClose الأصلي من الأب) مش يرجع لوضع العرض بس —
+    // المستخدم أصلاً معندوش نية يشوف ملف الموكل، جاي يعدّل بس ويرجع.
+    // الكود القديم كان دايمًا بينده setShowEditClient(false) (يرجع لوضع
+    // العرض)، فمودال عرض الموكل كان يفضل مفتوح "في الخلفية" وnav.isOpen('clientDetail')
+    // يفضل true، فـclientProfileOpen في CaseDetailView.tsx ميبقاش false
+    // أبدًا وفورم تعديل القضية ميرجعش. لو الدخول كان عادي (زرار ✏️ جوه
+    // الموديل نفسه)، بيرجع لوضع العرض زي ما هو من غير أي تغيير.
+    const cameDirectlyToEdit = useRef(initialEditMode);
+    const closeEditClient = () => {
+        if (cameDirectlyToEdit.current) { cameDirectlyToEdit.current = false; onClose(); }
+        else setShowEditClient(false);
+    };
     // ⚠️ client-docs باكت private — الرابط المتخزن في contact_info ممكن
     // يكون منتهي/رابط عام قديم، فبنولّد رابط موقّع طازة وقت فتح المودال.
     const contactInfo = c.contact_info as ClientContactInfo | null;
@@ -82,14 +100,14 @@ function ClientDetailModal({client:c, cases, onClose, onDelete, onEdit, onOpenCa
             showEditClient && React.createElement(EditClientModal,{
                 client:c,
                 saving: savingClient,
-                onClose:()=>setShowEditClient(false),
+                onClose: closeEditClient,
                 // 🔒 FIX (تشخيص لوجز E2E — 29 يوليو 2026): كان بيقفل المودال فورًا
                 // من غير ما ينتظر نتيجة onEdit (تكرار الرقم القومي مثلاً بيرفض
                 // التحديث ويعرض توست خطأ، بس المودال كان يقفل برضو). دلوقتي
                 // بننتظر النتيجة ونقفل بس لو نجح فعلاً.
                 onSave: async (form: ClientFormData, idFile?: File | null, poaFile?: File | null) => {
                     const result = await onEdit?.(c.id, form, idFile, poaFile);
-                    if (result !== false) setShowEditClient(false);
+                    if (result !== false) closeEditClient();
                     // 🔒 FIX (قرارات مفتوحة — خطة حفظ المسودات، 3 أغسطس 2026):
                     // بنرجّع النتيجة لـ EditClientModal.tsx عشان يمسح المسودة
                     // بس لو نجح الحفظ فعلاً.
