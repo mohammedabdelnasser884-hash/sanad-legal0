@@ -1,6 +1,28 @@
 import type { Page } from '@playwright/test';
 import { expect } from '@playwright/test';
 
+// 🔒 FIX (تحليل لوجز E2E — 12 أغسطس 2026، تشغيلة تانية): بعد ما بيانات
+// التوكيل بقت إجبارية، كل مكان بيملأ الحقل ده في E2E كان بيستخدم نفس
+// القيمة الثابتة بالظبط (رقم '1234' / حرف 'أ' / سنة '2026'). طلع إن فيه
+// فحص تكرار على التوكيل نفسه (checkClientDuplicate في clientValidation.ts
+// بيقارن رقم+حرف+سنة التوكيل مع بعض) — بالظبط نفس نمط باج تكرار رقم
+// القضية اللي اتصلح قبل كده، بس هنا على الموكلين. أول موكل في كل تشغيلة
+// CI بيتسجل عادي، وأي موكل تاني بعده بنفس بيانات التوكيل بيترفض كتكرار،
+// فالحفظ بيوقف على توست وclient-card الجديدة مابتظهرش → Timeout.
+// الحل: هيلبر واحد بيولّد قيمة فريدة لكل نداء (مبني على Date.now()،
+// بمصادر أرقام مختلفة لكل جزء عشان احتمال تصادم الاتنين مع بعض يبقى شبه
+// معدوم حتى لو نداءين حصلوا في نفس الـ100 ثانية) — مستخدم من هنا وفي كل
+// ملف .spec.ts بيملأ بيانات التوكيل مباشرة (مش بس من جوه createClient).
+const POA_ARABIC_LETTERS = ['أ', 'ب', 'ت', 'ث', 'ج', 'ح', 'خ', 'د', 'ذ', 'ر'];
+export function uniquePoa(): { number: string; letters: string; year: string } {
+  const now = Date.now();
+  return {
+    number: String(now).slice(-5),
+    letters: POA_ARABIC_LETTERS[now % POA_ARABIC_LETTERS.length],
+    year: String(2020 + (now % 10)),
+  };
+}
+
 // خطوة 2+ من مرحلة 7 (E2E) — هيلبر تسجيل دخول مشترك.
 // كل خطوة بعد الأولى محتاجة تعدّي شاشة الدخول الأول عشان توصل للشاشة
 // اللي هتختبرها. بدل ما نكرر نفس الأربع سطور في كل ملف تست، بنلمّها هنا.
@@ -222,10 +244,15 @@ export async function createClient(
   // من غيرها save-client-button بيقف على توست "بيانات التوكيل إجبارية"
   // ومفيش موكل بيتسجل أصلاً. راجع PoaInput.tsx (testIdPrefix اتضاف
   // للمكوّن نفسه في نفس التاريخ عشان يبقى ممكن نوصله بالـtestid خالص).
-  await page.getByTestId('new-client-poa-number').fill('1234');
-  await page.getByTestId('new-client-poa-letters').fill('أ');
-  await page.getByTestId('new-client-poa-year').fill('2026');
+  // 🔒 FIX (تحليل لوجز E2E — 12 أغسطس 2026، تشغيلة تانية): بيانات فريدة
+  // (uniquePoa فوق) بدل القيمة الثابتة '1234'/'أ'/'2026' — راجع تعليق
+  // uniquePoa الكامل لتفاصيل باج تكرار التوكيل.
+  const poa = uniquePoa();
+  await page.getByTestId('new-client-poa-number').fill(poa.number);
+  await page.getByTestId('new-client-poa-letters').fill(poa.letters);
+  await page.getByTestId('new-client-poa-year').fill(poa.year);
   await page.getByTestId('save-client-button').click();
+
 
   const card = page.getByTestId('client-card').filter({ hasText: name });
   await card.first().waitFor({ state: 'visible', timeout: 15_000 });
