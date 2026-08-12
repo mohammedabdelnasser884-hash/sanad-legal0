@@ -375,6 +375,10 @@ function App() {
         // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 3): زرار "عدّل من ملف
         // الموكل" جوه EditStandaloneModal — نفس آلية فتح تفاصيل الموكل.
         onOpenClientProfile: (c) => setSelectedClient(c as MappedClient, true),
+        // ⚡ NEW (توحيد "المحكمة"/"نوع القضية" مع فورمي القضية — 12 أغسطس
+        // 2026): نفس props بالظبط اللي AppModals.tsx بيبعتها لـNewCaseModal.
+        countryCourts: COUNTRY_CONFIGS[country]?.courts,
+        countryCaseTypes: COUNTRY_CONFIGS[country]?.caseTypes,
     });
     const CasesTabContent   = React.createElement(CasesTab, {
         cases, casesFilter, setCasesFilter, casesPage, setCasesPage,
@@ -431,6 +435,11 @@ function App() {
                     externalRefreshSignal: sessionsRefreshSignal,
                     nav,
                     onOpenClientProfile: (c) => setSelectedClient(c as MappedClient, true),
+                    // ⚡ NEW (توحيد "المحكمة"/"نوع القضية" مع فورمي القضية —
+                    // 12 أغسطس 2026): نفس props بالظبط اللي AppModals.tsx
+                    // بيبعتها لـNewCaseModal.
+                    countryCourts: COUNTRY_CONFIGS[country]?.courts,
+                    countryCaseTypes: COUNTRY_CONFIGS[country]?.caseTypes,
                 })
             ),
             // ⚡ FIX (8 أغسطس 2026 — البند 4 من تقرير حالة التنفيذ): casesWithExtras
