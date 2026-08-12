@@ -48,7 +48,9 @@ test('2) إنشاء جلسة مستقلة بأكتر من طرف — فاليد�
   await page.getByTestId('new-session-title').fill(title);
   // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): بيانات القيد الرسمي بقت إجبارية.
   await page.getByTestId('new-session-court').fill('محكمة اختبار E2E');
-  await page.getByTestId('new-session-case-number').fill('100');
+  // 🔒 FIX (تحليل لوجز E2E — 12 أغسطس 2026): رقم فريد بدل الثابت '100' —
+  // راجع نفس الفيكس والتعليق الكامل في createCase (utils.ts).
+  await page.getByTestId('new-session-case-number').fill(String(Date.now()).slice(-6));
   await page.getByTestId('new-session-case-year').fill('2026');
   await page.getByTestId('new-session-case-type').fill('مدني');
   await page.getByTestId('new-session-circuit').fill('1');
@@ -113,7 +115,9 @@ test('3) مودال "تحويل لقضية؟" — إنشاء قضية من بي�
   await page.getByTestId('new-session-title').fill(title);
   // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): بيانات القيد الرسمي بقت إجبارية.
   await page.getByTestId('new-session-court').fill('محكمة اختبار E2E');
-  await page.getByTestId('new-session-case-number').fill('100');
+  // 🔒 FIX (تحليل لوجز E2E — 12 أغسطس 2026): رقم فريد بدل الثابت '100' —
+  // راجع نفس الفيكس والتعليق الكامل في createCase (utils.ts).
+  await page.getByTestId('new-session-case-number').fill(String(Date.now()).slice(-6));
   await page.getByTestId('new-session-case-year').fill('2026');
   await page.getByTestId('new-session-case-type').fill('مدني');
   await page.getByTestId('new-session-circuit').fill('1');
@@ -151,6 +155,11 @@ test('3) مودال "تحويل لقضية؟" — إنشاء قضية من بي�
   await page.getByTestId('new-session-postsave-add-and-link-notfound').click({ timeout: 10_000 });
   await page.getByTestId('new-client-name').waitFor({ state: 'visible', timeout: 10_000 });
   await page.getByTestId('new-client-phone').fill('01000000000');
+  // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): بيانات التوكيل بقت إجبارية —
+  // من غيرها المودال بيقف على توست تحذير ومايتقفلش خالص.
+  await page.getByTestId('new-client-poa-number').fill('1234');
+  await page.getByTestId('new-client-poa-letters').fill('أ');
+  await page.getByTestId('new-client-poa-year').fill('2026');
   await page.getByTestId('save-client-button').click();
   await expect(page.getByTestId('new-client-name')).not.toBeVisible({ timeout: 10_000 });
   await expect(page.getByText('تم بنجاح')).toBeVisible({ timeout: 10_000 });
@@ -172,7 +181,9 @@ test('4) حفظ الجلسة المستقلة أوفلاين', async ({ page, co
   await page.getByTestId('new-session-title').fill(title);
   // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): بيانات القيد الرسمي بقت إجبارية.
   await page.getByTestId('new-session-court').fill('محكمة اختبار E2E');
-  await page.getByTestId('new-session-case-number').fill('100');
+  // 🔒 FIX (تحليل لوجز E2E — 12 أغسطس 2026): رقم فريد بدل الثابت '100' —
+  // راجع نفس الفيكس والتعليق الكامل في createCase (utils.ts).
+  await page.getByTestId('new-session-case-number').fill(String(Date.now()).slice(-6));
   await page.getByTestId('new-session-case-year').fill('2026');
   await page.getByTestId('new-session-case-type').fill('مدني');
   await page.getByTestId('new-session-circuit').fill('1');
