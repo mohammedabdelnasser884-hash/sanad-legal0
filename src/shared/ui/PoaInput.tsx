@@ -1,4 +1,5 @@
 import React from 'react';
+import { onlyDigits as onlyDigitsN } from '../lib/sanitize';
 
 // ══════════════════════════════════════════════════════════════
 //  PoaInput — حقل "بيانات التوكيل" الموحّد، مستخدم في كل الفورمات
@@ -15,8 +16,6 @@ export interface PoaValue {
     office: string;
 }
 
-// أرقام فقط، بحد أقصى معيّن من الخانات
-const onlyDigitsN = (v: string, max: number) => v.replace(/\D/g, '').slice(0, max);
 
 // حروف عربية فقط (بدون أرقام أو رموز)، بحد أقصى معيّن من الخانات
 const onlyArabicLetters = (v: string, max: number) => v.replace(/[^\u0600-\u06FF]/g, '').slice(0, max);
