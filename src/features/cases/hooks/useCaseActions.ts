@@ -332,8 +332,16 @@ export function useCaseActions(params: {
                         case_id: null,                   // هيتملى وقت المزامنة
                         session_date: form.date,
                         session_time: form.session_time || 'صباحي',
-                        session_floor: form.court_floor || null,
-                        session_hall: form.court_hall || null,
+                        // 🔒 FIX (باگ "قاعة الجلسة الأولى بتتسجل فاضية" — 12
+                        // أغسطس 2026): كان بيتكتب هنا form.court_floor/
+                        // form.court_hall — حقول قديمة اتلغت من الواجهة
+                        // تمامًا وقت "توحيد منطق مكان الجلسة" (session_hall
+                        // بقى المصدر الوحيد في الفورم)، فكانت دايمًا فاضية
+                        // ('') مهما كتب المستخدم في "الطابق وقاعة الجلسة" —
+                        // الجلسة الأولى كانت بتتسجل بقاعة فاضية دايمًا رغم
+                        // إن cases.session_hall نفسه كان بيتكتب صح.
+                        session_floor: null,
+                        session_hall: form.session_hall || null,
                         description: 'الجلسة الأولى',
                         result: null,
                         next_action: null,
@@ -387,8 +395,11 @@ export function useCaseActions(params: {
                     case_id: newCaseId,
                     session_date: form.date,
                     session_time: form.session_time || 'صباحي',
-                    session_floor: form.court_floor || null,
-                    session_hall: form.court_hall || null,
+                    // 🔒 FIX (باگ "قاعة الجلسة الأولى بتتسجل فاضية" — 12
+                    // أغسطس 2026): راجع تعليق الفيكس فوق (مسار الأوفلاين) —
+                    // نفس السبب بالظبط.
+                    session_floor: null,
+                    session_hall: form.session_hall || null,
                     description: 'الجلسة الأولى',
                     result: null,
                     next_action: null,
@@ -780,8 +791,13 @@ export function useCaseActions(params: {
                                 case_id: caseId,
                                 session_date: form.date,
                                 session_time: form.session_time || 'صباحي',
-                                session_floor: form.court_floor || null,
-                                session_hall: form.court_hall || null,
+                                // 🔒 FIX (باگ "قاعة الجلسة الجديدة بتتسجل
+                                // فاضية بعد تعديل قضية" — 12 أغسطس 2026):
+                                // راجع تعليق الفيكس في handleSaveCase فوق —
+                                // نفس السبب بالظبط (form.court_floor/
+                                // form.court_hall مفعّرين ودايمًا فاضيين).
+                                session_floor: null,
+                                session_hall: form.session_hall || null,
                                 description: 'جلسة محددة',
                                 result: null,
                                 next_action: null,
