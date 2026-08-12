@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { login, createStandaloneSession, expectToast } from './utils';
+import { login, createStandaloneSession, expectToast, uniquePoa } from './utils';
 
 // المرحلة 2 من خطة تنفيذ اختبارات E2E المقسمة — الجلسة المستقلة
 // (NewStandaloneSessionModal.tsx + StandaloneSessionDetailModal.tsx).
@@ -157,9 +157,12 @@ test('3) مودال "تحويل لقضية؟" — إنشاء قضية من بي�
   await page.getByTestId('new-client-phone').fill('01000000000');
   // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): بيانات التوكيل بقت إجبارية —
   // من غيرها المودال بيقف على توست تحذير ومايتقفلش خالص.
-  await page.getByTestId('new-client-poa-number').fill('1234');
-  await page.getByTestId('new-client-poa-letters').fill('أ');
-  await page.getByTestId('new-client-poa-year').fill('2026');
+  // 🔒 FIX (تحليل لوجز E2E — 12 أغسطس 2026، تشغيلة تانية): uniquePoa()
+  // بدل القيمة الثابتة — راجع تعليقها الكامل في utils.ts.
+  const poa = uniquePoa();
+  await page.getByTestId('new-client-poa-number').fill(poa.number);
+  await page.getByTestId('new-client-poa-letters').fill(poa.letters);
+  await page.getByTestId('new-client-poa-year').fill(poa.year);
   await page.getByTestId('save-client-button').click();
   await expect(page.getByTestId('new-client-name')).not.toBeVisible({ timeout: 10_000 });
   await expect(page.getByText('تم بنجاح')).toBeVisible({ timeout: 10_000 });
