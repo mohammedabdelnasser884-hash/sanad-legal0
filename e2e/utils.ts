@@ -54,7 +54,15 @@ export async function createCase(page: Page, title: string): Promise<void> {
   // راجع نفس الفحص بالحرف في NewCaseModal.tsx.handleSave. لازم تتملى هنا
   // قبل new-case-save وإلا التست يفضل واقف على توست تحذير.
   await page.getByTestId('new-case-court').fill('محكمة اختبار E2E');
-  await page.getByTestId('new-case-number').fill('100');
+  // 🔒 FIX (تحليل لوجز E2E — 12 أغسطس 2026): كان رقم الدعوى ثابت ('100')
+  // في كل الملفات اللي بتنشئ قضية. من ساعة ما بيانات القيد الرسمي بقت
+  // إجبارية (نفس تاريخ اليوم)، كل قضية تانية في نفس تشغيلة CI (بعد أول
+  // قضية) بتوصّل لنفس رقم/سنة/محكمة/نوع بالظبط → checkCaseNumberDuplicate
+  // (caseValidation.ts) بيرفضها كتكرار، والحفظ بيقف على توست تحذير بدل ما
+  // يقفل المودال — فـcase-card الجديدة مبتظهرش أبدًا وكل تست بينتظر
+  // 15 ثانية لحد التايم آوت. رقم فريد لكل نداء (آخر 6 خانات من الوقت
+  // بالميلي ثانية) بيمنع التصادم ده تمامًا.
+  await page.getByTestId('new-case-number').fill(String(Date.now()).slice(-6));
   await page.getByTestId('new-case-year').fill('2026');
   await page.getByTestId('new-case-type').fill('مدني');
   await page.getByTestId('new-case-circuit').fill('1');
@@ -209,6 +217,14 @@ export async function createClient(
   await page.getByTestId('new-client-name').fill(name);
   await page.getByTestId('new-client-phone').fill('01000000000');
   await page.getByTestId('new-client-national-id').fill(finalNationalId);
+  // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): "بيانات التوكيل" بقت إجبارية عند
+  // إضافة موكل جديد (validatePowerOfAttorney في useClientActions.ts) —
+  // من غيرها save-client-button بيقف على توست "بيانات التوكيل إجبارية"
+  // ومفيش موكل بيتسجل أصلاً. راجع PoaInput.tsx (testIdPrefix اتضاف
+  // للمكوّن نفسه في نفس التاريخ عشان يبقى ممكن نوصله بالـtestid خالص).
+  await page.getByTestId('new-client-poa-number').fill('1234');
+  await page.getByTestId('new-client-poa-letters').fill('أ');
+  await page.getByTestId('new-client-poa-year').fill('2026');
   await page.getByTestId('save-client-button').click();
 
   const card = page.getByTestId('client-card').filter({ hasText: name });
@@ -259,7 +275,11 @@ export async function createStandaloneSession(page: Page, title: string): Promis
   // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): نفس بيانات القيد الرسمي الإجبارية
   // الجديدة، بالحرف زي createCase فوق — راجع NewStandaloneSessionModal.tsx.handleSave.
   await page.getByTestId('new-session-court').fill('محكمة اختبار E2E');
-  await page.getByTestId('new-session-case-number').fill('100');
+  // 🔒 FIX (تحليل لوجز E2E — 12 أغسطس 2026): نفس فيكس createCase فوق —
+  // رقم فريد بدل الرقم الثابت '100'، عشان أي جلسة مستقلة هنا تتحوّل لقضية
+  // (زرار "إنشاء ملف قضية") ما تتصادمش مع رقم قضية اتسجل فعلاً في نفس
+  // تشغيلة CI.
+  await page.getByTestId('new-session-case-number').fill(String(Date.now()).slice(-6));
   await page.getByTestId('new-session-case-year').fill('2026');
   await page.getByTestId('new-session-case-type').fill('مدني');
   await page.getByTestId('new-session-circuit').fill('1');
