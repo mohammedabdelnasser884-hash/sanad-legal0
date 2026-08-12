@@ -375,6 +375,10 @@ function App() {
         // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 3): زرار "عدّل من ملف
         // الموكل" جوه EditStandaloneModal — نفس آلية فتح تفاصيل الموكل.
         onOpenClientProfile: (c) => setSelectedClient(c as MappedClient, true),
+        // 🔒 FIX (نفس باگ CaseDetailView.tsx — 12 أغسطس 2026): nav متاحة
+        // هنا فعلًا (استُخدمت أصلًا لـArchiveTab تحت)، فبنمررها جاهزة
+        // لـDashboardTab اللي مالوش وصول مباشر لـnav.
+        clientProfileOpen: nav.isOpen('clientDetail'),
         // ⚡ NEW (توحيد "المحكمة"/"نوع القضية" مع فورمي القضية — 12 أغسطس
         // 2026): نفس props بالظبط اللي AppModals.tsx بيبعتها لـNewCaseModal.
         countryCourts: COUNTRY_CONFIGS[country]?.courts,
