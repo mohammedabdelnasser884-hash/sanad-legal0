@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { login, createCase, expectToast } from './utils';
+import { login, createCase, expectToast, uniquePoa } from './utils';
 
 // خطوة 6 من مرحلة 7 (E2E) — فاليديشن الحقول المطلوبة (دفعة الباگات
 // الخمسة اللي اتصلحت في 17/7: عنوان قضية فاضي، أتعاب من غير قضية،
@@ -106,9 +106,12 @@ test.describe('فاليديشن الحقول المطلوبة', () => {
     // قريبتين). آخر 14 خانة بدل الأول.
     await page.getByTestId('new-client-national-id').fill(`2900101${Date.now()}`.slice(-14));
     // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): بيانات التوكيل بقت إجبارية.
-    await page.getByTestId('new-client-poa-number').fill('1234');
-    await page.getByTestId('new-client-poa-letters').fill('أ');
-    await page.getByTestId('new-client-poa-year').fill('2026');
+    // 🔒 FIX (تحليل لوجز E2E — 12 أغسطس 2026، تشغيلة تانية): uniquePoa()
+    // بدل القيمة الثابتة — راجع تعليقها الكامل في utils.ts.
+    const poa = uniquePoa();
+    await page.getByTestId('new-client-poa-number').fill(poa.number);
+    await page.getByTestId('new-client-poa-letters').fill(poa.letters);
+    await page.getByTestId('new-client-poa-year').fill(poa.year);
     await page.getByTestId('save-client-button').click();
 
     const newClientCard = page.getByTestId('client-card').filter({ hasText: clientName });
