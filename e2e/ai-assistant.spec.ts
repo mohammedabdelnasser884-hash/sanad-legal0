@@ -28,8 +28,19 @@ const AI_CHAT_ROUTE = '**/functions/v1/ai-chat';
 // الباقية كلها بتفضل شغالة بسلوك الـ SW الطبيعي.
 test.use({ serviceWorkers: 'block' });
 
+// ⚡ [قفل قسم الـAI مؤقتًا — 12 أغسطس 2026] قسم المساعد الذكي بقى مقفول
+// لكل المستخدمين ما عدا حساب السوبر أدمن الوحيد (m.gemy4231@gmail.com) —
+// راجع handleAIButtonClick في App.tsx وAIComingSoonModal.tsx. حساب
+// الاختبار التجريبي المستخدم هنا (E2E_TEST_EMAIL) مش السوبر أدمن، فأي
+// اختبار بيحاول يفتح 'ai-assistant-panel' الحقيقي هيفشل دايمًا دلوقتي —
+// ده سلوك متوقّع ومقصود، مش خلل. الاختبارين اللي بيغطّوا "توليد مستند"
+// الفعلي اتحوّلوا لـ test.skip بدل ما يتمسحوا، عشان يفضل الكود موجود
+// جاهز لو حبينا نرجّعه شغال يدويًا بحساب السوبر أدمن الحقيقي (من غير ما
+// نحط إيميل/باسورد حساب حقيقي كـ Secret في CI). بدالهم اتضاف اختبار جديد
+// (تحت) بيتأكد إن حساب عادي بيشوف مودال "قريبًا" مش القسم الحقيقي —
+// وده الغطاء الصحيح للفيتشر الجديد.
 test.describe('مساعد الذكاء الاصطناعي — توليد مستند (mock عبر اعتراض ai-chat)', () => {
-  test('توليد مستند بنجاح يعرض محتوى الرد من الإيدج فانكشن', async ({ page }) => {
+  test.skip('توليد مستند بنجاح يعرض محتوى الرد من الإيدج فانكشن', async ({ page }) => {
     await login(page);
 
     // mock رد ناجح (200) بنفس شكل استجابة ai-chat الحقيقية (json({ok:true, content, source}))
@@ -71,7 +82,7 @@ test.describe('مساعد الذكاء الاصطناعي — توليد مست�
   // "وصلت للحد المجاني اليومي..." كانت بتتحول لرسالة عامة (⚠️) بدل
   // رسالة السقف (⏳) الصح. الإصلاح بيستخدم getFnErrorMessage (نفس نمط
   // useAdminLegalLibrary.ts) لاستخراج الرسالة الحقيقية عبر error.context.json().
-  test('تجاوز السقف اليومي يعرض الرسالة العربية الحقيقية من الإيدج فانكشن', async ({ page }) => {
+  test.skip('تجاوز السقف اليومي يعرض الرسالة العربية الحقيقية من الإيدج فانكشن', async ({ page }) => {
     await login(page);
 
     // mock رد خطأ (400) بنفس شكل استجابة ai-chat الحقيقية عند نفاد السقف
@@ -101,5 +112,21 @@ test.describe('مساعد الذكاء الاصطناعي — توليد مست�
     // العامة "تعذّر توليد المستند..."
     await expect(generatedDoc).toContainText('وصلت للحد المجاني اليومي');
     await expect(generatedDoc).not.toContainText('تعذّر توليد المستند. حاول مرة أخرى');
+  });
+
+  // ✅ [قفل قسم الـAI مؤقتًا — 12 أغسطس 2026] الغطاء الصحيح للفيتشر
+  // الجديد: حساب عادي (E2E_TEST_EMAIL) لازم يشوف مودال "قريبًا" بدل
+  // القسم الحقيقي عند الضغط على زرار AI. راجع AIComingSoonModal.tsx.
+  test('حساب مش سوبر أدمن يشوف مودال "قريبًا" بدل القسم الحقيقي', async ({ page }) => {
+    await login(page);
+
+    await page.getByTestId('nav-ai-center').click();
+
+    await page.getByTestId('ai-coming-soon-modal').waitFor({ state: 'visible', timeout: 10_000 });
+    await expect(page.getByTestId('ai-assistant-panel')).toHaveCount(0);
+
+    // زرار الإغلاق بيقفل المودال عادي
+    await page.getByTestId('ai-coming-soon-close').click();
+    await expect(page.getByTestId('ai-coming-soon-modal')).toHaveCount(0);
   });
 });
