@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { toast } from '../../shared/lib/notifications';
 import { validatePhone, validateEmail } from '../../shared/lib/validation';
+import { onlyDigits, normalizeArabicDigits } from '../../shared/lib/sanitize';
 import { validateFullNameParts, validatePowerOfAttorney } from '../../shared/lib/clientValidation';
 import { I } from '../../constants';
 import { Inp } from '@/shared/ui/Inp';
@@ -37,10 +38,6 @@ interface NewClientModalProps {
     // إن دي مش عملية إنشاء موكل مستقلة.
     contextLabel?: string | null;
 }
-
-// أرقام بس، وبالظبط 14 رقم — بيتقص أي حرف مش رقم أول بأول (نفس نمط
-// onlyDigits المستخدم في NewCaseModal/NewStandaloneSessionModal)
-const onlyDigits = (v: string, max = 14) => v.replace(/\D/g, '').slice(0, max);
 
 // ── حقل تحذير صغير تحت أي input ──
 function WarnHint({msg}: {msg?: string | null}){
@@ -142,12 +139,12 @@ function NewClientModal({onClose,onSave,loading,initialData,contextLabel}: NewCl
                         {value:'government',label:'جهة حكومية'}
                     ]}),
                     React.createElement('div',null,
-                        React.createElement(Inp,{label:"رقم الهاتف",value:form.phone,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('phone',e.target.value),placeholder:"05xxxxxxxx",required:true,'data-testid':'new-client-phone'}),
+                        React.createElement(Inp,{label:"رقم الهاتف",value:form.phone,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('phone',normalizeArabicDigits(e.target.value)),placeholder:"05xxxxxxxx",required:true,'data-testid':'new-client-phone'}),
                         React.createElement(WarnHint,{msg:phoneWarn})
                     )
                 ),
                 React.createElement('div',null,
-                    React.createElement(Inp,{label:"رقم هاتف ثاني",value:form.phone2,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('phone2',e.target.value),placeholder:"رقم بديل"}),
+                    React.createElement(Inp,{label:"رقم هاتف ثاني",value:form.phone2,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('phone2',normalizeArabicDigits(e.target.value)),placeholder:"رقم بديل"}),
                     React.createElement(WarnHint,{msg:phoneWarn2})
                 ),
                 React.createElement('div',null,
@@ -162,7 +159,7 @@ function NewClientModal({onClose,onSave,loading,initialData,contextLabel}: NewCl
                 React.createElement('div',{className:"grid grid-cols-2 gap-3"},
                     React.createElement(Inp,{label:"اسم القريب",value:form.kin_name,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('kin_name',e.target.value),placeholder:"الاسم الكامل"}),
                     React.createElement('div',null,
-                        React.createElement(Inp,{label:"هاتف القريب",value:form.kin_phone,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('kin_phone',e.target.value),placeholder:"05xxxxxxxx"}),
+                        React.createElement(Inp,{label:"هاتف القريب",value:form.kin_phone,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('kin_phone',normalizeArabicDigits(e.target.value)),placeholder:"05xxxxxxxx"}),
                         React.createElement(WarnHint,{msg:validatePhone(form.kin_phone)})
                     )
                 ),
@@ -173,7 +170,7 @@ function NewClientModal({onClose,onSave,loading,initialData,contextLabel}: NewCl
                 ),
 
                 // الرقم القومي
-                React.createElement(Inp,{label:"الرقم القومي",value:form.national_id,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('national_id',onlyDigits(e.target.value)),placeholder:"14 رقم",required:true,inputMode:"numeric",maxLength:14,'data-testid':'new-client-national-id'}),
+                React.createElement(Inp,{label:"الرقم القومي",value:form.national_id,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('national_id',onlyDigits(e.target.value,14)),placeholder:"14 رقم",required:true,inputMode:"numeric",maxLength:14,'data-testid':'new-client-national-id'}),
 
                 // بيانات التوكيل — سطر كامل: رقم / حرف / سنة / مكتب توثيق
                 React.createElement(PoaInput,{value:form.cr_number,onChange:(v: string) =>s('cr_number',v),required:true,testIdPrefix:'new-client-poa'}),
