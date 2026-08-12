@@ -236,7 +236,11 @@ function AppModals({
             cases, clients,
             onClose: () => setShowSearch(false),
             onOpenCase: (c) => { setSelectedCase(c as MappedCase, 'timeline'); },
-            onOpenClient: (c) => { setSelectedClient(c as MappedClient); setTab('clients'); }
+            // ⚡ FIX (12 أغسطس 2026 — نفس باگ "عدّل من ملف الموكل" بالظبط):
+            // setTab('clients') بعد setSelectedClient كانت بتقفل مودال
+            // تفاصيل الموكل فورًا (navigateTo بتمسح الـmodalStack عند أي
+            // تبديل تاب). المودال بيتعرض فوق أي تاب من غير الحاجة لتبديله.
+            onOpenClient: (c) => { setSelectedClient(c as MappedClient); }
         }),
         showAI && createPortal(React.createElement(AILegalAssistant, { onClose: () => setShowAI(false), cases, clients, profile, country }), document.body),
         deleteConfirm && nav.isOpen('delete') && createPortal(React.createElement(DeleteConfirmModal, {
@@ -355,10 +359,14 @@ function AppModals({
             // ⚡ NEW (خطة تطوير أطراف الدعوى — مرحلة 4 خطوة 2): بتوصل لـ
             // EditCaseModal عشان زرار "إنشاء موكل جديد" جوه كارت أي طرف.
             openNewClientModal,
-            // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 2): نفس آلية
-            // onOpenClient المستخدمة فوق في UniversalSearchModal — بنقفل
-            // تفاصيل القضية الحالية ونفتح تفاصيل الموكل.
-            onOpenClientProfile: (c) => { nav.closeModal('caseDetail'); setSelectedClient(c as MappedClient, true); setTab('clients'); },
+            // ⚡ FIX (12 أغسطس 2026 — "عدّل من ملف الموكل" بيفتح تاب الموكلين
+            // بدل ملف الموكل): setTab('clients') كانت بتتنفذ *بعد*
+            // setSelectedClient (اللي بتفتح مودال 'clientDetail' فعليًا).
+            // setTab بترادف nav.navigateTo، وnavigateTo بتمسح كل الـ
+            // modalStack كأثر جانبي لأي تبديل تاب — فمودال الموكل اللي
+            // فتحناه لسه كان بيتقفل فورًا تاني. المودال بيتعرض فوق أي تاب
+            // بغض النظر عنه، فمفيش داعي لتبديل التاب أصلًا هنا.
+            onOpenClientProfile: (c) => { nav.closeModal('caseDetail'); setSelectedClient(c as MappedClient, true); },
         }),
     );
 }
