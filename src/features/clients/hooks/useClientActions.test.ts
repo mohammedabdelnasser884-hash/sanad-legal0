@@ -110,10 +110,16 @@ function dbWriteMock(): ReturnType<typeof vi.fn> {
   return window.__dbWrite as unknown as ReturnType<typeof vi.fn>;
 }
 
+// ⚡ FIX (12 أغسطس 2026): cr_number الافتراضي بقى بيانات توكيل صحيحة
+// (رقم/حرف/سنة) بدل فاضي — validatePowerOfAttorney بقى بوابة إجبارية في
+// handleSaveClient (راجع useClientActions.ts)، فأي تست بيستخدم makeForm()
+// من غير override صريح لـ cr_number ومحتاج يعدّي الفاليديشن ده لازم يلاقي
+// قيمة صالحة بشكل افتراضي. التست المخصص لفحص الفاليديشن نفسه بيعمل
+// override صريح بـ cr_number: '' (شوف describe('handleSaveClient — فاليديشن التوكيل') تحت).
 function makeForm(overrides: Partial<ClientFormData> = {}): ClientFormData {
   return {
     full_name: 'أحمد محمد علي', type: 'individual', phone: '', phone2: '', email: '',
-    address: '', notes: '', national_id: '', cr_number: '', kin_name: '', kin_phone: '',
+    address: '', notes: '', national_id: '', cr_number: '12345/أب/2026/مكتب الشهر العقاري', kin_name: '', kin_phone: '',
     ...overrides,
   };
 }
@@ -174,6 +180,30 @@ describe('useClientActions', () => {
       await handleSaveClient(makeForm({ full_name: '   ' }), null, null);
 
       expect(toast).toHaveBeenCalledWith('❌ حقل "اسم الموكل" مطلوب', true);
+      expect(dbWriteMock()).not.toHaveBeenCalled();
+    });
+  });
+
+  // ⚡ NEW (12 أغسطس 2026): تغطية بوابة "بيانات التوكيل إجبارية" الجديدة
+  // في handleSaveClient (راجع التعليق فوق poaErr في useClientActions.ts).
+  describe('handleSaveClient — فاليديشن التوكيل', () => {
+    it('cr_number فاضي → توست "بيانات التوكيل إجبارية"، مفيش أي __dbWrite', async () => {
+      const params = makeParams();
+      const { handleSaveClient } = useClientActions(params);
+
+      await handleSaveClient(makeForm({ cr_number: '' }), null, null);
+
+      expect(toast).toHaveBeenCalledWith('⚠️ بيانات التوكيل إجبارية — يرجى إدخال رقم التوكيل وحرفه وسنته على الأقل', true);
+      expect(dbWriteMock()).not.toHaveBeenCalled();
+    });
+
+    it('cr_number ناقص (رقم وحرف بس، من غير سنة) → نفس رفض الفاليديشن', async () => {
+      const params = makeParams();
+      const { handleSaveClient } = useClientActions(params);
+
+      await handleSaveClient(makeForm({ cr_number: '12345/أب//مكتب الشهر العقاري' }), null, null);
+
+      expect(toast).toHaveBeenCalledWith('⚠️ بيانات التوكيل إجبارية — يرجى إدخال رقم التوكيل وحرفه وسنته على الأقل', true);
       expect(dbWriteMock()).not.toHaveBeenCalled();
     });
   });
