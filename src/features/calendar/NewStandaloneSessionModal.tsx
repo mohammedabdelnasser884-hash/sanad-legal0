@@ -29,7 +29,6 @@ export interface Form {
     case_number: string;
     case_year: string;
     case_type: string;
-    case_type_custom: string;
     circuit_number: string;
     court_level: string;
     session_date: string;
@@ -67,7 +66,6 @@ const EMPTY: Form = {
     case_number: '',
     case_year: '',
     case_type: '',
-    case_type_custom: '',
     circuit_number: '',
     court_level: '',
     session_date: '',
@@ -120,8 +118,14 @@ export function Field({ label, required = false, children }: { label: string; re
 const inputCls = 'w-full p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600';
 const inputStyle = { fontFamily: 'Cairo,sans-serif' };
 
-export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAdded, onNotify, onOpenCreateClient, onOpenCreateClientForCase, onOpenCreateClientForParty, onOpenCreateClientForSessionParty }: {
+export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAdded, onNotify, onOpenCreateClient, onOpenCreateClientForCase, onOpenCreateClientForParty, onOpenCreateClientForSessionParty, countryCourts, countryCaseTypes }: {
     onClose: () => void;
+    // ⚡ NEW (توحيد "المحكمة"/"نوع القضية" مع فورمي القضية — 12 أغسطس 2026):
+    // نفس props بالظبط اللي NewCaseModal.tsx بياخدها — قايمة محاكم/تصنيفات
+    // الدولة الحالية (اختيارية)، تُستخدم كـdatalist اقتراحات بس (مش قايمة
+    // مقفولة) لحقلي "المحكمة" و"نوع القضية" تحت.
+    countryCourts?: string[];
+    countryCaseTypes?: string[];
     // ⚡ FIX (تحليل لوجز E2E — 9 أغسطس 2026): بارامتر skipRefetch اختياري —
     // بيتبعت true من مسار الحفظ أوفلاين (queued) عشان الاستدعاء في
     // AppModals.tsx يتخطى fetchCases/fetchTodaySessions/fetchUpcomingSessions
@@ -247,7 +251,10 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
     // اتحفظت فعليًا فمفيش داعي لتحذير).
     const { guardedClose, confirmModal } = useUnsavedChangesGuard(draftData, { form, parties: partyFields.parties, legalTitles: partyFields.legalTitles }, onClose, draft.clearDraft);
 
-    const finalCaseType = form.case_type === 'أخرى' ? (form.case_type_custom || 'أخرى') : form.case_type;
+    // ⚡ CHANGED (توحيد "المحكمة"/"نوع القضية" مع فورمي القضية — 12 أغسطس
+    // 2026): بقت نص حر زي "تصنيف الدعوى" في NewCaseModal.tsx بالظبط، مفيش
+    // داعي بعد كده لتفرقة "أخرى" عن قيمة من القايمة.
+    const finalCaseType = form.case_type.trim();
     const finalCourtLevel = form.court_level.trim();
     const fullCaseNumber = [form.case_number, form.case_year].filter(Boolean).join('/');
 
@@ -670,15 +677,21 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                 React.createElement(React.Fragment, null,
                 React.createElement(SectionTitle, null, '⚖️ بيانات القضية'),
 
-                // المحكمة — نص حر
+                // المحكمة — نص حر، مع datalist للاقتراح من قايمة محاكم
+                // الدولة لو موجودة — نفس فيكس "المحكمة المختصة" في
+                // NewCaseModal.tsx بالحرف (12 أغسطس 2026).
                 React.createElement(Field, { label: 'المحكمة' },
                     React.createElement('input', {
                         value: form.court,
                         onChange: set('court'),
                         placeholder: 'مثال: محكمة جنوب القاهرة الابتدائية',
                         className: inputCls,
-                        style: inputStyle
-                    })
+                        style: inputStyle,
+                        list: (countryCourts && countryCourts.length > 0) ? 'new-session-courts-list' : undefined,
+                    }),
+                    countryCourts && countryCourts.length > 0 && React.createElement('datalist', { id: 'new-session-courts-list' },
+                        countryCourts.map((c: string) => React.createElement('option', { key: c, value: c }))
+                    )
                 ),
 
                 // موضوع الجلسة / عنوان
@@ -715,27 +728,32 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                     })
                 ),
 
-                // نوع القضية + الدائرة جمب بعض
+                // نوع القضية + الدائرة جمب بعض — نوع القضية بقى نص حر مع
+                // datalist اقتراحات (من قايمة تصنيفات الدولة لو موجودة،
+                // وإلا CASE_TYPES الافتراضية) بدل Select مقفول كان بيجبر
+                // اختيار "أخرى" الأول قبل الكتابة الحرة — نفس فيكس "تصنيف
+                // الدعوى" في NewCaseModal.tsx بالحرف (12 أغسطس 2026).
                 React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
-                    React.createElement(Sel, {
-                        label: 'نوع القضية',
-                        value: form.case_type,
-                        onChange: set('case_type'),
-                        options: [{ value: '', label: '— اختر —' }, ...CASE_TYPES.map((t: string) => ({ value: t, label: t }))]
-                    }),
+                    React.createElement(Field, { label: 'نوع القضية' },
+                        React.createElement('input', {
+                            value: form.case_type,
+                            onChange: set('case_type'),
+                            placeholder: 'مدني / تجاري...',
+                            className: inputCls,
+                            style: inputStyle,
+                            list: 'new-session-case-types-list',
+                        }),
+                        React.createElement('datalist', { id: 'new-session-case-types-list' },
+                            (countryCaseTypes && countryCaseTypes.length > 0 ? countryCaseTypes : CASE_TYPES).map((t: string) => React.createElement('option', { key: t, value: t }))
+                        )
+                    ),
                     React.createElement(Inp, {
                         label: 'الدائرة',
                         value: form.circuit_number,
                         onChange: set('circuit_number'),
                         placeholder: 'مثال: الدائرة 7'
                     })
-                ),
-                form.case_type === 'أخرى' && React.createElement(Inp, {
-                    label: 'نوع القضية (تفصيل)',
-                    value: form.case_type_custom,
-                    onChange: set('case_type_custom'),
-                    placeholder: 'مثال: أحوال شخصية'
-                })
+                )
                 ),
 
                 // درجة التقاضي — نص حر مع اقتراحات (نفس نمط "المحكمة
