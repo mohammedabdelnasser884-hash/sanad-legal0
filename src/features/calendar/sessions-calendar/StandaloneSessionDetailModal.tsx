@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from '../../../shared/lib/notifications';
 import { showErrorToast } from '../../../shared/lib/errorReporting';
@@ -798,6 +798,12 @@ interface StandaloneSessionDetailModalProps {
     // setSelectedCase مباشرة، SessionsCalendar.tsx عبر onOpenCase الموجود
     // أصلًا للقضايا المربوطة) يقدروا يمرروها بسهولة.
     onOpenCase?: (c: MappedCase) => void;
+    // 🔒 FIX (نفس باگ "عدّل من ملف الموكل جوه تعديل القضية بيرجّع للصفحة
+    // العادية مش لفورم التعديل" — CaseDetailView.tsx — بس هنا لفورم تعديل
+    // الجلسة المستقلة، 12 أغسطس 2026): بتوصل من DashboardTab.tsx/
+    // SessionsCalendar.tsx وبتعكس إذا كان مودال تفاصيل/تعديل الموكل لسه
+    // مفتوح فعليًا — راجع useEffect تحت لتفاصيل الاستخدام.
+    clientProfileOpen?: boolean;
     // ⚡ REMOVED (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة، المرحلة 6 — 9
     // أغسطس 2026): onOpenCreateClientForSessionParty وopenNewClientModal
     // كانوا هنا خدمة لـ LinkSessionModal (اتشال Phase 2) وزرار "➕ إنشاء
@@ -811,9 +817,19 @@ interface StandaloneSessionDetailModalProps {
     countryCaseTypes?: string[];
 }
 
-function StandaloneSessionDetailModal({ session: partialSession, db, onClose, onDone, onNotify, onClientAdded, clients = [], onOpenClientProfile, onOpenCase, countryCourts, countryCaseTypes }: StandaloneSessionDetailModalProps) {
+function StandaloneSessionDetailModal({ session: partialSession, db, onClose, onDone, onNotify, onClientAdded, clients = [], onOpenClientProfile, onOpenCase, countryCourts, countryCaseTypes, clientProfileOpen = false }: StandaloneSessionDetailModalProps) {
     const [showUpdate, setShowUpdate] = useState(false);
     const [showEdit, setShowEdit] = useState(false);
+    // 🔒 FIX (نفس نمط CaseDetailView.tsx): بنسجّل إننا قفلنا فورم تعديل
+    // الجلسة عشان نفتح ملف الموكل (زرار "عدّل من ملف الموكل")، عشان نعرف
+    // نرجّع الفورم تاني لما مودال الموكل يتقفل (حفظ أو إلغاء أو ✕).
+    const wasEditingRef = useRef(false);
+    useEffect(() => {
+        if (!clientProfileOpen && wasEditingRef.current) {
+            wasEditingRef.current = false;
+            setShowEdit(true);
+        }
+    }, [clientProfileOpen]);
     const [showConfirmDelete, setShowConfirmDelete] = useState(false);
     const [deleting, setDeleting] = useState(false);
     // ⚡ NEW (استرجاع ميزة "تحويل الجلسة المستقلة لقضية" — 11 أغسطس 2026)
@@ -1398,7 +1414,7 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
             onSaved: () => { onDone(); onClose(); },
             linkedClient,
             clients,
-            onOpenClientProfile: onOpenClientProfile ? (c: ClientRow) => { setShowEdit(false); onOpenClientProfile(c); } : undefined,
+            onOpenClientProfile: onOpenClientProfile ? (c: ClientRow) => { wasEditingRef.current = true; setShowEdit(false); onOpenClientProfile(c); } : undefined,
             countryCourts,
             countryCaseTypes,
         }),
