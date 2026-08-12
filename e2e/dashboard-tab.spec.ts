@@ -30,6 +30,10 @@ test('الإجراءات السريعة: إضافة موكل من الداشبو
   // createClient() جوه utils.ts — هنا نفس الباج لأن التست بيبني الرقم
   // مباشرة بدل ما يستخدم الهيلبر. الحل: آخر 14 خانة بدل الأول.
   await page.getByTestId('new-client-national-id').fill(`2900101${Date.now()}`.slice(-14));
+  // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): بيانات التوكيل بقت إجبارية.
+  await page.getByTestId('new-client-poa-number').fill('1234');
+  await page.getByTestId('new-client-poa-letters').fill('أ');
+  await page.getByTestId('new-client-poa-year').fill('2026');
   await page.getByTestId('save-client-button').click();
 
   await expectToast(page, '✅ تم إضافة الموكل بنجاح!');
