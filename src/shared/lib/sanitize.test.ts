@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { escapeHtml, ilikeOrClause, escapeTelegramHtml, normalizeArabicDigits } from './sanitize';
+import { escapeHtml, ilikeOrClause, escapeTelegramHtml, normalizeArabicDigits, onlyDigits } from './sanitize';
 
 describe('escapeHtml', () => {
     it('نص عادي → يرجع زي ما هو', () => {
@@ -124,5 +124,35 @@ describe('ilikeOrClause + normalizeArabicDigits (تكامل)', () => {
         expect(ilikeOrClause('case_number_official', '٦٣٥٢')).toBe(
             'case_number_official.ilike."%6352%"'
         );
+    });
+});
+
+// 🔢 FIX (توحيد onlyDigits + تطبيع الأرقام العربية عند الحفظ — 12 أغسطس 2026):
+// قبل الفيكس، \D في جافاسكريبت كان بيشيل الأرقام العربية الشرقية (مش
+// بيحولها) لأنها مش بتتطابق مع [0-9] — يعني موبايل مكتوب بالعربي كان
+// بيتمسح بالكامل بدل ما يتحفظ محوّل.
+describe('onlyDigits', () => {
+    it('رقم موبايل عربي شرقي → بيتحول لإنجليزي (مش بيتمسح)', () => {
+        expect(onlyDigits('٠١٠١٢٣٤٥٦٧٨')).toBe('01012345678');
+    });
+
+    it('رقم قومي عربي مع مسافات → أرقام إنجليزية بس، والـmax بيقص الزيادة', () => {
+        expect(onlyDigits('٢٩ ٠١ ٠١ ٠١٢٣٤٥٦٧٨٩', 14)).toBe('29010101234567');
+    });
+
+    it('رقم إنجليزي عادي → يفضل زي ما هو', () => {
+        expect(onlyDigits('01012345678')).toBe('01012345678');
+    });
+
+    it('خليط عربي/إنجليزي مع حروف → الحروف بتتشال والأرقام كلها بتتحول وتتلم', () => {
+        expect(onlyDigits('01٠a1٢b345٦78')).toBe('01012345678');
+    });
+
+    it('من غير max → مفيش قص للطول', () => {
+        expect(onlyDigits('١٢٣٤٥٦٧٨٩٠١٢٣٤٥٦٧٨٩')).toBe('12345678901234567890');
+    });
+
+    it('نص فاضي → يرجع فاضي', () => {
+        expect(onlyDigits('')).toBe('');
     });
 });

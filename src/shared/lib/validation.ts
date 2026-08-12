@@ -1,5 +1,8 @@
 // دوال التحقق من صحة البيانات (Validation)
 // ══════════════════════════════════════════════════════════════
+import { normalizeArabicDigits } from './sanitize';
+// ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════
 //  دوال التحقق من صحة البيانات (Validation)
 //  ── مرنة: بترجع رسالة تحذير بس، مفيش منع للحفظ ──
 // ══════════════════════════════════════════════════════════════
@@ -12,7 +15,7 @@
 export function validatePhone(phone: string): string | null {
     if (!phone || !phone.trim()) return null; // حقل اختياري — مفيش تحذير لو فاضي
 
-    const cleaned = phone.replace(/[\s-]/g, '');
+    const cleaned = normalizeArabicDigits(phone).replace(/[\s-]/g, '');
 
     // مصر: 01[0125]xxxxxxxx (11 رقم) — مع أو بدون +20 / 0020
     const egyptPattern = /^(\+20|0020|0)?1[0125]\d{8}$/;
@@ -38,8 +41,11 @@ export function validatePhone(phone: string): string | null {
 export function formatPhoneForWhatsApp(phone: string | null | undefined): string {
     if (!phone) return '';
 
+    // 🔢 FIX (12 أغسطس 2026): طبقة أمان أخيرة — نطبّع أي رقم عربي شرقي
+    // (٠-٩) لإنجليزي هنا كمان (defense-in-depth)، تحسّبًا لأي رقم اتخزن
+    // قديم من قبل فيكس تطبيع الإدخال في الفورمات نفسها.
     // إزالة كل شيء ما عدا الأرقام
-    let digits = phone.replace(/\D/g, '');
+    let digits = normalizeArabicDigits(phone).replace(/\D/g, '');
     if (!digits) return '';
 
     // لو الرقم مصري محلي: بيبدأ بـ 0 وطوله 11 رقم (مثال: 01022150151)
