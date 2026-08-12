@@ -3,6 +3,7 @@ import { toast } from '../../../shared/lib/notifications';
 import { db } from '../../../supabaseClient';
 import { showErrorToast } from '../../../shared/lib/errorReporting';
 import { recalcNextHearing } from '../../../shared/lib/dataAccess';
+import { checkCaseNumberDuplicate } from '../../../shared/lib/caseValidation';
 import type { Form } from '../NewStandaloneSessionModal';
 import {
   makeOfflineTempId, isOfflineTempId, withCaseSelfOfflineSentinel, findMatchingClientByName, buildCaseInsertData,
@@ -160,6 +161,26 @@ export function useClientLinking(
     try {
       const { form: f, finalCaseType: ct, finalCourtLevel: cl, fullCaseNumber: cn } = savedFormData;
       const caseTitle = f.title || cn || 'قضية من جلسة مستقلة';
+      // 🔒 FIX (خلل: تعذّر إنشاء القضية — idx_cases_tenant_case_number_unique،
+      // 12 أغسطس 2026): مسار "تحويل جلسة مستقلة لقضية" كان بيعمل INSERT
+      // مباشر من غير فحص تكرار رقم القيد أصلاً (بعكس useCaseActions.ts
+      // العادي)، فلو رقم القيد مسجل بالفعل لقضية بنفس المحكمة والنوع، الـ
+      // UNIQUE index كان بيرفض الكتابة برسالة Postgres خام غير مفهومة
+      // للمستخدم. نفس فحص checkCaseNumberDuplicate المستخدم في إنشاء قضية
+      // عادي، بنفس النمط بالظبط.
+      let caseDup;
+      try {
+        caseDup = await checkCaseNumberDuplicate(db, cn, cl, ct);
+      } catch (e) {
+        showErrorToast('case_number_duplicate_check', e, 'تعذّر التحقق من رقم القيد. حاول مرة أخرى.', 'تحويل جلسة لقضية');
+        setLinkingCase(false);
+        return;
+      }
+      if (caseDup.duplicate) {
+        toast(caseDup.message!, true);
+        setLinkingCase(false);
+        return;
+      }
       // 🆕 المرحلة 2 (خطة توسيع الأوفلاين): معرّف مؤقت client-side، بنفس
       // نمط offlineTempId الموجود فعلاً في useCaseActions.ts (handleSaveCase)
       // — بيتبعت مع القضية بغض النظر عن حالة الاتصال، وبيتشال قبل أي INSERT
@@ -197,7 +218,14 @@ export function useClientLinking(
         returning: true,
       });
       if (error) {
-        showErrorToast('case_create', error, 'تعذّر إنشاء القضية. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'إنشاء قضية');
+        // 🔒 FIX (نفس الفيكس فوق): خط دفاع أخير لو الفحص المسبق فوّت حالة
+        // (سباق بين تبويبين، إلخ) — نفس رسالة useCaseActions.ts بالظبط
+        // بدل الرسالة العامة لأي خطأ INSERT تاني.
+        if ((error as { code?: string }).code === '23505') {
+          toast('⚠️ رقم القيد ده مسجل بالفعل لقضية موجودة', true);
+        } else {
+          showErrorToast('case_create', error, 'تعذّر إنشاء القضية. حاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'إنشاء قضية');
+        }
         return;
       }
       // 🆕 المرحلة 2: لو أوفلاين، مفيش id حقيقي راجع من __dbWrite (العملية
