@@ -28,6 +28,12 @@ interface SessionsCalendarProps {
     // أغسطس 2026): onOpenCreateClientForSessionParty وopenNewClientModal
     // كانوا بيتوصّلوا لـ StandaloneSessionDetailModal تحت، لكن دي بقت prop
     // بلا استخدام داخلي فيها من المراحل السابقة (2 و3).
+    // ⚡ NEW (توحيد "المحكمة"/"نوع القضية" مع فورمي القضية — 12 أغسطس 2026):
+    // بيتمرروا لـStandaloneSessionDetailModal تحت (فورم تعديل الجلسة
+    // المستقلة) — نفس props اللي App.tsx بيبعتها لـNewCaseModal.tsx
+    // (COUNTRY_CONFIGS[country]).
+    countryCourts?: string[];
+    countryCaseTypes?: string[];
 }
 
 // شكل صف case_sessions اللي بيترجع من استعلامي fetchMissedCount هنا
@@ -42,7 +48,7 @@ interface OverdueReminderRow {
     done: boolean;
 }
 
-function SessionsCalendar({ cases, clients, onOpenCase, onOpenReminders, onClientAdded, initialTab, nav, onOpenClientProfile, externalRefreshSignal }: SessionsCalendarProps & { externalRefreshSignal?: number }) {
+function SessionsCalendar({ cases, clients, onOpenCase, onOpenReminders, onClientAdded, initialTab, nav, onOpenClientProfile, externalRefreshSignal, countryCourts, countryCaseTypes }: SessionsCalendarProps & { externalRefreshSignal?: number }) {
     const [activeTab, setActiveTab] = useState<'month'|'calendar'|'missed'>(initialTab || 'calendar');
     const [missedCount, setMissedCount] = useState(0);
     // النوع الأعم (CalendarSessionRow) بيغطي كل الاستخدامات التلاتة (Calendar/Missed/Month)
@@ -127,6 +133,8 @@ function SessionsCalendar({ cases, clients, onOpenCase, onOpenReminders, onClien
             // مطلوبة من الأعلى (App.tsx) لفتح قضية مربوطة من كارت الجلسة
             // — بنعيد استخدامها هنا بالظبط بعد تحويل جلسة مستقلة لقضية.
             onOpenCase,
+            countryCourts,
+            countryCaseTypes,
         }),
         React.createElement('div', { className: "space-y-2 fade-in" },
 
