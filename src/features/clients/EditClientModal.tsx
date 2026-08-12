@@ -130,7 +130,7 @@ function EditClientModal({client: c, onClose, onSave, saving = false}: EditClien
                 React.createElement(Inp, {label:"الرقم القومي", value:form.national_id, onChange:(e: React.ChangeEvent<HTMLInputElement>)=>s('national_id',onlyDigits(e.target.value,14)), placeholder:"14 رقم", required:true, inputMode:"numeric", maxLength:14,'data-testid':'edit-client-national-id'}),
 
                 // بيانات التوكيل — سطر كامل: رقم / حرف / سنة / مكتب توثيق
-                React.createElement(PoaInput, {value:form.cr_number, onChange:(v: string)=>s('cr_number',v)}),
+                React.createElement(PoaInput, {value:form.cr_number, onChange:(v: string)=>s('cr_number',v), testIdPrefix:'edit-client-poa'}),
 
                 // فاصل قريب الدرجة الأولى
                 React.createElement('div', {className:"border-t border-white/5 pt-2"},
