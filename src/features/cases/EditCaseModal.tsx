@@ -608,13 +608,14 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
             // دلوقتي مربع نص حر دايمًا، مع datalist للاقتراح بس (مش إجبار)
             // من قايمة محاكم الدولة لو موجودة.
             React.createElement('div', null,
-                React.createElement('label', {className:"block text-[10px] font-bold text-slate-400 mb-1.5"}, "المحكمة المختصة"),
+                React.createElement('label', {className:"block text-[10px] font-bold text-slate-400 mb-1.5"}, "المحكمة المختصة",React.createElement('span',{className:"text-rose-400 mr-1"},"*")),
                 React.createElement('input', {
                     value:form.court,
                     onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('court',e.target.value),
                     placeholder:"اكتب اسم المحكمة",
                     className:inputCls, style:inpStyle,
                     list: (countryCourts && countryCourts.length>0) ? 'edit-case-courts-list' : undefined,
+                    'data-testid':'edit-case-court',
                 }),
                 countryCourts && countryCourts.length>0 && React.createElement('datalist',{id:'edit-case-courts-list'},
                     countryCourts.map((c: string) => React.createElement('option',{key:c,value:c}))
@@ -623,11 +624,11 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
 
             // ٣. رقم الدعوى الرسمي + السنة
             React.createElement('div', null,
-                React.createElement('label', {className:"block text-[10px] font-bold text-slate-400 mb-1.5"}, "رقم الدعوى الرسمي"),
+                React.createElement('label', {className:"block text-[10px] font-bold text-slate-400 mb-1.5"}, "رقم الدعوى الرسمي",React.createElement('span',{className:"text-rose-400 mr-1"},"*")),
                 React.createElement('div', {className:"flex gap-2 items-center"},
-                    React.createElement('input', {value:form.caseNum, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('caseNum',e.target.value), placeholder:"رقم الدعوى", className:"flex-1 p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600 text-center", style:inpStyle}),
+                    React.createElement('input', {value:form.caseNum, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('caseNum',e.target.value), placeholder:"رقم الدعوى", className:"flex-1 p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600 text-center", style:inpStyle,'data-testid':'edit-case-number'}),
                     React.createElement('span', {className:"text-slate-500 font-black text-sm shrink-0"}, "/"),
-                    React.createElement('input', {value:form.caseYear, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('caseYear',e.target.value), placeholder:"السنة", maxLength:4, className:"w-24 p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600 text-center", style:inpStyle})
+                    React.createElement('input', {value:form.caseYear, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('caseYear',e.target.value), placeholder:"السنة", maxLength:4, className:"w-24 p-3 text-xs rounded-xl border border-white/10 bg-premium-bg text-white placeholder-slate-600 text-center", style:inpStyle,'data-testid':'edit-case-year'})
                 )
             ),
 
@@ -636,21 +637,22 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
             // المختصة" فوق بالظبط — نص حر دايمًا، مع datalist للاقتراح بس.
             React.createElement('div', {className:"grid grid-cols-2 gap-2"},
                 React.createElement('div', null,
-                    React.createElement('label', {className:"block text-[10px] font-bold text-slate-400 mb-1.5"}, "تصنيف الدعوى"),
+                    React.createElement('label', {className:"block text-[10px] font-bold text-slate-400 mb-1.5"}, "تصنيف الدعوى",React.createElement('span',{className:"text-rose-400 mr-1"},"*")),
                     React.createElement('input', {
                         value:form.type,
                         onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('type',e.target.value),
                         placeholder:"مدني / تجاري...",
                         className:inputCls, style:inpStyle,
                         list: (countryCaseTypes && countryCaseTypes.length>0) ? 'edit-case-types-list' : undefined,
+                        'data-testid':'edit-case-type',
                     }),
                     countryCaseTypes && countryCaseTypes.length>0 && React.createElement('datalist',{id:'edit-case-types-list'},
                         countryCaseTypes.map((t: string) => React.createElement('option',{key:t,value:t}))
                     )
                 ),
                 React.createElement('div', null,
-                    React.createElement('label', {className:"block text-[10px] font-bold text-slate-400 mb-1.5"}, "رقم الدائرة"),
-                    React.createElement('input', {value:form.circuit_number, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('circuit_number',e.target.value), placeholder:"مثال: 12 تجاري", className:inputCls, style:inpStyle})
+                    React.createElement('label', {className:"block text-[10px] font-bold text-slate-400 mb-1.5"}, "رقم الدائرة",React.createElement('span',{className:"text-rose-400 mr-1"},"*")),
+                    React.createElement('input', {value:form.circuit_number, onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('circuit_number',e.target.value), placeholder:"مثال: 12 تجاري", className:inputCls, style:inpStyle,'data-testid':'edit-case-circuit'})
                 )
             ),
 
@@ -673,7 +675,7 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
             // المختصة"/"تصنيف الدعوى" فوق بالظبط — نص حر دايمًا، مع
             // datalist للاقتراح بس (مش إجبار).
             React.createElement('div', null,
-                React.createElement('label', {className:"block text-[10px] font-bold text-slate-400 mb-1.5"}, "درجة التقاضي"),
+                React.createElement('label', {className:"block text-[10px] font-bold text-slate-400 mb-1.5"}, "درجة التقاضي",React.createElement('span',{className:"text-rose-400 mr-1"},"*")),
                 React.createElement('input', {
                     value:form.court_level,
                     onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('court_level',e.target.value),
@@ -775,6 +777,14 @@ function EditCaseModalForm({caseData, onClose, onSave, countryCourts, countryCas
                 onClick: async () => {
                     if(saving) return;
                     if(!form.title.trim()){ toast('يرجى إدخال موضوع ومسمى الدعوى', true); return; }
+                    // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): نفس فحوصات "بيانات القيد
+                    // الرسمي" الإجبارية في NewCaseModal.tsx بالحرف — راجع التعليق هناك.
+                    if(!form.court.trim()){ toast('⚠️ حقل "المحكمة المختصة" مطلوب', true); return; }
+                    if(!form.caseNum.trim()){ toast('⚠️ حقل "رقم الدعوى" مطلوب', true); return; }
+                    if(!form.caseYear.trim()){ toast('⚠️ حقل "السنة" مطلوب', true); return; }
+                    if(!form.type.trim()){ toast('⚠️ حقل "تصنيف الدعوى" مطلوب', true); return; }
+                    if(!form.circuit_number.trim()){ toast('⚠️ حقل "رقم الدائرة" مطلوب', true); return; }
+                    if(!form.court_level.trim()){ toast('⚠️ حقل "درجة التقاضي" مطلوب', true); return; }
                     // ⚡ CHANGED (مرحلة 5.1 — خطة تعدد الأطراف): فاليديشن
                     // أطراف الدعوى كلها بقت من casePartiesValidation.ts (نفس
                     // قواعد NewCaseModal.tsx مرحلة 4.1) بدل الفحوصات المفردة
