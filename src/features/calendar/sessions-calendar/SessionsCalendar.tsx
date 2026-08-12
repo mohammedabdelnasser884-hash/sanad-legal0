@@ -128,6 +128,10 @@ function SessionsCalendar({ cases, clients, onOpenCase, onOpenReminders, onClien
             onClientAdded,
             clients,
             onOpenClientProfile,
+            // 🔒 FIX (نفس باگ CaseDetailView — 12 أغسطس 2026): nav موجودة
+            // أصلًا كـprop هنا، فبنحسب clientProfileOpen مباشرة بدل ما
+            // نضيف prop جديدة.
+            clientProfileOpen: nav.isOpen('clientDetail'),
             // ⚡ NEW (استرجاع ميزة "تحويل الجلسة المستقلة لقضية" + فتحها
             // فورًا — 12 أغسطس 2026): onOpenCase موجودة أصلًا كـprop
             // مطلوبة من الأعلى (App.tsx) لفتح قضية مربوطة من كارت الجلسة
