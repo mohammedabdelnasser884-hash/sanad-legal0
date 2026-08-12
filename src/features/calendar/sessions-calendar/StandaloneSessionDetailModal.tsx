@@ -522,6 +522,14 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
             toast('⚠️ يجب ملء الحقول الإجبارية المحددة بعلامة (*)', true);
             return;
         }
+        // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): نفس فحوصات بيانات القضية
+        // الإجبارية في NewStandaloneSessionModal.tsx بالحرف — راجع التعليق هناك.
+        if (!form.court.trim()) { toast('⚠️ حقل "المحكمة" مطلوب', true); return; }
+        if (!form.case_number.trim()) { toast('⚠️ حقل "رقم القضية" مطلوب', true); return; }
+        if (!form.case_year.trim()) { toast('⚠️ حقل "السنة" مطلوب', true); return; }
+        if (!form.case_type.trim()) { toast('⚠️ حقل "نوع القضية" مطلوب', true); return; }
+        if (!form.circuit_number.trim()) { toast('⚠️ حقل "الدائرة" مطلوب', true); return; }
+        if (!form.court_level.trim()) { toast('⚠️ حقل "درجة التقاضي" مطلوب', true); return; }
         // ⚡ CHANGED (مرحلة 6.4 — خطة تعدد الأطراف): فاليديشن أطراف الجلسة
         // كلها بقت من casePartiesValidation.ts (نفس قواعد NewCaseModal.tsx
         // مرحلة 4.1 وEditCaseModal.tsx مرحلة 5.1) بدل الفحوصات المفردة
@@ -649,9 +657,10 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
                     // الدولة لو موجودة — نفس فيكس فورم الإنشاء (12 أغسطس 2026).
                     React.createElement('div', null,
                         React.createElement(Inp, {
-                            label: 'المحكمة', value: form.court, onChange: set('court'),
+                            label: 'المحكمة', required: true, value: form.court, onChange: set('court'),
                             placeholder: 'مثال: محكمة جنوب القاهرة',
                             list: (countryCourts && countryCourts.length > 0) ? 'edit-standalone-session-courts-list' : undefined,
+                            'data-testid': 'edit-standalone-session-court',
                         }),
                         countryCourts && countryCourts.length > 0 && React.createElement('datalist', { id: 'edit-standalone-session-courts-list' },
                             countryCourts.map((c: string) => React.createElement('option', { key: c, value: c }))
@@ -659,17 +668,17 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
                     ),
                     React.createElement(Inp, { label: 'موضوع الجلسة / عنوان', required: true, value: form.title, onChange: set('title'), placeholder: 'مثال: قضية إيجار', 'data-testid': 'edit-standalone-session-title' }),
                     React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
-                        React.createElement(Inp, { label: 'رقم القضية', value: form.case_number, onChange: set('case_number'), placeholder: '1234' }),
+                        React.createElement(Inp, { label: 'رقم القضية', required: true, value: form.case_number, onChange: set('case_number'), placeholder: '1234', 'data-testid': 'edit-standalone-session-case-number' }),
                         // 🐛 FIX (12 أغسطس 2026): كان ناقص maxLength=4 هنا بعكس
                         // فورم الإنشاء وفورمي القضية الاتنين — المستخدم كان يقدر
                         // يكتب سنة أطول من 4 أرقام وهو بيعدّل جلسة موجودة.
-                        React.createElement(Inp, { label: 'السنة', value: form.case_year, onChange: set('case_year'), placeholder: '2024', maxLength: 4 })
+                        React.createElement(Inp, { label: 'السنة', required: true, value: form.case_year, onChange: set('case_year'), placeholder: '2024', maxLength: 4, 'data-testid': 'edit-standalone-session-case-year' })
                     ),
                     // نوع القضية — نص حر مع datalist اقتراحات (من قايمة
                     // تصنيفات الدولة لو موجودة، وإلا CASE_TYPES الافتراضية)
                     // بدل Select مقفول — نفس فيكس فورم الإنشاء بالحرف.
                     React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
-                        React.createElement(Field, { label: 'نوع القضية' },
+                        React.createElement(Field, { label: 'نوع القضية', required: true },
                             React.createElement('input', {
                                 value: form.case_type,
                                 onChange: set('case_type'),
@@ -677,16 +686,17 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
                                 className: inputCls,
                                 style: inputStyle,
                                 list: 'edit-standalone-session-case-types-list',
+                                'data-testid': 'edit-standalone-session-case-type',
                             }),
                             React.createElement('datalist', { id: 'edit-standalone-session-case-types-list' },
                                 (countryCaseTypes && countryCaseTypes.length > 0 ? countryCaseTypes : CASE_TYPES).map((t: string) => React.createElement('option', { key: t, value: t }))
                             )
                         ),
-                        React.createElement(Inp, { label: 'الدائرة', value: form.circuit_number, onChange: set('circuit_number'), placeholder: 'الدائرة 7' })
+                        React.createElement(Inp, { label: 'الدائرة', required: true, value: form.circuit_number, onChange: set('circuit_number'), placeholder: 'الدائرة 7', 'data-testid': 'edit-standalone-session-circuit' })
                     ),
                     // ⚡ FIX (فورم التعديل الناقص — 11 أغسطس 2026): درجة
                     // التقاضي كانت موجودة في فورم الإنشاء بس غايبة هنا.
-                    React.createElement(Field, { label: 'درجة التقاضي' },
+                    React.createElement(Field, { label: 'درجة التقاضي', required: true },
                         React.createElement('input', {
                             value: form.court_level,
                             onChange: set('court_level'),
