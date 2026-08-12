@@ -10,12 +10,9 @@ import { FileUploadField } from '@/shared/ui/FileUploadField';
 import { useResolvedStorageUrl } from '../../shared/lib/storage';
 import { useFormDraft } from '@/shared/hooks/useFormDraft';
 import { useUnsavedChangesGuard } from '@/shared/hooks/useUnsavedChangesGuard';
+import { onlyDigits, normalizeArabicDigits } from '../../shared/lib/sanitize';
 import type { ClientRow } from '../../types';
 import type { ClientContactInfo } from './hooks/useClientActions';
-
-// أرقام بس، وبالظبط 14 رقم — نفس نمط onlyDigits في NewClientModal/
-// NewCaseModal/EditCaseModal.
-const onlyDigits = (v: string, max = 14) => v.replace(/\D/g, '').slice(0, max);
 
 interface EditClientForm {
     full_name: string;
@@ -124,13 +121,13 @@ function EditClientModal({client: c, onClose, onSave, saving = false}: EditClien
                         {value:'company',    label:'شركة'},
                         {value:'government', label:'جهة حكومية'},
                     ]}),
-                    React.createElement(Inp, {label:"رقم الهاتف", value:form.phone, onChange:(e: React.ChangeEvent<HTMLInputElement>)=>s('phone',e.target.value), placeholder:"05xxxxxxxx", required:true,'data-testid':'edit-client-phone'})
+                    React.createElement(Inp, {label:"رقم الهاتف", value:form.phone, onChange:(e: React.ChangeEvent<HTMLInputElement>)=>s('phone',normalizeArabicDigits(e.target.value)), placeholder:"05xxxxxxxx", required:true,'data-testid':'edit-client-phone'})
                 ),
-                React.createElement(Inp, {label:"رقم هاتف ثاني", value:form.phone2, onChange:(e: React.ChangeEvent<HTMLInputElement>)=>s('phone2',e.target.value), placeholder:"رقم بديل"}),
+                React.createElement(Inp, {label:"رقم هاتف ثاني", value:form.phone2, onChange:(e: React.ChangeEvent<HTMLInputElement>)=>s('phone2',normalizeArabicDigits(e.target.value)), placeholder:"رقم بديل"}),
                 React.createElement(Inp, {label:"البريد الإلكتروني", type:"email", value:form.email, onChange:(e: React.ChangeEvent<HTMLInputElement>)=>s('email',e.target.value), placeholder:"client@email.com"}),
 
                 // الرقم القومي
-                React.createElement(Inp, {label:"الرقم القومي", value:form.national_id, onChange:(e: React.ChangeEvent<HTMLInputElement>)=>s('national_id',onlyDigits(e.target.value)), placeholder:"14 رقم", required:true, inputMode:"numeric", maxLength:14,'data-testid':'edit-client-national-id'}),
+                React.createElement(Inp, {label:"الرقم القومي", value:form.national_id, onChange:(e: React.ChangeEvent<HTMLInputElement>)=>s('national_id',onlyDigits(e.target.value,14)), placeholder:"14 رقم", required:true, inputMode:"numeric", maxLength:14,'data-testid':'edit-client-national-id'}),
 
                 // بيانات التوكيل — سطر كامل: رقم / حرف / سنة / مكتب توثيق
                 React.createElement(PoaInput, {value:form.cr_number, onChange:(v: string)=>s('cr_number',v)}),
@@ -141,7 +138,7 @@ function EditClientModal({client: c, onClose, onSave, saving = false}: EditClien
                 ),
                 React.createElement('div', {className:"grid grid-cols-2 gap-3"},
                     React.createElement(Inp, {label:"اسم القريب",  value:form.kin_name,  onChange:(e: React.ChangeEvent<HTMLInputElement>)=>s('kin_name',e.target.value),  placeholder:"الاسم الكامل"}),
-                    React.createElement(Inp, {label:"هاتف القريب", value:form.kin_phone, onChange:(e: React.ChangeEvent<HTMLInputElement>)=>s('kin_phone',e.target.value), placeholder:"05xxxxxxxx"})
+                    React.createElement(Inp, {label:"هاتف القريب", value:form.kin_phone, onChange:(e: React.ChangeEvent<HTMLInputElement>)=>s('kin_phone',normalizeArabicDigits(e.target.value)), placeholder:"05xxxxxxxx"})
                 ),
 
                 // فاصل المستندات
