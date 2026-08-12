@@ -342,8 +342,26 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
     // في الجلسة المستقلة دلوقتي بيفضل حر بلا أي طريق ربط/إنشاء موكل —
     // ده بيحصل بس بعد التحويل لقضية.
 
+    // ⚡ CHANGED (توحيد تجربة الطرف الأساسي/الثانوي — 12 أغسطس 2026): نفس
+    // التعديل اللي حصل في EditCaseModal.tsx بالحرف — الطرف الأساسي
+    // (party.id === linkedPartyId) كان بيرجع null بالكامل هنا (مفيش زرار
+    // "عدّل من ملف الموكل" ليه)، بعكس أي طرف ثانوي مربوط. دلوقتي عنده فرع
+    // مختصر بيوريله بس الزرار، من غير زرار فك الربط (فك ربط الجلسة
+    // بموكلها الأساسي بيتم من مكان تاني، مش من هنا).
     const renderPartyExtra = (party: PartyFieldValue) => {
-        if (party.id === linkedPartyId || !party.is_client) return null;
+        if (party.id === linkedPartyId) {
+            if (!party.is_client || !onOpenClientProfile || !linkedClient) return null;
+            return React.createElement('div', { className: 'flex items-center justify-between' },
+                React.createElement('p', { className: 'text-[9px] text-slate-500' }, '🟢 موكل المكتب — بيانات هذا الطرف بتتقرا من ملف الموكل'),
+                React.createElement('button', {
+                    type: 'button',
+                    onClick: () => onOpenClientProfile(linkedClient),
+                    className: 'text-[9px] font-black text-premium-gold shrink-0',
+                    'data-testid': `edit-standalone-session-open-client-profile-${party.id}`,
+                }, '✏️ عدّل من ملف الموكل')
+            );
+        }
+        if (!party.is_client) return null;
         const state = getPartyState(party, domainContext);
         const linkedPartyClient = clients.find((c) => c.id === party.client_id) || null;
         const confirmingUnlink = unlinkConfirmPartyId === party.id;
