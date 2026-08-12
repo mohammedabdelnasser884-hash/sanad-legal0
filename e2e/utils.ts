@@ -49,6 +49,16 @@ export async function createCase(page: Page, title: string): Promise<void> {
   await page.getByTestId('nav-cases').click();
   await page.getByTestId('new-case-button').click();
   await page.getByTestId('new-case-title').fill(title);
+  // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): بيانات القيد الرسمي (المحكمة/رقم
+  // القضية/السنة/تصنيف الدعوى/رقم الدائرة/درجة التقاضي) بقت إجبارية —
+  // راجع نفس الفحص بالحرف في NewCaseModal.tsx.handleSave. لازم تتملى هنا
+  // قبل new-case-save وإلا التست يفضل واقف على توست تحذير.
+  await page.getByTestId('new-case-court').fill('محكمة اختبار E2E');
+  await page.getByTestId('new-case-number').fill('100');
+  await page.getByTestId('new-case-year').fill('2026');
+  await page.getByTestId('new-case-type').fill('مدني');
+  await page.getByTestId('new-case-circuit').fill('1');
+  await page.getByTestId('new-case-court-level').fill('ابتدائي');
   // ⚡ CHANGED (خطة "تطوير أطراف الدعوى" — مرحلة 4، 23 يوليو 2026): حقول
   // كل طرف بقت جوه نموذج فرعي منفصل (PartySubform) بيتفتح من كارت مطوي
   // (party-side-card-<side>)، مش ظاهرة مفتوحة دايمًا زي الشكل القديم —
@@ -246,6 +256,14 @@ export async function createStandaloneSession(page: Page, title: string): Promis
   await page.getByTestId('calendar-new-session-button').click();
   await page.getByTestId('new-session-modal').waitFor({ state: 'visible', timeout: 10_000 });
   await page.getByTestId('new-session-title').fill(title);
+  // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): نفس بيانات القيد الرسمي الإجبارية
+  // الجديدة، بالحرف زي createCase فوق — راجع NewStandaloneSessionModal.tsx.handleSave.
+  await page.getByTestId('new-session-court').fill('محكمة اختبار E2E');
+  await page.getByTestId('new-session-case-number').fill('100');
+  await page.getByTestId('new-session-case-year').fill('2026');
+  await page.getByTestId('new-session-case-type').fill('مدني');
+  await page.getByTestId('new-session-circuit').fill('1');
+  await page.getByTestId('new-standalone-session-court-level').fill('ابتدائي');
   const today = new Date().toISOString().slice(0, 10);
   await page.getByTestId('new-session-date').fill(today);
   await page.getByTestId('party-side-card-plaintiff').click();
