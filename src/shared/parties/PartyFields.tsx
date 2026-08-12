@@ -2,13 +2,9 @@ import React from 'react';
 import { Inp } from '../ui/Inp';
 import { PoaInput } from '../ui/PoaInput';
 import { toast } from '../lib/notifications';
+import { onlyDigits } from '../lib/sanitize';
 import { getPartyStateBadge, type PartyLinkState } from './partyDomainService';
 import type { PartyFieldValue, PartySide } from './partyTypes';
-
-// نفس هيلبر "أرقام فقط بحد أقصى" المستخدم في NewCaseModal.tsx/
-// NewStandaloneSessionModal.tsx — مكرر هنا محليًا (بدون export) عشان
-// المكوّن ده يفضل مستقل بمعزل عن أي فورم، زي المطلوب في قسم 6 خطوة 2.
-const onlyDigits = (v: string, max = 14) => v.replace(/\D/g, '').slice(0, max);
 
 // 🆕 (خطة "تبسيط عرض أطراف الدعوى" — 3 أغسطس 2026): ترقيم ترتيبي لعنوان
 // كارت كل شخص جوه نفس الطرف (بدل "مدعي 1"/"مدعي 2" اللي كانت بتفترض إن
@@ -160,7 +156,7 @@ export function PartyFields({
             React.createElement(Inp, {
                 label: party.is_client ? 'الرقم القومي' : 'الرقم القومي (اختياري)',
                 value: party.national_id,
-                onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChange('national_id', onlyDigits(e.target.value)),
+                onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChange('national_id', onlyDigits(e.target.value, 14)),
                 placeholder: '14 رقم',
                 required: party.is_client,
                 inputMode: 'numeric',
