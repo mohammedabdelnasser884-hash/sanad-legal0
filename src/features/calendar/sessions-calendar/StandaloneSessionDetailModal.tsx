@@ -984,6 +984,14 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
                     secretaryHall: session.secretary_hall,
                     secretaryName: session.secretary_name,
                     secretaryMobile: session.secretary_mobile,
+                    // 🔒 FIX (المسمى القانوني الجامع بيتمسح بعد تحويل جلسة
+                    // لقضية — 12 أغسطس 2026): مكانوش متبعتين هنا خالص —
+                    // راجع تعليق buildCaseInsertData في
+                    // caseSessionLinkingShared.ts لتفاصيل السبب الكامل
+                    // (بما فيه الجزء التاني من الباج، اللي كان في الدالة
+                    // نفسها بتتجاهل القيمتين حتى لو اتبعتوا).
+                    plaintiffLegalTitle: session.plaintiff_legal_title,
+                    defendantLegalTitle: session.defendant_legal_title,
                 }, caseTitle, offlineTempId, session.client_id ?? null),
                 returning: true,
             });
