@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { toast } from '../../shared/lib/notifications';
 import { validatePhone, validateEmail } from '../../shared/lib/validation';
-import { validateFullNameParts } from '../../shared/lib/clientValidation';
+import { validateFullNameParts, validatePowerOfAttorney } from '../../shared/lib/clientValidation';
 import { I } from '../../constants';
 import { Inp } from '@/shared/ui/Inp';
 import { PoaInput } from '@/shared/ui/PoaInput';
@@ -176,7 +176,7 @@ function NewClientModal({onClose,onSave,loading,initialData,contextLabel}: NewCl
                 React.createElement(Inp,{label:"الرقم القومي",value:form.national_id,onChange:(e: React.ChangeEvent<HTMLInputElement>) =>s('national_id',onlyDigits(e.target.value)),placeholder:"14 رقم",required:true,inputMode:"numeric",maxLength:14,'data-testid':'new-client-national-id'}),
 
                 // بيانات التوكيل — سطر كامل: رقم / حرف / سنة / مكتب توثيق
-                React.createElement(PoaInput,{value:form.cr_number,onChange:(v: string) =>s('cr_number',v)}),
+                React.createElement(PoaInput,{value:form.cr_number,onChange:(v: string) =>s('cr_number',v),required:true}),
 
                 // رفع الصور
                 React.createElement(FileUploadField,{
@@ -214,6 +214,14 @@ function NewClientModal({onClose,onSave,loading,initialData,contextLabel}: NewCl
                         if(!form.type){toast('يرجى اختيار نوع الموكل',true);return;}
                         if(!form.national_id.trim()){toast('يرجى إدخال الرقم القومي',true);return;}
                         if(form.national_id.length!==14){toast('⚠️ الرقم القومي لازم يكون 14 رقم بالظبط',true);return;}
+                        // ⚡ NEW (12 أغسطس 2026 — بيانات التوكيل إجبارية عند إنشاء
+                        // موكل جديد): قرار عمل — طالما بيتضاف لقائمة الموكلين،
+                        // لازم يكون ليه رقم توكيل حقيقي، بغض النظر عن مكان
+                        // الاستدعاء (قسم الموكلين مباشرة/طرف قضية/جلسة مستقلة) —
+                        // كلهم بيفتحوا نفس الفورم ده. راجع validatePowerOfAttorney
+                        // في clientValidation.ts.
+                        const poaErr = validatePowerOfAttorney(form.cr_number);
+                        if(poaErr){toast(poaErr,true);return;}
                         const warnings = [phoneWarn, phoneWarn2, emailWarn].filter(Boolean);
                         if(warnings.length>0) toast('⚠️ تنبيه: '+warnings[0]+' — تم الحفظ رغم ذلك');
                         const result = await onSave(form,idFile,poaFile);
