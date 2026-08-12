@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { toast } from '../../shared/lib/notifications';
 import { formatPhoneForWhatsApp } from '../../shared/lib/validation';
 import { Inp } from '@/shared/ui/Inp';
@@ -107,15 +107,31 @@ interface CaseDetailViewProps {
     // ملف الموكل" جوه EditCaseModal بيستخدم الكولباك ده لفتح تفاصيل
     // الموكل الحقيقي (نفس آلية فتح تفاصيل الموكل الموجودة بالفعل).
     onOpenClientProfile?: (client: ClientRow) => void;
+    // 🔒 FIX (باگ "عدّل من ملف الموكل جوه تعديل القضية بيرجّع لصفحة القضية
+    // مش لفورم التعديل" — 12 أغسطس 2026): بتوصل من AppModals.tsx وبتعكس
+    // إذا كان مودال تفاصيل/تعديل الموكل (ClientDetailModal) لسه مفتوح فعليًا
+    // (nav.isOpen('clientDetail')) — راجع useEffect تحت لتفاصيل الاستخدام.
+    clientProfileOpen?: boolean;
     // ⚡ NEW (خطة تطوير أطراف الدعوى — مرحلة 4 خطوة 2، 23 يوليو 2026): بتوصل
     // لـ EditCaseModal عشان زرار "إنشاء موكل جديد" جوه كارت أي طرف لسه مش
     // مربوط بموكل — راجع App.tsx (openNewClientModal) وAppModals.tsx.
     openNewClientModal?: (ctx: ClientModalContext) => void;
 }
 
-function CaseDetailView({caseData, client, clients=[], onEnsureClientsLoaded, onClose, onUpdate, onDelete, onEdit, onLinkClient, onLinkClientForParty, onUnlinkClient, onUnlinkClientForParty, onCreateAndLinkClient, onCreateAndLinkClientForParty, onNotify, initialTab='timeline', profile=null, country=null, savingCase=false, onOpenClientProfile, openNewClientModal}: CaseDetailViewProps){
+function CaseDetailView({caseData, client, clients=[], onEnsureClientsLoaded, onClose, onUpdate, onDelete, onEdit, onLinkClient, onLinkClientForParty, onUnlinkClient, onUnlinkClientForParty, onCreateAndLinkClient, onCreateAndLinkClientForParty, onNotify, initialTab='timeline', profile=null, country=null, savingCase=false, onOpenClientProfile, clientProfileOpen=false, openNewClientModal}: CaseDetailViewProps){
     const [activeSection, setActiveSection] = useState(initialTab);
     const [showEditCase, setShowEditCase] = useState(false);
+    // 🔒 FIX (نفس الباگ فوق): بنسجّل إننا قفلنا فورم تعديل القضية عشان
+    // نفتح ملف الموكل (زرار "عدّل من ملف الموكل")، عشان نعرف نرجّع فورم
+    // التعديل تاني لما مودال الموكل يتقفل (حفظ أو إلغاء أو ✕) — راجع
+    // الـuseEffect تحت اللي بيراقب clientProfileOpen.
+    const wasEditingCaseRef = useRef(false);
+    useEffect(() => {
+        if (!clientProfileOpen && wasEditingCaseRef.current) {
+            wasEditingCaseRef.current = false;
+            setShowEditCase(true);
+        }
+    }, [clientProfileOpen]);
     const [linkingClient, setLinkingClient] = useState(false);
     // ⚡ NEW: نفس نمط linkingClient — بيقفل زرار "فك الربط" جوه InfoSection
     // أثناء التنفيذ.
@@ -326,7 +342,7 @@ function CaseDetailView({caseData, client, clients=[], onEnsureClientsLoaded, on
                 countryCourts: COUNTRY_CONFIGS[country as string]?.courts,
                 countryCaseTypes: COUNTRY_CONFIGS[country as string]?.caseTypes,
                 linkedClient: effectiveClient,
-                onOpenClientProfile: onOpenClientProfile ? (c: ClientRow) => { setShowEditCase(false); onOpenClientProfile(c); } : undefined,
+                onOpenClientProfile: onOpenClientProfile ? (c: ClientRow) => { wasEditingCaseRef.current = true; setShowEditCase(false); onOpenClientProfile(c); } : undefined,
                 // ⚡ NEW (مرحلة 4 خطوة 2): لربط/إنشاء موكل لأي طرف جديد يتضاف
                 // أثناء التعديل (بخلاف linkedClient الأصلي المقفول بالفعل).
                 clients,
