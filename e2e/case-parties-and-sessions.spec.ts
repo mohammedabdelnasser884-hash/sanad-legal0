@@ -21,7 +21,9 @@ test('إنشاء قضية بأكتر من مدعي واحد — فاليديشن
   await page.getByTestId('new-case-title').fill(caseTitle);
   // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): بيانات القيد الرسمي بقت إجبارية.
   await page.getByTestId('new-case-court').fill('محكمة اختبار E2E');
-  await page.getByTestId('new-case-number').fill('100');
+  // 🔒 FIX (تحليل لوجز E2E — 12 أغسطس 2026): رقم فريد بدل الثابت '100' —
+  // راجع نفس الفيكس والتعليق الكامل في createCase (utils.ts).
+  await page.getByTestId('new-case-number').fill(String(Date.now()).slice(-6));
   await page.getByTestId('new-case-year').fill('2026');
   await page.getByTestId('new-case-type').fill('مدني');
   await page.getByTestId('new-case-circuit').fill('1');
@@ -72,7 +74,9 @@ test('ضغط زرار حفظ القضية الجديدة مرتين بسرعة (
   await page.getByTestId('new-case-title').fill(caseTitle);
   // ⚡ NEW (طلب مباشر — 12 أغسطس 2026): بيانات القيد الرسمي بقت إجبارية.
   await page.getByTestId('new-case-court').fill('محكمة اختبار E2E');
-  await page.getByTestId('new-case-number').fill('100');
+  // 🔒 FIX (تحليل لوجز E2E — 12 أغسطس 2026): رقم فريد بدل الثابت '100' —
+  // راجع نفس الفيكس والتعليق الكامل في createCase (utils.ts).
+  await page.getByTestId('new-case-number').fill(String(Date.now()).slice(-6));
   await page.getByTestId('new-case-year').fill('2026');
   await page.getByTestId('new-case-type').fill('مدني');
   await page.getByTestId('new-case-circuit').fill('1');
