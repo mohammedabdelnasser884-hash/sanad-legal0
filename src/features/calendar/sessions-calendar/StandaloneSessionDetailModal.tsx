@@ -106,6 +106,11 @@ interface EditStandaloneModalProps {
     // ⚡ NEW: لازمة عشان نلاقي بيانات أي موكل مربوط بطرف *غير* الأساسي
     // (client_id بتاعه بيتحط وقت إنشاء الجلسة عن طريق الربط لكل طرف على حدة).
     clients?: ClientRow[];
+    // ⚡ NEW (توحيد "المحكمة"/"نوع القضية" مع فورمي القضية — 12 أغسطس 2026):
+    // نفس props بالظبط اللي EditCaseModal.tsx بياخدها — قايمة محاكم/تصنيفات
+    // الدولة الحالية (اختيارية)، تُستخدم كـdatalist اقتراحات بس تحت.
+    countryCourts?: string[];
+    countryCaseTypes?: string[];
     // ⚡ REMOVED (خطة إلغاء ربط/إنشاء موكل من الجلسة المستقلة، المرحلة 6 — 9
     // أغسطس 2026): openNewClientModal كانت هنا لزرار "➕ إنشاء موكل جديد"
     // جنب دروب-داون ربط طرف غير مربوط في EditStandaloneModalForm — الدروب-
@@ -121,7 +126,6 @@ interface StandaloneEditForm {
     case_number: string;
     case_year: string;
     case_type: string;
-    case_type_custom: string;
     circuit_number: string;
     // ⚡ FIX (فورم تعديل الجلسة المستقلة كان ناقص عن فورم الإنشاء — 11
     // أغسطس 2026): court_level/session_hall/secretary_hall/secretary_name/
@@ -191,7 +195,7 @@ interface EditStandaloneModalFormProps extends EditStandaloneModalProps {
     existingPartyRows: CasePartyRow[];
 }
 
-function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient = null, onOpenClientProfile, existingPartyRows, clients = [] }: EditStandaloneModalFormProps) {
+function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient = null, onOpenClientProfile, existingPartyRows, clients = [], countryCourts, countryCaseTypes }: EditStandaloneModalFormProps) {
     // ⚡ NEW: الجلسة مربوطة فعليًا بموكل حي لو linkedClient موصول (مش null).
     const isLinked = !!linkedClient;
     // ⚡ NEW (خطة توحيد مصدر بيانات الموكل، مرحلة 7 — fallback الموكل
@@ -206,8 +210,11 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
         title: session.title || '',
         case_number: session.case_number?.split('/')?.[0] || '',
         case_year: session.case_number?.split('/')?.[1] || '',
-        case_type: CASE_TYPES.includes(session.case_type as string) ? (session.case_type as string) : (session.case_type ? 'أخرى' : ''),
-        case_type_custom: CASE_TYPES.includes(session.case_type as string) ? '' : (session.case_type || ''),
+        // ⚡ CHANGED (توحيد "نوع القضية" مع فورمي القضية — 12 أغسطس 2026):
+        // نص حر مباشر زي form.type في EditCaseModal.tsx، مفيش داعي بعد كده
+        // لتفرقة "أخرى" عن قيمة من القايمة (CASE_TYPES بقت اقتراحات
+        // datalist بس تحت).
+        case_type: session.case_type || '',
         circuit_number: session.circuit_number || '',
         court_level: session.court_level || '',
         session_date: session.session_date || '',
@@ -506,7 +513,9 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
             return;
         }
         setSaving(true);
-        const finalCaseType = form.case_type === 'أخرى' ? (form.case_type_custom || 'أخرى') : form.case_type;
+        // ⚡ CHANGED (توحيد "نوع القضية" مع فورمي القضية — 12 أغسطس 2026):
+        // نص حر مباشر، نفس تغيير NewStandaloneSessionModal.tsx بالحرف.
+        const finalCaseType = form.case_type.trim();
         const fullCaseNumber = [form.case_number, form.case_year].filter(Boolean).join('/');
         // ⚡ CHANGED (خطة تفكيك legacy columns — Phase F.2، 6 أغسطس 2026):
         // primaryPlaintiff/primaryDefendant كانوا بيتحسبوا هنا عشان يتبعتوا
@@ -618,17 +627,45 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
                     className: 'overflow-y-auto px-5 py-4 space-y-3',
                     style: { maxHeight: 'calc(92vh - 130px)' }
                 },
-                    React.createElement(Inp, { label: 'المحكمة', value: form.court, onChange: set('court'), placeholder: 'مثال: محكمة جنوب القاهرة' }),
+                    // المحكمة — نص حر، مع datalist للاقتراح من قايمة محاكم
+                    // الدولة لو موجودة — نفس فيكس فورم الإنشاء (12 أغسطس 2026).
+                    React.createElement('div', null,
+                        React.createElement(Inp, {
+                            label: 'المحكمة', value: form.court, onChange: set('court'),
+                            placeholder: 'مثال: محكمة جنوب القاهرة',
+                            list: (countryCourts && countryCourts.length > 0) ? 'edit-standalone-session-courts-list' : undefined,
+                        }),
+                        countryCourts && countryCourts.length > 0 && React.createElement('datalist', { id: 'edit-standalone-session-courts-list' },
+                            countryCourts.map((c: string) => React.createElement('option', { key: c, value: c }))
+                        )
+                    ),
                     React.createElement(Inp, { label: 'موضوع الجلسة / عنوان', required: true, value: form.title, onChange: set('title'), placeholder: 'مثال: قضية إيجار', 'data-testid': 'edit-standalone-session-title' }),
                     React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
                         React.createElement(Inp, { label: 'رقم القضية', value: form.case_number, onChange: set('case_number'), placeholder: '1234' }),
-                        React.createElement(Inp, { label: 'السنة', value: form.case_year, onChange: set('case_year'), placeholder: '2024' })
+                        // 🐛 FIX (12 أغسطس 2026): كان ناقص maxLength=4 هنا بعكس
+                        // فورم الإنشاء وفورمي القضية الاتنين — المستخدم كان يقدر
+                        // يكتب سنة أطول من 4 أرقام وهو بيعدّل جلسة موجودة.
+                        React.createElement(Inp, { label: 'السنة', value: form.case_year, onChange: set('case_year'), placeholder: '2024', maxLength: 4 })
                     ),
+                    // نوع القضية — نص حر مع datalist اقتراحات (من قايمة
+                    // تصنيفات الدولة لو موجودة، وإلا CASE_TYPES الافتراضية)
+                    // بدل Select مقفول — نفس فيكس فورم الإنشاء بالحرف.
                     React.createElement('div', { className: 'grid grid-cols-2 gap-3' },
-                        React.createElement(Sel, { label: 'نوع القضية', value: form.case_type, onChange: set('case_type'), options: [{ value: '', label: '— اختر —' }, ...CASE_TYPES.map((t: string) => ({ value: t, label: t }))] }),
+                        React.createElement(Field, { label: 'نوع القضية' },
+                            React.createElement('input', {
+                                value: form.case_type,
+                                onChange: set('case_type'),
+                                placeholder: 'مدني / تجاري...',
+                                className: inputCls,
+                                style: inputStyle,
+                                list: 'edit-standalone-session-case-types-list',
+                            }),
+                            React.createElement('datalist', { id: 'edit-standalone-session-case-types-list' },
+                                (countryCaseTypes && countryCaseTypes.length > 0 ? countryCaseTypes : CASE_TYPES).map((t: string) => React.createElement('option', { key: t, value: t }))
+                            )
+                        ),
                         React.createElement(Inp, { label: 'الدائرة', value: form.circuit_number, onChange: set('circuit_number'), placeholder: 'الدائرة 7' })
                     ),
-                    form.case_type === 'أخرى' && React.createElement(Inp, { label: 'نوع القضية (تفصيل)', value: form.case_type_custom, onChange: set('case_type_custom'), placeholder: 'أحوال شخصية' }),
                     // ⚡ FIX (فورم التعديل الناقص — 11 أغسطس 2026): درجة
                     // التقاضي كانت موجودة في فورم الإنشاء بس غايبة هنا.
                     React.createElement(Field, { label: 'درجة التقاضي' },
@@ -739,9 +776,14 @@ interface StandaloneSessionDetailModalProps {
     // موكل جديد" جوه EditStandaloneModalForm (اتشال Phase 3) — الاتنين
     // بقوا بلا مستهلك حقيقي من وقتها. اتشالت السلسلة كلها من DashboardTab.tsx
     // وSessionsCalendar.tsx كمان.
+    // ⚡ NEW (توحيد "المحكمة"/"نوع القضية" مع فورمي القضية — 12 أغسطس 2026):
+    // بيتمرروا لـEditStandaloneModal تحت — راجع تعليق countryCourts في
+    // EditStandaloneModalProps فوق.
+    countryCourts?: string[];
+    countryCaseTypes?: string[];
 }
 
-function StandaloneSessionDetailModal({ session: partialSession, db, onClose, onDone, onNotify, onClientAdded, clients = [], onOpenClientProfile, onOpenCase }: StandaloneSessionDetailModalProps) {
+function StandaloneSessionDetailModal({ session: partialSession, db, onClose, onDone, onNotify, onClientAdded, clients = [], onOpenClientProfile, onOpenCase, countryCourts, countryCaseTypes }: StandaloneSessionDetailModalProps) {
     const [showUpdate, setShowUpdate] = useState(false);
     const [showEdit, setShowEdit] = useState(false);
     const [showConfirmDelete, setShowConfirmDelete] = useState(false);
@@ -1329,6 +1371,8 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
             linkedClient,
             clients,
             onOpenClientProfile: onOpenClientProfile ? (c: ClientRow) => { setShowEdit(false); onOpenClientProfile(c); } : undefined,
+            countryCourts,
+            countryCaseTypes,
         }),
         showUpdate && React.createElement(SessionUpdateModal, {
             session, caseData, db,
