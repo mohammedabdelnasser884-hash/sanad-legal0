@@ -90,10 +90,13 @@ const EMPTY: Form = {
 
 // ⚡ CHANGED (طلب مباشر — 9 أغسطس 2026): بقت بس suggestions لـdatalist
 // (مش قايمة اختيارات مقفولة) — راجع تعليق الرندر تحت.
-const COURT_LEVELS = ['ابتدائي', 'استئناف', 'نقض'];
+// ⚡ EXPORTED (فيكس فورم تعديل الجلسة المستقلة الناقص — 11 أغسطس 2026):
+// StandaloneSessionDetailModal.tsx محتاجهم بالظبط عشان يضيف نفس حقول
+// "درجة التقاضي"/"موبايل السكرتير" اللي كانت ناقصة من فورم التعديل.
+export const COURT_LEVELS = ['ابتدائي', 'استئناف', 'نقض'];
 
 // أرقام بس، وبالظبط 14 رقم — بيتقص أي حرف مش رقم أول بأول
-const onlyDigits = (v: string, max = 14) => v.replace(/\D/g, '').slice(0, max);
+export const onlyDigits = (v: string, max = 14) => v.replace(/\D/g, '').slice(0, max);
 
 function SectionTitle({ children }: { children: string }) {
     return React.createElement('p', {
@@ -101,7 +104,10 @@ function SectionTitle({ children }: { children: string }) {
     }, children);
 }
 
-function Field({ label, required = false, children }: { label: string; required?: boolean; children?: React.ReactNode }) {
+// ⚡ EXPORTED (فيكس فورم تعديل الجلسة المستقلة الناقص — 11 أغسطس 2026):
+// StandaloneSessionDetailModal.tsx بيستخدمه لحقل "درجة التقاضي" (datalist)
+// بنفس شكل فورم الإنشاء بالظبط، بدل ما يتكرر تعريفه من جديد هناك.
+export function Field({ label, required = false, children }: { label: string; required?: boolean; children?: React.ReactNode }) {
     return React.createElement('div', null,
         React.createElement('label', { className: 'block text-[10px] font-bold text-slate-400 mb-1.5' },
             label,
