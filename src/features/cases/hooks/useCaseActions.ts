@@ -3,6 +3,7 @@ import { escapeTelegramHtml } from '../../../shared/lib/sanitize';
 import { logActivity } from '../../../shared/lib/dataAccess';
 import { checkCaseNumberDuplicate } from '../../../shared/lib/caseValidation';
 import { showErrorToast } from '../../../shared/lib/errorReporting';
+import { runDuplicateCheckOfflineAware } from '../../../shared/lib/offlineGuard';
 import { db } from '../../../supabaseClient';
 import { withFkOfflineSentinel, linkClientToParty, unlinkClientFromParty } from '../../calendar/hooks/caseSessionLinkingShared';
 import type { Dispatch, SetStateAction } from 'react';
@@ -196,9 +197,18 @@ export function useCaseActions(params: {
         // منفصلتين تمامًا يتصادفوا بنفس الرقم في محكمة أو نوع مختلف
         // ميترفضوش بالغلط كتكرار. مفيش فحص لو الرقم فاضي أصلاً
         // (caseValidation.ts بيرجع duplicate:false).
-        let caseDup;
+        // 🔒 FIX (تقرير فحص أعطال الأوف لاين — 13 أغسطس 2026): أوف لاين أو
+        // تايم آوت (8 ثواني) بيأجّلوا الفحص (skipped:true) بدل ما يوقفوا
+        // الحفظ بالكامل — السيرفر هيرفض التكرار وقت المزامنة الفعلية على أي
+        // حال عن طريق الـUNIQUE index. أي خطأ حقيقي تاني لسه بيوقف الحفظ
+        // زي الأول بالظبط.
+        let caseDup: { duplicate: boolean; message?: string } = { duplicate: false };
         try {
-            caseDup = await checkCaseNumberDuplicate(db, form.number, form.court_level, form.type);
+            const check = await runDuplicateCheckOfflineAware((signal) =>
+                checkCaseNumberDuplicate(db, form.number, form.court_level, form.type, undefined, signal)
+            );
+            if (check.skipped) toast('⚠️ أوف لاين — فحص تكرار رقم القيد هيتأجل لحد المزامنة', false);
+            else caseDup = check.result!;
         } catch (e) {
             showErrorToast('case_number_duplicate_check', e, 'تعذّر التحقق من رقم القيد. حاول مرة أخرى.', 'إضافة قضية');
             creatingCaseGuard = false;
@@ -604,9 +614,16 @@ export function useCaseActions(params: {
             // handleSaveCase، بس هنا بنستبعد القضية نفسها من المقارنة
             // (excludeCaseId) عشان تعديل قضية بنفس رقمها الحالي (من غير
             // تغيير) ميترفضش بالغلط كـ"تكرار مع نفسها".
-            let caseDup;
+            // 🔒 FIX (تقرير فحص أعطال الأوف لاين — 13 أغسطس 2026): نفس فيكس
+            // handleSaveCase — أوف لاين/تايم آوت بيأجّلوا الفحص بدل ما يوقفوا
+            // التعديل بالكامل.
+            let caseDup: { duplicate: boolean; message?: string } = { duplicate: false };
             try {
-                caseDup = await checkCaseNumberDuplicate(db, form.number, form.court_level, form.type, caseId);
+                const check = await runDuplicateCheckOfflineAware((signal) =>
+                    checkCaseNumberDuplicate(db, form.number, form.court_level, form.type, caseId, signal)
+                );
+                if (check.skipped) toast('⚠️ أوف لاين — فحص تكرار رقم القيد هيتأجل لحد المزامنة', false);
+                else caseDup = check.result!;
             } catch (e) {
                 showErrorToast('case_number_duplicate_check', e, 'تعذّر التحقق من رقم القيد. حاول مرة أخرى.', 'تعديل قضية');
                 updatingCaseGuard = false;
