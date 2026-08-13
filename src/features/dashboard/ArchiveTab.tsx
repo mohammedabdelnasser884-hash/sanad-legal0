@@ -11,11 +11,39 @@ import { showErrorToast } from '../../shared/lib/errorReporting';
 import { createPortal } from 'react-dom';
 import PdfViewerModal from '@/shared/modals/PdfViewerModal';
 import DeleteConfirmModal from '@/shared/modals/DeleteConfirmModal';
+import { createFetchGuard } from '../../shared/lib/offlineGuard';
+import { recordError, recordSuccess } from '../../systemHealth';
 import type { MappedCase, MappedClient } from '../../hooks/useAppData';
 import type { CaseDocumentRow } from '../../types';
 import type { NavigationState } from '../../useNavigation';
 
 const PAGE_SIZE = 15;
+
+// ─────────────────────────────────────────────────────────
+//  🔒 FIX (متابعة تقرير فحص أعطال الأوف لاين — 13 أغسطس 2026): تاب أرشيف
+//  المستندات كان بينادي db.from(...) مباشرة من غير createFetchGuard ومن
+//  غير أي كاش fallback — أوف لاين أو نت بطيء، كان بيقعد "بيحمّل" لحظة ثم
+//  يرجع فاضي بصمت (نفس مشكلة القضية/الأتعاب قبل الفيكس). نفس نمط الكاش
+//  المستخدم في useFeesActions.ts بالظبط: مقيّد بـtenant_id، وبيتكاش بس
+//  أول صفحة (page 0) من غير بحث، ومفتاح منفصل لكل تصنيف (category) عشان
+//  آخر تصنيف فتحه المستخدم يفضل متاح أوف لاين.
+//  (رفع/حذف مستند نفسه مقصود يتمنع أوف لاين برسالة صريحة — مش جزء من
+//  الفيكس ده، راجع handleUpload/handleDelete تحت.)
+// ─────────────────────────────────────────────────────────
+const ARCHIVE_PAGE0_CACHE_PREFIX = 'sanad_cached_archive_page0_v1:';
+
+function saveArchiveCache(cat: string, tenantId: string | null | undefined, data: { docs: CaseDocumentRow[]; total: number }) {
+    try { localStorage.setItem(ARCHIVE_PAGE0_CACHE_PREFIX + cat, JSON.stringify({ tenantId: tenantId ?? null, data })); } catch { /* localStorage غير متاح — تجاهل */ }
+}
+function loadArchiveCache(cat: string, tenantId: string | null | undefined): { docs: CaseDocumentRow[]; total: number } | null {
+    try {
+        const raw = localStorage.getItem(ARCHIVE_PAGE0_CACHE_PREFIX + cat);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as { tenantId: string | null; data: { docs: CaseDocumentRow[]; total: number } };
+        if (parsed.tenantId !== (tenantId ?? null)) return null;
+        return parsed.data;
+    } catch { return null; }
+}
 
 interface ArchiveTabProps {
     cases: MappedCase[];
@@ -92,8 +120,32 @@ function ArchiveTab({cases, clients, nav}: ArchiveTabProps){
             q = q.eq('category', cat);
         }
 
-        const { data, error, count } = await q;
-        if (!error) {
+        const tenantId = getCurrentTenantId();
+        const cacheable = page === 0 && !search.trim();
+
+        // ⚡ FIX (13 أغسطس 2026): نفس نمط fetchFees في useFeesActions.ts —
+        // offline يوقف فورًا ويرجّع الكاش لو موجود، أونلاين بطيء يتقفل
+        // بعد 8 ثواني بدل ما يفضل معلّق، وأي فشل يتسجل بلقب واضح (db_archive).
+        const guard = createFetchGuard();
+        if (guard.offline) {
+            recordError('db_archive', 'offline');
+            if (cacheable) {
+                const cached = loadArchiveCache(cat, tenantId);
+                if (cached) {
+                    setDocs(cached.docs);
+                    setDocsTotal(cached.total);
+                    setDocsPage(0);
+                    setDocsMore(false);
+                    toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من الأرشيف');
+                }
+            }
+            setLoading(false);
+            guard.cleanup();
+            return;
+        }
+        try {
+            const { data, error, count } = await q.abortSignal(guard.controller.signal);
+            if (error) throw error;
             const rawList = data || [];
             // ⚠️ الباكت case-docs بقى private — لازم نولّد رابط موقّع طازة
             // لكل مستند بدل الاعتماد على رابط عام قديم متخزن في file_url.
@@ -106,8 +158,19 @@ function ArchiveTab({cases, clients, nav}: ArchiveTabProps){
             setDocsTotal(count || 0);
             setDocsPage(page);
             setDocsMore((page + 1) * PAGE_SIZE < (count || 0));
+            if (cacheable) saveArchiveCache(cat, tenantId, { docs: list, total: count || 0 });
+            recordSuccess('db_archive');
+        } catch (err) {
+            const msg = guard.didTimeOut() ? 'timeout' : (err as { message?: string })?.message || 'fetch failed';
+            recordError('db_archive', msg);
+            if (cacheable) {
+                const cached = loadArchiveCache(cat, tenantId);
+                if (cached) { setDocs(cached.docs); setDocsTotal(cached.total); setDocsPage(0); setDocsMore(false); }
+            }
+        } finally {
+            guard.cleanup();
+            setLoading(false);
         }
-        setLoading(false);
     }, [searchQ, filterCat, sortBy]);
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
