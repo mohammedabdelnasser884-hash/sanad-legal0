@@ -79,11 +79,17 @@ function makeMockDb() {
       // بتستخدم .select().eq(...) بس — نفس kind من object بيغطي السلسلتين،
       // افتراضيًا [] فاضية (مفيش أطراف إضافية) عشان مسار الاسم الواحد
       // القديم يفضل شغال زي ما هو في التستات اللي مش بتغطي تعدد الأطراف.
+      // 🔒 FIX (متابعة فيكس "ترتيب معالجة نسخ الطرف المكررة" — 13 أغسطس
+      // 2026): movePartiesFromSessionToCase بقت بتنادي .order() بعد
+      // .eq() الأولى برضه (مش awaited مباشرة زي قبل كده) — لازم .order()
+      // يبقى موجود على نفس مستوى .eq()/.then() هنا، وإلا التستات بتاخد
+      // TypeError صامت جوه try/catch handleLinkCase.
       const chain = {
         eq: vi.fn(() => ({
           eq: vi.fn(() => ({
             order: vi.fn(() => Promise.resolve(get('case_parties:select', { data: [], error: null }))),
           })),
+          order: vi.fn(() => Promise.resolve(get('case_parties:select', { data: [], error: null }))),
           // movePartiesFromSessionToCase: .select('id').eq('session_id', sessionId) — بس eq واحدة
           then: (resolve: (r: Result) => void) => resolve(get('case_parties:select', { data: [], error: null })),
         })),
