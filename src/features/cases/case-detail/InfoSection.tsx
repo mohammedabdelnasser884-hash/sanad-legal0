@@ -195,8 +195,6 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                             className: "space-y-1.5"
                         },
                             React.createElement('div', {className: "flex items-center justify-between gap-3"},
-                                React.createElement('span', {className: "text-[10px] text-slate-400 font-bold"}, p.capacity || 'الصفة غير محددة'),
-                                ' ',
                                 React.createElement('span', {className: "flex items-center gap-1.5"},
                                     p.is_client && React.createElement('span', {
                                         className: "text-[8px] font-black text-premium-gold bg-premium-gold/10 rounded-full px-1.5 py-0.5"
@@ -207,7 +205,8 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                                         'data-testid': `info-unlink-party-${p.id}`,
                                         className: "text-[9px] font-black text-rose-400"
                                     }, '🔓')
-                                )
+                                ),
+                                React.createElement('span', {className: "text-[10px] text-slate-400 font-bold"}, p.capacity || 'الصفة غير محددة')
                             ),
                             p.client_id && onUnlinkClientForParty && unlinkPartyConfirmId === p.id && React.createElement('div', {
                                 className: "bg-white/5 border border-white/10 rounded-xl p-2 flex items-center justify-between gap-2"
@@ -280,15 +279,15 @@ function InfoSection({ caseData, client, sessions, notes, docs, caseParties = []
                             : null;
                         return React.createElement('div', {className: "space-y-3"},
                             p && React.createElement('div', {className: "flex items-center justify-between"},
-                                React.createElement('span', {className: "text-[10px] text-slate-400 font-bold"}, p.capacity || "الصفة غير محددة"),
+                                React.createElement('span', {className: "text-[11px] font-black text-emerald-400"}, p.name),
                                 ' ',
-                                React.createElement('span', {className: "text-[11px] font-black text-emerald-400"}, p.name)
+                                React.createElement('span', {className: "text-[10px] text-slate-400 font-bold"}, p.capacity || "الصفة غير محددة")
                             ),
                             p && d && React.createElement('div', {className: "border-t border-white/5"}),
                             d && React.createElement('div', {className: "flex items-center justify-between"},
-                                React.createElement('span', {className: "text-[10px] text-slate-400 font-bold"}, d.capacity || "الصفة غير محددة"),
+                                React.createElement('span', {className: "text-[11px] font-black text-rose-400"}, d.name),
                                 ' ',
-                                React.createElement('span', {className: "text-[11px] font-black text-rose-400"}, d.name)
+                                React.createElement('span', {className: "text-[10px] text-slate-400 font-bold"}, d.capacity || "الصفة غير محددة")
                             )
                         );
                     })()
