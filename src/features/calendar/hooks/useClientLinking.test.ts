@@ -58,11 +58,18 @@ function makeMockDb() {
     // .is('deleted_at', null).or(...) [.neq(...) اختياري]. افتراضيًا بيرجع
     // [] (مفيش تكرار) عشان التستات القديمة (اللي مبتغطيش سيناريو التكرار)
     // تفضل شغالة بنفس السلوك المتوقع من غير ما تتلمس.
+    // 🔒 FIX (13 أغسطس 2026): checkCaseNumberDuplicate بقى بيستقبل signal
+    // اختياري وبينادي query.abortSignal(signal) عليه (راجع
+    // runDuplicateCheckOfflineAware في offlineGuard.ts) — الـmock القديم
+    // مكنش فيه abortSignal خالص فكان بيرمي "abortSignal is not a function"
+    // ويوقع في catch العام بدل ما يكمل لسلوك التست الطبيعي. abortSignal
+    // هنا بترجع نفس الـawaitable من غير ما تغيّر النتيجة المتحكم فيها.
     if (table === 'cases') {
       const makeAwaitableWithNeq = () => {
         const promise = Promise.resolve(get('cases:select', { data: [], error: null }));
         return Object.assign(promise, {
-          neq: vi.fn(() => Promise.resolve(get('cases:select', { data: [], error: null }))),
+          neq: vi.fn(() => makeAwaitableWithNeq()),
+          abortSignal: vi.fn(() => makeAwaitableWithNeq()),
         });
       };
       return {
