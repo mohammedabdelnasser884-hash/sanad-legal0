@@ -662,7 +662,11 @@ describe('linkSessionGroupToCase', () => {
           return { select: vi.fn(() => ({ eq: vi.fn(() => Promise.resolve(groupResult)) })) };
         }
         if (table === 'case_parties') {
-          return { select: vi.fn(() => ({ eq: vi.fn(() => Promise.resolve(partiesResult)) })) };
+          // 🔒 FIX (13 أغسطس 2026): movePartiesFromSessionToCase بقت بتنادي
+          // .order('created_at', {ascending:false}) بعد .eq('session_id', ...)
+          // (فيكس ترتيب نسخ الطرف المكررة) — الموك لازم يرجّع object فيه
+          // .order() بدل ما .eq() ترجع Promise على طول.
+          return { select: vi.fn(() => ({ eq: vi.fn(() => ({ order: vi.fn(() => Promise.resolve(partiesResult)) })) })) };
         }
         return {};
       }),
@@ -808,7 +812,9 @@ describe('retryFailedGroupSessionsLinkToCase', () => {
     return {
       from: vi.fn((table: string) => {
         if (table === 'case_parties') {
-          return { select: vi.fn(() => ({ eq: vi.fn(() => Promise.resolve(partiesResult)) })) };
+          // 🔒 FIX (13 أغسطس 2026): نفس تعديل makeMockDb في describe('linkSessionGroupToCase')
+          // فوق — movePartiesFromSessionToCase بتنادي .order() بعد .eq() دلوقتي.
+          return { select: vi.fn(() => ({ eq: vi.fn(() => ({ order: vi.fn(() => Promise.resolve(partiesResult)) })) })) };
         }
         return {};
       }),
