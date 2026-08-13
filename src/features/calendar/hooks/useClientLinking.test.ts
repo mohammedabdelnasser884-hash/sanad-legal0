@@ -65,7 +65,11 @@ function makeMockDb() {
     // ويوقع في catch العام بدل ما يكمل لسلوك التست الطبيعي. abortSignal
     // هنا بترجع نفس الـawaitable من غير ما تغيّر النتيجة المتحكم فيها.
     if (table === 'cases') {
-      const makeAwaitableWithNeq = () => {
+      type AwaitableWithNeq = Promise<Result> & {
+        neq: ReturnType<typeof vi.fn>;
+        abortSignal: ReturnType<typeof vi.fn>;
+      };
+      const makeAwaitableWithNeq = (): AwaitableWithNeq => {
         const promise = Promise.resolve(get('cases:select', { data: [], error: null }));
         return Object.assign(promise, {
           neq: vi.fn(() => makeAwaitableWithNeq()),
