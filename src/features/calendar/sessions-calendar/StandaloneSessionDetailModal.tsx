@@ -2,12 +2,15 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from '../../../shared/lib/notifications';
 import { showErrorToast } from '../../../shared/lib/errorReporting';
-import { I } from '../../../constants';
+import { I, loadOfficeSetting } from '../../../constants';
 import { Inp } from '@/shared/ui/Inp';
 import { Sel } from '@/shared/ui/Sel';
 import SessionUpdateModal from './SessionUpdateModal';
 import { COURT_LEVELS, onlyDigits, Field } from '../NewStandaloneSessionModal';
-import { normalizeArabicDigits } from '../../../shared/lib/sanitize';
+import { normalizeArabicDigits, escapeHtml } from '../../../shared/lib/sanitize';
+// 🆕 (طلب "زر طباعة تقرير PDF لبيانات الجلسة المستقلة" — 13 أغسطس 2026):
+// نفس خط الطباعة الموحّد المستخدم في تقرير القضية (useCaseDetailActions.ts).
+import { PDF_FONT_FAMILY, PDF_FONT_LINK } from '../../../shared/lib/pdf';
 import DeleteConfirmModal from '@/shared/modals/DeleteConfirmModal';
 // ⚡ FIX (استرجاع ميزة "تحويل الجلسة المستقلة لقضية" — 11 أغسطس 2026):
 // التعليق القديم هنا كان بيقول useSessionLinking.ts (اللي كان بيوفر
@@ -837,6 +840,8 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
     }, [clientProfileOpen]);
     const [showConfirmDelete, setShowConfirmDelete] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    // 🆕 (طلب "زر طباعة تقرير PDF لبيانات الجلسة المستقلة" — 13 أغسطس 2026)
+    const [exportingPdf, setExportingPdf] = useState(false);
     // ⚡ NEW (استرجاع ميزة "تحويل الجلسة المستقلة لقضية" — 11 أغسطس 2026)
     const [showConvertConfirm, setShowConvertConfirm] = useState(false);
     const [converting, setConverting] = useState(false);
@@ -972,8 +977,6 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
     })();
     const plaintiffSummary = summarizePartySide(plaintiffPersons);
     const defendantSummary = summarizePartySide(defendantPersons);
-    const partyLine = (s: ReturnType<typeof summarizePartySide>) =>
-        s ? (s.othersCount > 0 ? `${s.primaryName} وآخرين` : s.primaryName) : null;
     // ⚡ NEW (خطة توحيد قفل الطرف — المرحلة 3، سد فجوة 5.4، 6 أغسطس 2026):
     // شارة نصية صغيرة (إيموجي) بتتلحق باسم أول شخص مسمّى في الجهة، لو
     // بيانات case_parties.client_id متاحة له (بعد إضافتها للاستعلام
@@ -989,6 +992,27 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
         const badge = getPartyStateBadge(getPartyState({ client_id: first.client_id }, sessionDomainContext));
         return badge ? ` ${badge.emoji}` : '';
     };
+    // 🔒 FIX (طلب "عرض اسم واحد بس من الخصوم" — 13 أغسطس 2026): partyLine
+    // القديمة كانت بتختصر أي جهة فيها أكتر من شخص لـ"primaryName وآخرين"
+    // (اسم واحد بس)، فالأسماء الباقية كانت بتختفي تمامًا من شاشة عرض
+    // الجلسة المستقلة رغم إنها متسجلة فعليًا في case_parties. دلوقتي بتعرض
+    // كل الأسماء المسجلة لكل جهة (زي InfoSection.tsx في تفاصيل القضية) —
+    // شخص واحد: الاسم بس (زي ما كان بالظبط). أكتر من شخص: كل الأسماء
+    // مفصولة بفاصلة، وصفة كل شخص جنب اسمه (بدل صف "صفة الطرف" المنفصل
+    // اللي كان بيعرض صفة أول شخص بس ومبيعبّرش عن الجهة كلها).
+    const partyNamesLine = (persons: PartyPersonLike[]): string | null => {
+        const named = persons.filter((p) => p.name && p.name.trim());
+        if (named.length === 0) return null;
+        if (named.length === 1) {
+            return `${named[0].name!.trim()}${partyStateBadgeSuffix(persons)}`;
+        }
+        return named.map((p, i) => {
+            const nm = p.name!.trim();
+            const cap = (p.capacity || '').trim();
+            const suffix = i === 0 ? partyStateBadgeSuffix(persons) : '';
+            return `${cap ? `${nm} (${cap})` : nm}${suffix}`;
+        }).join('، ');
+    };
 
     const rows: { label: string; value: string | null; key?: string }[] = [
         { label: '📅 التاريخ', value: session.session_date || null },
@@ -997,13 +1021,214 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
         { label: '📋 رقم القضية', value: session.case_number || null },
         { label: '📂 نوع القضية', value: session.case_type || null },
         { label: '⚖️ الدائرة', value: session.circuit_number || null },
-        { label: '👤 الطرف الأول', value: partyLine(plaintiffSummary) ? partyLine(plaintiffSummary) + partyStateBadgeSuffix(plaintiffPersons) : null, key: 'primaryParty' },
-        { label: '🏷 صفة الطرف الأول', value: plaintiffSummary?.primaryCapacity || null },
-        { label: '👤 الطرف الثاني', value: partyLine(defendantSummary) ? partyLine(defendantSummary) + partyStateBadgeSuffix(defendantPersons) : null },
-        { label: '🏷 صفة الطرف الثاني', value: defendantSummary?.primaryCapacity || null },
+        { label: '👤 الطرف الأول', value: partyNamesLine(plaintiffPersons), key: 'primaryParty' },
+        { label: '🏷 صفة الطرف الأول', value: (plaintiffSummary && plaintiffSummary.othersCount === 0) ? plaintiffSummary.primaryCapacity || null : null },
+        { label: '👤 الطرف الثاني', value: partyNamesLine(defendantPersons) },
+        { label: '🏷 صفة الطرف الثاني', value: (defendantSummary && defendantSummary.othersCount === 0) ? defendantSummary.primaryCapacity || null : null },
         { label: '⚡ الإجراء القادم', value: session.next_action || null },
         { label: '📝 ما تم', value: session.result || null },
     ].filter((r) => r.value);
+
+    // 🆕 (طلب "زر طباعة تقرير PDF لبيانات الجلسة المستقلة" — 13 أغسطس
+    // 2026): نفس نمط handleExportPdf بتاع تقرير القضية (useCaseDetailActions.ts)
+    // بالحرف (نفس الهيدر/الخط/شعار المكتب)، بس مبني على بيانات الجلسة
+    // المستقلة نفسها (مفيش case_id أصلاً) بدل بيانات قضية كاملة — أطراف
+    // الدعوى هنا بتتاخد من plaintiffPersons/defendantPersons فوق (نفس
+    // مصدر العرض القرائي، فمفيش تعارض بين اللي ظاهر في الشاشة واللي
+    // بيتطبع)، وسجل الجلسات القديمة (chainSessions) بيتعرض كقسم "الجلسات"
+    // زي تقرير القضية بالظبط.
+    const handleExportSessionPdf = async () => {
+        setExportingPdf(true);
+        try {
+            const MONTHS_FULL = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+            const now = new Date();
+            const dateStr = now.getDate() + ' ' + MONTHS_FULL[now.getMonth()] + ' ' + now.getFullYear();
+
+            const [officeName, officeAddress, officePhone, officeEmail, officeLogo] = await Promise.all([
+                loadOfficeSetting('office_name'),
+                loadOfficeSetting('office_address'),
+                loadOfficeSetting('office_phone'),
+                loadOfficeSetting('office_email'),
+                loadOfficeSetting('office_logo'),
+            ]);
+            const name = escapeHtml(officeName || '');
+            const address = escapeHtml(officeAddress || '');
+            const phone = escapeHtml(officePhone || '');
+            const email = escapeHtml(officeEmail || '');
+            const contactLine = [address, phone, email].filter(Boolean).join(' | ');
+
+            const sanadSvg = `<svg width="32" height="32" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+          <line x1="6" y1="13" x2="34" y2="13" stroke="#D4AF37" stroke-width="4.5" stroke-linecap="round"/>
+          <line x1="9.5" y1="21" x2="34" y2="21" stroke="#D4AF37" stroke-width="4.5" stroke-linecap="round"/>
+          <line x1="13" y1="29" x2="34" y2="29" stroke="#D4AF37" stroke-width="4.5" stroke-linecap="round"/>
+          <line x1="6" y1="13" x2="6" y2="32" stroke="#D4AF37" stroke-width="4.5" stroke-linecap="round"/>
+          <circle cx="6" cy="13" r="4.5" fill="#D4AF37"/>
+          <circle cx="6" cy="33" r="3" fill="#D4AF37" opacity="0.38"/>
+        </svg>`;
+            const logoHtml = officeLogo
+                ? `<img src="${officeLogo}" style="width:56px;height:56px;object-fit:contain;border-radius:8px;border:1px solid rgba(255,255,255,0.2);" />`
+                : `<div style="width:48px;height:48px;border-radius:10px;background:linear-gradient(135deg,#0d1a2e,#0B1320);border:1px solid rgba(212,175,55,0.25);display:flex;align-items:center;justify-content:center;">${sanadSvg}</div>`;
+            const displayName = name || 'سَنَد';
+            const displaySub = name ? '' : 'نظام التشغيل القانوني';
+
+            const safeTitle = escapeHtml(session.title || 'جلسة مستقلة');
+            const caseNum = (() => { const p = (session.case_number || '').split('/'); return p.length === 2 ? p[0] + ' لسنة ' + p[1] : session.case_number || '—'; })();
+            const safeCaseNum = escapeHtml(caseNum);
+            const safeCaseType = escapeHtml(session.case_type || '—');
+            const safeCourt = escapeHtml(session.court || '—');
+            const safeCourtLevel = escapeHtml(session.court_level || '');
+            const safeCircuitNumber = escapeHtml(session.circuit_number || '');
+            const safeDate = escapeHtml(session.session_date || '—');
+            const safeTime = escapeHtml(session.session_time || '');
+
+            // نفس renderPartySideBlock بتاع تقرير القضية بالحرف — شخص واحد:
+            // بلوك حقل مفرد. أكتر من شخص: قايمة أسماء مضغوطة، صفة كل شخص جنبه.
+            const renderPartySideBlock = (persons: PartyPersonLike[], labelSingle: string): string => {
+                const named = persons.filter((p) => p.name && p.name.trim());
+                if (named.length === 0) return '';
+                if (named.length === 1) {
+                    const p = named[0];
+                    return `<div class="field"><label>${escapeHtml(p.capacity || labelSingle)}</label><span>${escapeHtml(p.name!.trim())}</span></div>`;
+                }
+                const lines = named.map((p) =>
+                    `<div class="party-person-line">${escapeHtml(p.name!.trim())}${p.capacity ? ` <span class="party-person-capacity">(${escapeHtml(p.capacity)})</span>` : ''}</div>`
+                ).join('');
+                return `<div class="party-group-box">${lines}</div>`;
+            };
+            const hasParties = plaintiffPersons.some((p) => p.name?.trim()) || defendantPersons.some((p) => p.name?.trim());
+
+            const safeSessionHall = escapeHtml(session.session_hall || '');
+            const safeSecretaryHall = escapeHtml(session.secretary_hall || '');
+            const safeSecretaryName = escapeHtml(session.secretary_name || '');
+            const safeSecretaryMobile = escapeHtml(session.secretary_mobile || '');
+            const safeSessionTimeLabel = safeTime === 'صباحي' ? '🌅 صباحي' : safeTime === 'مسائي' ? '🌆 مسائي' : '';
+            const hasExtraInfo = !!(safeSessionTimeLabel || safeSessionHall || safeSecretaryHall || safeSecretaryName || safeSecretaryMobile);
+
+            const safeNextAction = escapeHtml(session.next_action || '');
+            const safeResult = escapeHtml(session.result || '');
+
+            const historySessions = chainSessions.length > 1 ? chainSessions : [];
+
+            const win = window.open('', '_blank');
+            if (!win) { setExportingPdf(false); return; }
+
+            const html = `<!DOCTYPE html><html lang="ar" dir="rtl"><head>
+<meta charset="UTF-8"><title>تقرير الجلسة - ${safeTitle}</title>
+${PDF_FONT_LINK}
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:${PDF_FONT_FAMILY};background:#f8f9fa;color:#1a1a2e;padding:20px;}
+  .page{max-width:800px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);}
+  .header{background:linear-gradient(135deg,#1a1a2e,#16213e);color:#D4AF37;padding:28px 32px;}
+  .header-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+  .office-info{display:flex;align-items:center;gap:12px;}
+  .office-name{font-size:16px;font-weight:900;color:#D4AF37;}
+  .office-contact{font-size:10px;color:rgba(212,175,55,0.6);margin-top:2px;}
+  .case-title{font-size:20px;font-weight:900;color:#fff;text-align:center;}
+  .case-sub{font-size:11px;color:rgba(212,175,55,0.7);text-align:center;margin-top:6px;}
+  .badge{display:inline-block;padding:4px 14px;border-radius:20px;border:1px solid #D4AF37;color:#D4AF37;font-size:11px;margin-top:8px;}
+  .header-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px;padding-top:16px;border-top:1px solid rgba(212,175,55,0.2);}
+  .header-field{background:rgba(255,255,255,0.06);border:1px solid rgba(212,175,55,0.15);border-radius:8px;padding:10px 12px;}
+  .header-field label{font-size:9px;color:rgba(212,175,55,0.65);display:block;margin-bottom:3px;font-weight:700;}
+  .header-field span{font-size:12px;font-weight:700;color:#fff;}
+  .gold-bar{height:3px;background:linear-gradient(90deg,#D4AF37,#E8C84A,#D4AF37);}
+  .section{padding:20px 24px;border-bottom:1px solid #f0f0f0;}
+  .section h2{font-size:13px;font-weight:900;color:#1a1a2e;margin-bottom:14px;padding-bottom:6px;border-bottom:2px solid #D4AF37;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .field{background:#f8f9fa;border-radius:8px;padding:10px 12px;}
+  .field label{font-size:9px;color:#888;display:block;margin-bottom:3px;font-weight:700;}
+  .field span{font-size:12px;font-weight:700;color:#1a1a2e;}
+  .party-group-box{grid-column:1/-1;background:#f8f9fa;border-radius:8px;padding:10px 12px;}
+  .party-person-line{font-size:11px;font-weight:700;color:#1a1a2e;padding:2px 0;}
+  .party-person-capacity{font-size:10px;font-weight:600;color:#888;}
+  .session-card{border:1px solid #e8e8e8;border-right:4px solid #D4AF37;border-radius:8px;padding:12px;margin-bottom:8px;}
+  .session-date{font-size:12px;font-weight:900;color:#D4AF37;margin-bottom:6px;}
+  .session-label{font-size:9px;color:#888;font-weight:700;margin-top:6px;}
+  .session-val{font-size:11px;color:#333;margin-top:2px;line-height:1.6;}
+  .footer{background:#f8f9fa;padding:14px 24px;text-align:center;font-size:9px;color:#888;}
+  @media print{body{padding:0;}.page{box-shadow:none;border-radius:0;}}
+</style></head><body>
+<div class="page">
+  <div class="header">
+    <div class="header-top">
+      <div class="office-info">
+        ${logoHtml}
+        <div>
+          <div class="office-name">${displayName}</div>
+          ${displaySub ? `<div style="font-size:9px;color:rgba(212,175,55,0.5);margin-top:1px;">${displaySub}</div>` : ''}
+          ${contactLine ? `<div class="office-contact">${contactLine}</div>` : ''}
+        </div>
+      </div>
+      <div style="text-align:left">
+        <div style="font-size:10px;color:rgba(212,175,55,0.6);">تاريخ الإصدار</div>
+        <div style="font-size:12px;font-weight:700;color:#D4AF37;">${dateStr}</div>
+      </div>
+    </div>
+    <div style="border-top:1px solid rgba(212,175,55,0.2);padding-top:16px;text-align:center;">
+      <div class="case-title">⚡ ${safeTitle}</div>
+      <div class="case-sub">تقرير جلسة مستقلة (غير مرتبطة بملف قضية)</div>
+      <div class="badge">${safeDate}${safeTime ? ' — ' + escapeHtml(safeSessionTimeLabel || safeTime) : ''}</div>
+    </div>
+    <div class="header-fields">
+      <div class="header-field"><label>رقم القيد</label><span>${safeCaseNum}</span></div>
+      <div class="header-field"><label>نوع القضية</label><span>${safeCaseType}</span></div>
+      <div class="header-field"><label>المحكمة</label><span>${safeCourt}</span></div>
+      ${safeCourtLevel ? `<div class="header-field"><label>درجة التقاضي</label><span>${safeCourtLevel}</span></div>` : ''}
+      ${safeCircuitNumber ? `<div class="header-field"><label>رقم الدائرة</label><span>${safeCircuitNumber}</span></div>` : ''}
+    </div>
+  </div>
+  <div class="gold-bar"></div>
+
+  ${hasParties ? `
+  <div class="section">
+    <h2>⚖️ أطراف الدعوى</h2>
+    <div class="grid2">
+      ${renderPartySideBlock(plaintiffPersons, 'الطرف الأول')}
+      ${renderPartySideBlock(defendantPersons, 'الطرف الثاني')}
+    </div>
+  </div>` : ''}
+
+  ${hasExtraInfo ? `
+  <div class="section">
+    <h2>🗂 بيانات إضافية</h2>
+    <div class="grid2">
+      ${safeSessionHall ? `<div class="field"><label>الطابق وقاعة الجلسة</label><span>${safeSessionHall}</span></div>` : ''}
+      ${safeSecretaryHall ? `<div class="field"><label>قاعة سكرتير الجلسة</label><span>${safeSecretaryHall}</span></div>` : ''}
+      ${safeSecretaryName ? `<div class="field"><label>اسم سكرتير الجلسة</label><span>${safeSecretaryName}</span></div>` : ''}
+      ${safeSecretaryMobile ? `<div class="field"><label>موبايل سكرتير الجلسة</label><span>${safeSecretaryMobile}</span></div>` : ''}
+    </div>
+  </div>` : ''}
+
+  ${(safeNextAction || safeResult) ? `
+  <div class="section">
+    <h2>📝 آخر تحديث</h2>
+    <div class="grid2">
+      ${safeResult ? `<div class="field" style="grid-column:1/-1;"><label>ما تم في الجلسة</label><span>${safeResult}</span></div>` : ''}
+      ${safeNextAction ? `<div class="field" style="grid-column:1/-1;"><label>الإجراء القادم</label><span>${safeNextAction}</span></div>` : ''}
+    </div>
+  </div>` : ''}
+
+  ${historySessions.length > 0 ? `
+  <div class="section">
+    <h2>🕓 سجل الجلسات (${historySessions.length})</h2>
+    ${historySessions.map((s) => `
+    <div class="session-card">
+      <div class="session-date">📅 ${escapeHtml(s.session_date || '')}${s.id === session.id ? ' (الحالية)' : ''}</div>
+      ${s.result ? `<div class="session-label">ما تم</div><div class="session-val">${escapeHtml(s.result)}</div>` : ''}
+    </div>`).join('')}
+  </div>` : ''}
+
+  <div class="footer">🔒 ملف سري — ${displayName}${contactLine ? ' | ' + contactLine : ''} | تاريخ الإصدار: ${dateStr}</div>
+</div>
+<script>window.onload=()=>{window.print();}</script>
+</body></html>`;
+            win.document.write(html);
+            win.document.close();
+            toast('📄 جاري فتح ملف الطباعة...');
+        } finally {
+            setExportingPdf(false);
+        }
+    };
 
     // 🆕 (توحيد الأوفلاين لشاشة الجلسة المستقلة — 5 أغسطس 2026): __dbWrite
     // بدل db.from(...).delete() المباشر — لو النت مقطوع، الحذف بيتقيّد في
@@ -1352,6 +1577,16 @@ function StandaloneSessionDetailModal({ session: partialSession, db, onClose, on
                         className: 'flex-1 py-2.5 rounded-2xl text-xs font-bold text-slate-400 bg-white/5 hover:bg-white/10 transition-all',
                         'data-testid': 'standalone-session-footer-close'
                     }, 'إغلاق'),
+                    // 🆕 (طلب "زر طباعة تقرير PDF لبيانات الجلسة المستقلة" — 13
+                    // أغسطس 2026): نفس مكان/شكل زرار "📄 تصدير PDF" بتاع تقرير
+                    // القضية (CaseDetailView.tsx) — بس هنا بصف الأزرار الصغيرة
+                    // جنب تعديل/حذف بدل هيدر منفصل.
+                    React.createElement('button', {
+                        onClick: handleExportSessionPdf,
+                        disabled: loadingFull || exportingPdf,
+                        className: 'flex-1 py-2.5 rounded-2xl text-xs font-bold text-slate-300 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-50',
+                        'data-testid': 'standalone-session-export-pdf-trigger'
+                    }, exportingPdf ? '⏳ ...' : '📄 طباعة'),
                     React.createElement('button', {
                         onClick: () => setShowEdit(true),
                         disabled: loadingFull,
