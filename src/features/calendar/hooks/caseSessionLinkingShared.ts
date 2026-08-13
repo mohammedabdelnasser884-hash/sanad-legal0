@@ -221,9 +221,17 @@ export async function movePartiesFromSessionToCase(
   // ⚠️ case_parties بقت مضافة في database.types.ts (خطة تعدد الأطراف،
   // مرحلة 1) — مفيش داعي لكاست 'as cases' هنا تاني (كان قبل كده بديل
   // مؤقت لحد إضافة الجدول للـ types المولّدة).
+  // 🔒 FIX (ترتيب معالجة نسخ الطرف المكررة — 13 أغسطس 2026): من غير
+  // ORDER BY هنا، لو الطرف ده متكرر عبر أكتر من جلسة في نفس session_group
+  // (شوف الفيكس فوق)، ترتيب رجوع الصفوف من Postgres مش مضمون — يعني
+  // النسخة اللي "بتكسب" وتفضل ممكن تكون نسخة قديمة بدل الأحدث. بنرتب
+  // بالأحدث أولاً (created_at DESC) عشان النسخة الأحدث (خصوصًا لو مربوطة
+  // بموكل حي وبياناته اتغيرت — شوف copySessionPartiesToNewSession فوق)
+  // هي اللي تتعالج وتنجح الأول، والنسخ الأقدم المكررة هي اللي تتحذف.
   const { data, error } = await db.from('case_parties')
     .select('id')
-    .eq('session_id', sessionId);
+    .eq('session_id', sessionId)
+    .order('created_at', { ascending: false });
   if (error || !data || data.length === 0) return { ok: true };
 
   let allOk = true;
