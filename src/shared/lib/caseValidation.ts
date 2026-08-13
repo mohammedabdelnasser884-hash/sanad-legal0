@@ -45,7 +45,12 @@ export async function checkCaseNumberDuplicate(
     caseNumberOfficial: string | null | undefined,
     courtLevel: string | null | undefined,
     caseType: string | null | undefined,
-    excludeCaseId?: string | null
+    excludeCaseId?: string | null,
+    // 🔒 FIX (تقرير فحص أعطال الأوف لاين — 13 أغسطس 2026): abortSignal اختياري
+    // — بيسمح للمنادي يلف النداء ده بـ createFetchGuard (نفس نمط شاشات
+    // القراءة) عشان يقدر يفرّق بين "فشل حقيقي" و"أوف لاين/تايم آوت" ويأجل
+    // الفحص بدل ما يوقف الحفظ بالكامل. مفيش تغيير سلوك لو محدش بعت signal.
+    signal?: AbortSignal
 ): Promise<CaseNumberDuplicateCheckResult> {
     const number = (caseNumberOfficial || '').trim();
     if (!number) return { duplicate: false };
@@ -55,7 +60,7 @@ export async function checkCaseNumberDuplicate(
         .is('deleted_at', null)
         .or(exactIlikeClause('case_number_official', number));
     if (excludeCaseId) query = query.neq('id', excludeCaseId);
-    const { data } = await query;
+    const { data } = await (signal ? query.abortSignal(signal) : query);
     if (!data || data.length === 0) return { duplicate: false };
 
     const targetCourt = norm(courtLevel);
