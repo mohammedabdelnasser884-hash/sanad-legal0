@@ -4,6 +4,7 @@ import { db } from '../../../supabaseClient';
 import { showErrorToast } from '../../../shared/lib/errorReporting';
 import { recalcNextHearing } from '../../../shared/lib/dataAccess';
 import { checkCaseNumberDuplicate } from '../../../shared/lib/caseValidation';
+import { runDuplicateCheckOfflineAware } from '../../../shared/lib/offlineGuard';
 import type { Form } from '../NewStandaloneSessionModal';
 import {
   makeOfflineTempId, isOfflineTempId, withCaseSelfOfflineSentinel, findMatchingClientByName, buildCaseInsertData,
@@ -168,9 +169,14 @@ export function useClientLinking(
       // UNIQUE index كان بيرفض الكتابة برسالة Postgres خام غير مفهومة
       // للمستخدم. نفس فحص checkCaseNumberDuplicate المستخدم في إنشاء قضية
       // عادي، بنفس النمط بالظبط.
-      let caseDup;
+      // 🔒 FIX (تقرير فحص أعطال الأوف لاين — 13 أغسطس 2026): أوف لاين أو
+      // تايم آوت بيأجّلوا الفحص بدل ما يوقفوا التحويل بالكامل — نفس فيكس
+      // useCaseActions.ts/useClientActions.ts.
+      let caseDup: { duplicate: boolean; message?: string } = { duplicate: false };
       try {
-        caseDup = await checkCaseNumberDuplicate(db, cn, cl, ct);
+        const check = await runDuplicateCheckOfflineAware((signal) => checkCaseNumberDuplicate(db, cn, cl, ct, undefined, signal));
+        if (check.skipped) toast('⚠️ أوف لاين — فحص تكرار رقم القيد هيتأجل لحد المزامنة', false);
+        else caseDup = check.result!;
       } catch (e) {
         showErrorToast('case_number_duplicate_check', e, 'تعذّر التحقق من رقم القيد. حاول مرة أخرى.', 'تحويل جلسة لقضية');
         setLinkingCase(false);
