@@ -201,7 +201,7 @@ export function useCaseDetailActions(
       guard.cleanup();
       setLoadingSessions(false);
     }
-  }, [caseData.id, setSessions, setDocs, profile?.tenant_id, applyCaseDetailCacheIfAny, saveCaseDetailCache]);
+  }, [caseData.id, setSessions, setDocs, applyCaseDetailCacheIfAny, saveCaseDetailCache]);
 
   useEffect(() => { refetchAllRef.current = fetchSessions; }, [fetchSessions]);
   useEffect(() => { fetchSessions(); }, [fetchSessions]);
