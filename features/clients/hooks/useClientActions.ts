@@ -1,0 +1,562 @@
+import { toast } from '../../../shared/lib/notifications';
+import { validateFullNameParts, validatePowerOfAttorney, checkClientDuplicate } from '../../../shared/lib/clientValidation';
+import { validateUploadFile, resolveStorageUrl } from '../../../shared/lib/storage';
+import { escapeTelegramHtml } from '../../../shared/lib/sanitize';
+import { safeUpdate, logActivity } from '../../../shared/lib/dataAccess';
+import { callAdminAction, db } from '../../../supabaseClient';
+import { getCurrentTenantId } from '../../../constants';
+import { showErrorToast } from '../../../shared/lib/errorReporting';
+import { runDuplicateCheckOfflineAware } from '../../../shared/lib/offlineGuard';
+import { linkClientToParty, linkClientToSessionParty } from '../../calendar/hooks/caseSessionLinkingShared';
+import type { Dispatch, SetStateAction } from 'react';
+import type { ClientRow, ProfileRow } from '../../../types';
+import type { NavigationState } from '../../../useNavigation';
+import type { Json } from '../../../database.types';
+
+// شكل contact_info (عمود jsonb) — بيتخزن فيه روابط صور الهوية/التوكيل
+export interface ClientContactInfo {
+    id_url?: string | null;
+    poa_url?: string | null;
+}
+
+// شكل البيانات اللي بتوصل فعليًا من NewClientModal/EditClientModal لـ onSave —
+// نفس الحقول بالظبط الموجودة في NewClientForm/EditClientForm (الاتنين
+// متطابقين شكليًا فعليًا)، واتحقق من كل استخدام حقيقي تحت في
+// handleSaveClient/handleUpdateClient.
+export interface ClientFormData {
+    full_name: string;
+    type: string;
+    phone: string;
+    phone2: string;
+    email: string;
+    address: string;
+    notes: string;
+    national_id: string;
+    cr_number: string;
+    kin_name: string;
+    kin_phone: string;
+}
+
+// ⚡ NEW: "فين هيتربط الموكل الجديد بعد الحفظ" — بيتحدد وقت فتح
+// NewClientModal من جوه قضية أو جلسة مستقلة (شوف خطة توحيد إنشاء الموكل).
+// ⚡ NEW (Phase 2): caseIsOfflineTemp/caseFallbackTitle — لازمين لما
+// القضية المستهدفة نفسها لسه معرّف مؤقت أوفلاين (تم إنشاؤها من جلسة
+// مستقلة، ولسه ما اتزامنتش) — بنفس نمط _offlineSelfTempId/
+// _offlineSelfFallbackName المستخدم في handleLinkExistingClient/
+// handleAddAndLinkClient الأصليين (useClientLinking.ts). مش لازمين لمسار
+// Phase 1 (قضية محفوظة بالفعل ليها id حقيقي دايمًا).
+// ⚡ NEW (خطة تعدد الأطراف، 7.2 جزء 2 — 23 يوليو 2026): هدف ربط جديد
+// 'party' — لما NewClientModal بيتفتح لطرف بعينه (is_client=true) في
+// wizard useClientLinking.ts/useSessionLinking.ts، بدل ما نربط
+// cases.client_id مباشرة زي هدف 'case' العادي. partyId هو صف case_parties
+// المستهدف (id حقيقي دايمًا — الطرف أصلاً موجود في القاعدة قبل فتح
+// الموديل)، وisPrimaryParty بتحدد هل نحدّث cases.client_id القديم كمان
+// (نفس منطق linkClientToParty في caseSessionLinkingShared.ts). caseId/
+// caseIsOfflineTemp/caseFallbackTitle بنفس معنى هدف 'case' (القضية اللي
+// الطرف تابع لها ممكن لسه تكون تمبيد أوفلاين).
+// ⚡ NEW (خطة تعدد الأطراف، مرحلة 13 جزء 2 — 23 يوليو 2026): هدف ربط
+// جديد 'sessionParty' — مرآة لهدف 'party' فوق، بس لطرف تابع لجلسة
+// مستقلة *لسه ما اتحوّلتش لقضية* (زرار "إضافة الموكل لقائمة الموكلين
+// فقط" في NewStandaloneSessionModal.tsx). sessionId بدل caseId — لا يوجد
+// cases.client_id يتحدّث هنا، المزامنة القديمة (لو الطرف أساسي) بتروح
+// لـ case_sessions.client_id بدل كده (شوف linkClientToSessionParty).
+// ⚡ NEW (خطة تطوير أطراف الدعوى — مرحلة 4 خطوة 2، 23 يوليو 2026): هدف
+// ربط رابع 'localParty' — لطرف جوه فورم قضية/جلسة *لسه ما اتحفظش* (زر
+// "إنشاء موكل جديد" جوه PartySubform، قبل ما يتضغط "حفظ" على الفورم
+// الأساسي كله). الطرف هنا لسه مجرد صف في state محلي (usePartyFields)،
+// مش صف حقيقي في case_parties، فمفيش أي DB write مطلوب هنا (بعكس
+// 'party'/'sessionParty' اللي بيحدّثوا case_parties.client_id فعليًا) —
+// مجرد إرجاع بيانات الموكل المُنشأ حديثًا للمستدعي عبر onLinked عشان
+// يحدّث partyFields بنفسه (raجع NewCaseModal.tsx/EditCaseModal.tsx).
+export type ClientLinkTarget =
+    | { type: 'case'; caseId: string; caseIsOfflineTemp?: boolean; caseFallbackTitle?: string }
+    | { type: 'session'; sessionId: string }
+    | { type: 'party'; partyId: string; caseId: string; isPrimaryParty: boolean; caseIsOfflineTemp?: boolean; caseFallbackTitle?: string }
+    | { type: 'sessionParty'; partyId: string; sessionId: string; isPrimaryParty: boolean }
+    | { type: 'localParty' };
+
+// ⚡ NEW: كل حاجة محتاجها فتح NewClientModal بسياق (بيانات مبدئية + هدف
+// الربط + تسمية توضيحية + كول-باك تحديث بعد نجاح الربط) — بتتخزن كـ state
+// واحدة في App.tsx وقت الفتح، وبتتصفّر عند أي إغلاق للموديل.
+export interface ClientModalContext {
+    initialData?: Partial<ClientFormData>;
+    linkTarget?: ClientLinkTarget;
+    contextLabel?: string;
+    // ⚡ NEW (مرحلة 4 خطوة 2 — خطة تطوير أطراف الدعوى): باراميتر ثالث
+    // اختياري (بيانات الموكل اللي اتحفظت فعليًا) — بيتبعت بس مع هدف
+    // 'localParty' الجديد (باقي الأهداف مش محتاجاه، بيحدّثوا الداتابيز
+    // مباشرة). موجود عشان المستدعي (NewCaseModal/EditCaseModal) يقدر يملى
+    // اسم/رقم قومي/توكيل/عنوان الطرف محليًا فورًا، من غير ما يستنى
+    // fetchClients() (اللي بتتنادى async وغير مضمون توقيتها).
+    onLinked?: (target: ClientLinkTarget, clientId: string, clientData?: ClientFormData) => void;
+}
+
+interface DeleteConfirmState {
+    type: string;
+    id: string;
+    name: string;
+    itemType: string;
+    title: string;
+    mode?: 'archive' | 'delete';
+    onConfirm?: () => void | Promise<void>;
+    onConfirmArchive?: () => void | Promise<void>;
+    onConfirmDelete?: () => void | Promise<void>;
+    deleteConsequences?: string[];
+}
+
+export function useClientActions(params: {
+    sendTelegram: (text: string) => void | Promise<void>;
+    fetchClients: (page?: number, search?: string) => void | Promise<void>;
+    fetchLawyers: () => void | Promise<void>;
+    clients: ClientRow[];
+    clientSearch: string;
+    setClients: Dispatch<SetStateAction<ClientRow[]>>;
+    setSelectedClient: (v: ClientRow | null) => void;
+    setDeleteConfirm: (v: DeleteConfirmState | null) => void;
+    setSavingClient: Dispatch<SetStateAction<boolean>>;
+    setSavingLawyer: Dispatch<SetStateAction<boolean>>;
+    // ⚠️ نفس ملاحظة setShowCaseModal في useCaseActions.ts — دول دوال
+    // مخصصة (nav.openModal/closeModal) مش useState setters حقيقية.
+    setShowClientModal: (v: boolean) => void;
+    setShowLawyerModal: (v: boolean) => void;
+    nav: NavigationState;
+    profile?: ProfileRow | null;
+    // ⚡ NEW: هدف الربط التلقائي بعد حفظ الموكل (لو الموديل اتفتح من جوه
+    // قضية/جلسة) + كول-باك اختياري بينادى بعد نجاح الربط (لتحديث الـ state
+    // المحلي في المكان اللي فتح منه الموديل — قضية، جلسة... إلخ).
+    clientLinkTarget?: ClientLinkTarget | null;
+    onClientLinked?: (target: ClientLinkTarget, clientId: string, clientData?: ClientFormData) => void;
+}) {
+    const {
+        sendTelegram, fetchClients, fetchLawyers, clients, clientSearch,
+        setClients, setSelectedClient, setDeleteConfirm, setSavingClient,
+        setSavingLawyer, setShowClientModal, setShowLawyerModal, nav, profile,
+        clientLinkTarget, onClientLinked,
+    } = params;
+    const _userName = profile?.full_name || null;
+
+    // ─ حفظ موكل ─
+    // شكل form/idFile/poaFile بييجي من NewClientModal — بنسيبه مرن هنا
+    // (بيتغير حسب حقول الفورم)، وكل استخدام لعمود DB حقيقي في payload
+    // اتوصل بنوع جدول clients الحقيقي.
+    // 🔒 FIX (قرارات مفتوحة — خطة حفظ المسودات، 3 أغسطس 2026): بترجع
+    // Promise<boolean> دلوقتي (كانت من غير return صريح) — عشان
+    // NewClientModal.tsx يمسح مسودة الفورم بس لو نجح الحفظ فعلًا.
+    const handleSaveClient = async (form: ClientFormData, idFile: File | null, poaFile: File | null): Promise<boolean> => {
+        if (!form.full_name || !form.full_name.trim()) {
+            toast('❌ حقل "اسم الموكل" مطلوب', true);
+            return false;
+        }
+        const nameErr = validateFullNameParts(form.full_name);
+        if (nameErr) { toast(nameErr, true); return false; }
+        // ⚡ NEW (12 أغسطس 2026 — بيانات التوكيل إجبارية عند إنشاء موكل
+        // جديد): الفحص هنا هو الجيت الحقيقي قبل أي INSERT فعلي — موجود
+        // كمان في NewClientModal.tsx كتحقق فوري (toast سريع من غير
+        // استنى الشبكة)، بس ده اللي بيمنع أي موكل جديد يتسجل من غير
+        // رقم توكيل حتى لو حصل استدعاء لـhandleSaveClient من مكان تاني
+        // مستقبلًا من غير ما يعدي على فحص الفورم. ⚠️ الفحص ده مقصود إنه
+        // هنا بس (INSERT) مش في handleUpdateClient تحت (UPDATE) — موكلين
+        // قدام موجودين اتسجلوا قبل القرار ده وممكن يكون مفيش عندهم رقم
+        // توكيل، وإجبار الفحص على التعديل كان هيقفل تعديل أي حاجة تانية
+        // في ملفاتهم (هاتف/عنوان/ملاحظات) لحد ما يوفروا رقم توكيل مش
+        // موجود أصلاً عندهم في الواقع.
+        const poaErr = validatePowerOfAttorney(form.cr_number);
+        if (poaErr) { toast(poaErr, true); return false; }
+        // فحص التكرار اللي هو استعلام على النت وممكن ياخد وقت لو النت
+        // بطيء. قبل الفيكس ده كان setSavingClient(true) بعد الفحص، فلو
+        // النت هيس والمستخدم ضغط "إضافة" أكتر من مرة، كل ضغطة كانت
+        // بتعمل فحصها الخاص وتشوف "مفيش تكرار" (لسه محدش عمل insert)،
+        // فيتسجل نفس الموكل أكتر من مرة — ده السبب الجذري اللي أدى لتكرار
+        // موكل واحد 3 مرات في الاستخدام الفعلي. تقفيل الزرار قبل الفحص
+        // بيضمن إن أي ضغطة تانية أثناء الفحص أو الحفظ متتجاهلش تمامًا.
+        setSavingClient(true);
+        // ⚡ تحقق موحّد: يرفض الحفظ لو نفس الاسم أو نفس الرقم القومي مسجل
+        // لموكل موجود بالفعل (نفس المكتب) — راجع clientValidation.ts.
+        // 🔒 FIX (تقرير فحص أعطال الأوف لاين — 13 أغسطس 2026): أوف لاين أو
+        // تايم آوت (8 ثواني) بيأجّلوا فحص التكرار بدل ما يوقفوا الحفظ
+        // بالكامل — السيرفر هيرفض التكرار وقت المزامنة الفعلية بالـUNIQUE
+        // index. أي خطأ حقيقي تاني لسه بيوقف الحفظ زي الأول بالظبط.
+        let dup: { duplicate: boolean; message?: string } = { duplicate: false };
+        try {
+            const check = await runDuplicateCheckOfflineAware((signal) =>
+                checkClientDuplicate(db, { full_name: form.full_name, national_id: form.national_id, cr_number: form.cr_number }, undefined, signal)
+            );
+            if (check.skipped) toast('⚠️ أوف لاين — فحص تكرار بيانات الموكل هيتأجل لحد المزامنة', false);
+            else dup = check.result!;
+        } catch (e) {
+            showErrorToast('client_duplicate_check', e, 'تعذّر التحقق من بيانات الموكل. حاول مرة أخرى.', 'إضافة موكل');
+            setSavingClient(false);
+            return false;
+        }
+        if (dup.duplicate) { toast(dup.message!, true); setSavingClient(false); return false; }
+        // رفع الصور على Storage (يحتاج نت — مش بنحفظه offline)
+        let idUrl: string | null = null, poaUrl: string | null = null;
+        if (navigator.onLine) {
+            const tenantId = getCurrentTenantId();
+            const uploadFile = async (file: File, prefix: string): Promise<string | null> => {
+                // ⚠️ فحص نوع وحجم الملف قبل الرفع — راجع validateUploadFile في utils.ts.
+                const validationError = validateUploadFile(file);
+                if (validationError) { toast('❌ ' + validationError, true); return null; }
+                if (!tenantId) { toast('❌ تعذر تحديد المكتب الحالي، أعد تحميل الصفحة وحاول مرة أخرى', true); return null; }
+                const ext = file.name.split('.').pop();
+                // FIX (5.6): المسار لازم يبدأ بـ tenant_id عشان نقدر نفعّل RLS
+                // بتفلتر بالمكتب على bucket client-docs (كان المسار قبل كده
+                // بدون أي معرّف خالص غير الوقت بالميلي ثانية).
+                const path = `${tenantId}/${prefix}_${Date.now()}.${ext}`;
+                const { error } = await db.storage.from('client-docs').upload(path, file, { upsert: true });
+                if (error) return null;
+                // الباكت client-docs private (بيشيل صور هوية/توكيل العملاء) —
+                // بنولّد رابط موقّع مؤقت بدل الرابط العام.
+                return await resolveStorageUrl('client-docs', path);
+            };
+            if (idFile) idUrl = await uploadFile(idFile, 'id');
+            if (poaFile) poaUrl = await uploadFile(poaFile, 'poa');
+        }
+
+        const payload = {
+            client_name: form.full_name,
+            client_type: form.type || 'individual',
+            phone: form.phone || null,
+            // FIX (2.1): الحقول الأربعة دي كانت موجودة في فورم الإضافة
+            // (NewClientModal) بس مبتتحفظش أبداً عند "إضافة موكل جديد" —
+            // كانت بتضيع بصمت وتتسجل بس لو رجعت عدّلت الموكل بعد كده
+            // (handleUpdateClient تحت كانت بالفعل بتحفظها صح).
+            phone2: form.phone2 || null,
+            address: form.address || null,
+            kin_name: form.kin_name || null,
+            kin_phone: form.kin_phone || null,
+            email: form.email || null,
+            notes: form.notes || null,
+            national_id: form.national_id || null,
+            cr_number: form.cr_number || null,
+            contact_info: { id_url: idUrl, poa_url: poaUrl } as ClientContactInfo,
+        };
+
+        // ⚡ NEW: تمبيد أوفلاين للموكل — بنفس نمط offlineTempId المستخدم في
+        // useClientLinking.ts، عشان لو فيه clientLinkTarget نقدر نربط بيه
+        // حتى لو الإدراج نفسه راح للطابور (أوفلاين).
+        const offlineTempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        const { error, offline, queued, data: insertedClient } = await window.__dbWrite({
+            type: 'INSERT', table: 'clients', data: { ...payload, _offlineTempId: offlineTempId }, returning: true,
+        });
+        setSavingClient(false);
+
+        if (offline && queued) {
+            toast('📥 الموكل محفوظ محلياً — سيُضاف فور عودة الإنترنت');
+            // إضافة مؤقتة في الـ state المحلي
+            setClients((prev) => [{ ...payload, id: 'offline-' + Date.now(), full_name: form.full_name } as unknown as ClientRow, ...prev]);
+        } else if (error) {
+            // 🔒 FIX (تقرير الموثوقية — نتيجة 3): خط دفاع أخير — لو الـ
+            // UNIQUE index على الداتابيز (راجع client-case-unique-constraints-migration.sql)
+            // رفض الإدراج (كود 23505 من Postgres) رغم إن فحص التكرار في
+            // الكود فوق عدّى، بنعرض نفس رسالة "موجود بالفعل" بدل رسالة
+            // خطأ عامة — بيغطي أي سباق نادر (TOCTOU) أو مسار أوفلاين
+            // اتخطى الفحص العادي.
+            if ((error as { code?: string }).code === '23505') {
+                toast('⚠️ موكل بنفس الاسم أو الرقم القومي مسجل بالفعل', true);
+            } else {
+                toast('❌ فشل حفظ بيانات الموكل — تحقق من الاتصال وأعد المحاولة', true);
+            }
+            return false;
+        } else {
+            toast('✅ تم إضافة الموكل بنجاح!');
+            logActivity(db, 'إضافة موكل', { userName: _userName, entity_type: 'client', details: form.full_name || null, client_name: form.full_name || null });
+            // إشعار تليجرام - موكل جديد
+            const typeLabel = form.type === 'company' ? 'شركة' : form.type === 'government' ? 'جهة حكومية' : 'فرد';
+            let clientMsg = `👤 <b>موكل جديد تمت إضافته</b>\n`;
+            clientMsg += `━━━━━━━━━━━━━━━━━━━━\n`;
+            clientMsg += `👤 <b>الاسم:</b> ${escapeTelegramHtml(form.full_name)}\n`;
+            clientMsg += `🏷 <b>النوع:</b> ${typeLabel}\n`;
+            if (form.phone) clientMsg += `📞 <b>الهاتف:</b> ${escapeTelegramHtml(form.phone)}\n`;
+            if (form.email) clientMsg += `📧 <b>الإيميل:</b> ${escapeTelegramHtml(form.email)}\n`;
+            if (form.national_id) clientMsg += `🪪 <b>الرقم القومي:</b> ${escapeTelegramHtml(form.national_id)}\n`;
+            if (form.cr_number) clientMsg += `📜 <b>رقم التوكيل:</b> ${escapeTelegramHtml(form.cr_number)}\n`;
+            if (form.notes) clientMsg += `📝 <b>ملاحظات:</b> ${escapeTelegramHtml(form.notes)}\n`;
+            sendTelegram(clientMsg);
+            fetchClients(0, clientSearch);
+        }
+
+        // ⚡ NEW: ربط تلقائي بالقضية/الجلسة اللي فتح منها الموديل (لو فيه
+        // clientLinkTarget) — نفس فلسفة handleLinkClient الموجودة
+        // الموجودين، بس هنا الموكل نفسه جديد اتحفظ لسه.
+        if (clientLinkTarget) {
+            const isOfflineTemp = offline && queued;
+            const linkedClientId = isOfflineTemp ? offlineTempId : (insertedClient as { id: string } | null)?.id;
+            // ⚡ NEW (7.2 جزء 2): هدف 'party' — بيستخدم linkClientToParty
+            // المشتركة (case_parties.client_id + cases.client_id لو الطرف
+            // أساسي) بدل مسار table/targetId العادي تحت (اللي معملوش لـ
+            // case_parties أصلاً). فرع مستقل عشان مفيش داعي نلوي منطق
+            // 'case'/'session' الموجود من أجل حالة تالتة مختلفة معماريًا.
+            if (linkedClientId && clientLinkTarget.type === 'party') {
+                const caseTitleForSentinel = clientLinkTarget.caseIsOfflineTemp ? clientLinkTarget.caseFallbackTitle : undefined;
+                const result = await linkClientToParty(
+                    clientLinkTarget.partyId, linkedClientId, clientLinkTarget.isPrimaryParty,
+                    clientLinkTarget.caseId, caseTitleForSentinel,
+                    isOfflineTemp ? { isTempClientId: true, tempClientId: offlineTempId, fallbackNameValue: form.full_name } : undefined,
+                );
+                if (!result.ok) {
+                    showErrorToast('client_auto_link', new Error('party link failed'), 'تم حفظ الموكل لكن تعذّر ربطه بالطرف تلقائيًا — استخدم زرار "🔗 ربط" لربطه يدويًا.', 'ربط الموكل تلقائيًا');
+                } else {
+                    logActivity(db, 'ربط طرف بموكل', {
+                        userName: _userName,
+                        entity_type: 'case',
+                        entity_id: clientLinkTarget.caseId,
+                        client_name: form.full_name || null,
+                    });
+                    onClientLinked?.(clientLinkTarget, linkedClientId);
+                }
+            } else if (linkedClientId && clientLinkTarget.type === 'sessionParty') {
+                // ⚡ NEW (خطة تعدد الأطراف، مرحلة 13 جزء 2 — 23 يوليو 2026):
+                // نفس فرع 'party' فوق بالظبط بس بـ linkClientToSessionParty
+                // (case_parties.client_id + case_sessions.client_id لو الطرف
+                // أساسي بس، مفيش cases.client_id هنا أصلًا — مفيش قضية لسه).
+                const result = await linkClientToSessionParty(
+                    clientLinkTarget.partyId, linkedClientId, clientLinkTarget.isPrimaryParty,
+                    clientLinkTarget.sessionId,
+                    isOfflineTemp ? { isTempClientId: true, tempClientId: offlineTempId, fallbackNameValue: form.full_name } : undefined,
+                );
+                if (!result.ok) {
+                    showErrorToast('client_auto_link', new Error('session party link failed'), 'تم حفظ الموكل لكن تعذّر ربطه بالطرف تلقائيًا — استخدم زرار "🔗 ربط" لربطه يدويًا.', 'ربط الموكل تلقائيًا');
+                } else {
+                    logActivity(db, 'ربط طرف بموكل', {
+                        userName: _userName,
+                        entity_type: 'session',
+                        entity_id: clientLinkTarget.sessionId,
+                        client_name: form.full_name || null,
+                    });
+                    onClientLinked?.(clientLinkTarget, linkedClientId);
+                }
+            } else if (linkedClientId && clientLinkTarget.type === 'localParty') {
+                // ⚡ NEW (مرحلة 4 خطوة 2): مفيش أي DB write هنا عمدًا — الطرف
+                // نفسه لسه مش محفوظ في case_parties (فورم قضية/جلسة جديدة أو
+                // تعديل قبل الضغط على "حفظ" الأساسي). بنكتفي بإرجاع بيانات
+                // الموكل المُنشأ حديثًا للمستدعي (onLinked) عشان يحدّث
+                // partyFields المحلي بنفسه (اسم/رقم قومي/توكيل/عنوان + client_id).
+                onClientLinked?.(clientLinkTarget, linkedClientId, form);
+            } else if (linkedClientId && clientLinkTarget.type !== 'party' && clientLinkTarget.type !== 'sessionParty' && clientLinkTarget.type !== 'localParty') {
+                const table = clientLinkTarget.type === 'case' ? 'cases' : 'case_sessions';
+                const targetId = clientLinkTarget.type === 'case' ? clientLinkTarget.caseId : clientLinkTarget.sessionId;
+                // ⚡ NEW (Phase 2): لو القضية المستهدفة نفسها لسه تمبيد أوفلاين
+                // (clientLinkTarget.caseIsOfflineTemp)، لازم نبعت
+                // _offlineSelfTempId + _offlineSelfFallbackName كمان — بنفس
+                // نمط handleLinkExistingClient/handleAddAndLinkClient الأصليين
+                // — عشان دورة المزامنة تقدر تحل id القضية الحقيقي قبل تنفيذ
+                // الـ UPDATE ده (resolveOfflineSelfId في offlineQueue.ts).
+                const isTargetOfflineTempCase = clientLinkTarget.type === 'case' && clientLinkTarget.caseIsOfflineTemp;
+                const { error: linkErr } = await window.__dbWrite({
+                    type: 'UPDATE',
+                    table,
+                    id: targetId,
+                    data: {
+                        client_id: linkedClientId,
+                        ...(isOfflineTemp ? { _offlineFkTempId: [{ field: 'client_id', tempId: offlineTempId, table: 'clients' as const, fallbackNameValue: form.full_name }] } : {}),
+                        ...(isTargetOfflineTempCase ? { _offlineSelfTempId: targetId, _offlineSelfFallbackName: clientLinkTarget.caseFallbackTitle } : {}),
+                    },
+                });
+                if (linkErr) {
+                    const targetLabel = clientLinkTarget.type === 'case' ? 'بالقضية' : 'بالجلسة';
+                    showErrorToast('client_auto_link', linkErr, `تم حفظ الموكل لكن تعذّر ربطه ${targetLabel} تلقائيًا — استخدم زرار "🔗 ربط" لربطه يدويًا.`, 'ربط الموكل تلقائيًا');
+                } else {
+                    logActivity(db, clientLinkTarget.type === 'case' ? 'ربط قضية بموكل' : 'ربط جلسة بموكل', {
+                        userName: _userName,
+                        entity_type: clientLinkTarget.type,
+                        entity_id: targetId,
+                        client_name: form.full_name || null,
+                    });
+                    onClientLinked?.(clientLinkTarget, linkedClientId);
+                }
+            }
+        }
+
+        setShowClientModal(false);
+        return true;
+    };
+
+    // ─ حذف موكل نهائيًا من قاعدة البيانات (مرحلة 2 — مكتمل، مفيش كود إضافي مطلوب) ─
+    // ⚠️ القرار المحسوم فى الخطة (18 يوليو 2026) بعد تحقق فعلي من delete_rule
+    // الحقيقي فى الداتابيز الحية: حذف موكل نهائيًا لازم يحذف الموكل فقط، وميحذفش
+    // القضايا ولا الأتعاب المرتبطة بيه. الـ FKs الحقيقية بتحقق ده تلقائيًا:
+    //   - cases.client_id / case_fees.client_id / fee_payments.client_id → SET NULL
+    //     (القضايا والأتعاب تفضل موجودة، بس الربط بالموكل بيتصفّر)
+    //   - client_messages / client_portal_sessions / client_portal_pins → CASCADE
+    //     (بيانات بوابة الموكل نفسه، بتتحذف تلقائيًا معاه — منطقي، مفيش معنى لها من غيره)
+    // يعني الدالة دي مش محتاجة أي كاسكيد يدوي ولا تحذير "عندك قضايا مرتبطة" —
+    // الحذف بيعدي عادي دايمًا (مفيش FK هيرفضه) والقضايا/الأتعاب تفضل موجودة.
+    const handlePermanentDeleteClient = async (clientId: string) => {
+        const cl = clients.find((x) => x.id === clientId);
+        const { error } = await db.from('clients').delete().eq('id', clientId);
+        nav.closeModal('delete');
+        setDeleteConfirm(null);
+        if (error) { toast('❌ فشل حذف الموكل نهائياً — تحقق من الاتصال وأعد المحاولة', true); return; }
+        toast('🗑️ تم حذف الموكل نهائياً');
+        logActivity(db, 'حذف موكل نهائياً', { userName: _userName, entity_type: 'client', entity_id: clientId, details: cl?.full_name || null, client_name: cl?.full_name || null });
+        setSelectedClient(null);
+        setClients((prev) => prev.filter((c) => c.id !== clientId));
+    };
+
+    // ─ حذف موكل: يعرض اختيار (أرشفة/حذف نهائي) عن طريق DeleteConfirmModal ─
+    const handleDeleteClient = async (clientId: string) => {
+        const cl = clients.find((x) => x.id === clientId);
+        setDeleteConfirm({
+            type: 'client', id: clientId,
+            name: cl?.full_name || 'الموكل',
+            itemType: 'الموكل',
+            title: 'حذف الموكل',
+            onConfirmArchive: async () => {
+                const { error } = await db.from('clients').update({ deleted_at: new Date().toISOString() }).eq('id', clientId);
+                nav.closeModal('delete');
+                setDeleteConfirm(null);
+                if (error) { toast('❌ فشل أرشفة الموكل — تحقق من الاتصال وأعد المحاولة', true); return; }
+                toast('📦 تم نقل الموكل للأرشيف');
+                logActivity(db, 'أرشفة موكل', { userName: _userName, entity_type: 'client', entity_id: clientId, details: cl?.full_name || null, client_name: cl?.full_name || null });
+                setSelectedClient(null);
+                setClients((prev) => prev.filter((c) => c.id !== clientId));
+            },
+            onConfirmDelete: () => handlePermanentDeleteClient(clientId),
+            deleteConsequences: [
+                'سيُحذف نهائيًا: بيانات الموكل، ورسائل/جلسات/أكواد بوابة الموكل الخاصة به فقط.',
+                'القضايا والأتعاب المرتبطة بالموكل تفضل محفوظة بالكامل — بس رابطها بالموكل بيتصفّر.',
+                'لا يمكن التراجع عن هذا الإجراء.',
+            ],
+        });
+    };
+
+    // ─ استرجاع موكل من الأرشيف ─
+    const handleRestoreClient = async (clientId: string) => {
+        const { error } = await db.from('clients').update({ deleted_at: null }).eq('id', clientId);
+        if (error) { toast('❌ فشل استرجاع الموكل — تحقق من الاتصال وأعد المحاولة', true); return; }
+        toast('✅ تم استرجاع الموكل');
+        logActivity(db, 'استرجاع موكل من الأرشيف', { userName: _userName, entity_type: 'client', entity_id: clientId });
+        fetchClients(0, clientSearch);
+    };
+
+    // ─ تعديل موكل ─
+    // 🔒 FIX (تشخيص لوجز E2E — 29 يوليو 2026): الدالة دي بترجع boolean دلوقتي
+    // (true = اتحدثت فعلاً، false = فشل التحديث لأي سبب) بدل void. السبب:
+    // ClientDetailModal.tsx كان بيقفل مودال التعديل فورًا بمجرد الضغط على
+    // "حفظ" (onEdit?.(...) من غير await، وبعدها على طول setShowEditClient(false))
+    // — بغض النظر عن نتيجة الفحص الأسينك ده (تكرار رقم قومي، فشل اتصال...).
+    // ده كان بيخلي المودال يقفل حتى في حالة الفشل (اختبار E2E clients.spec.ts
+    // — تكرار الرقم القومي عند التعديل). دلوقتي الكولر بينتظر النتيجة ويقفل
+    // المودال بس لو true.
+    const handleUpdateClient = async (clientId: string, form: ClientFormData, idFile?: File | null, poaFile?: File | null): Promise<boolean> => {
+        if (!form.full_name || !form.full_name.trim()) {
+            toast('❌ حقل "اسم الموكل" مطلوب', true);
+            return false;
+        }
+        const nameErr = validateFullNameParts(form.full_name);
+        if (nameErr) { toast(nameErr, true); return false; }
+        // 🔒 FIX (تقرير الموثوقية — نتيجة 0/1): الدالة دي ما كانش فيها أي
+        // حماية دبل كليك خالص — لا setSavingClient ولا أي state تاني. زرار
+        // "حفظ التعديلات" في EditClientModal فاضل شغال طول وقت الفحص
+        // والرفع والتحديث، فضغط متكرر (خصوصًا مع نت بطيء) ممكن يبعت أكتر
+        // من UPDATE متوازي ويرفع نفس الملف أكتر من مرة. بنستخدم نفس
+        // setSavingClient المستخدمة في handleSaveClient (المودالين بيشاركوا
+        // نفس الـ state من App.tsx)، وبنقفلها هنا فورًا قبل فحص التكرار.
+        setSavingClient(true);
+        // ⚡ تحقق موحّد: يرفض التعديل لو نفس الاسم أو نفس الرقم القومي بقى
+        // متسجل لموكل تاني غير الموكل ده نفسه (نفس المكتب) — راجع
+        // clientValidation.ts. clientId هنا هو الاستثناء (بنعدّل بياناته هو).
+        // 🔒 FIX (تقرير فحص أعطال الأوف لاين — 13 أغسطس 2026): نفس فيكس
+        // handleSaveClient — أوف لاين/تايم آوت بيأجّلوا الفحص بدل ما يوقفوا
+        // التعديل بالكامل.
+        let dup: { duplicate: boolean; message?: string } = { duplicate: false };
+        try {
+            const check = await runDuplicateCheckOfflineAware((signal) =>
+                checkClientDuplicate(db, { full_name: form.full_name, national_id: form.national_id, cr_number: form.cr_number }, clientId, signal)
+            );
+            if (check.skipped) toast('⚠️ أوف لاين — فحص تكرار بيانات الموكل هيتأجل لحد المزامنة', false);
+            else dup = check.result!;
+        } catch (e) {
+            showErrorToast('client_duplicate_check', e, 'تعذّر التحقق من بيانات الموكل. حاول مرة أخرى.', 'تعديل موكل');
+            setSavingClient(false);
+            return false;
+        }
+        if (dup.duplicate) { toast(dup.message!, true); setSavingClient(false); return false; }
+        const client = clients.find((c) => c.id === clientId);
+        const existingContactInfo = (client?.contact_info as ClientContactInfo | null) || null;
+
+        // رفع صور جديدة لو اتحددت
+        const tenantId = getCurrentTenantId();
+        const uploadFile = async (file: File, prefix: string): Promise<string | null> => {
+            const validationError = validateUploadFile(file);
+            if (validationError) { toast('❌ ' + validationError, true); return null; }
+            if (!tenantId) { toast('❌ تعذر تحديد المكتب الحالي، أعد تحميل الصفحة وحاول مرة أخرى', true); return null; }
+            const ext = file.name.split('.').pop();
+            // FIX (5.6): نفس منطق handleSaveClient — المسار لازم يبدأ بـ tenant_id.
+            const path = `${tenantId}/${prefix}_${Date.now()}.${ext}`;
+            const { error } = await db.storage.from('client-docs').upload(path, file, { upsert: true });
+            if (error) return null;
+            // الباكت client-docs private — بنولّد رابط موقّع مؤقت بدل الرابط العام.
+            return await resolveStorageUrl('client-docs', path);
+        };
+
+        let idUrl: string | null  = existingContactInfo?.id_url  || null;
+        let poaUrl: string | null = existingContactInfo?.poa_url || null;
+        if (navigator.onLine) {
+            if (idFile)  idUrl  = await uploadFile(idFile,  'id')  ?? idUrl;
+            if (poaFile) poaUrl = await uploadFile(poaFile, 'poa') ?? poaUrl;
+        }
+
+        const { success, conflict, error } = await safeUpdate(db, 'clients', clientId, {
+            client_name:  form.full_name,
+            client_type:  form.type || 'individual',
+            phone:        form.phone        || null,
+            phone2:       form.phone2       || null,
+            email:        form.email        || null,
+            address:      form.address      || null,
+            notes:        form.notes        || null,
+            national_id:  form.national_id  || null,
+            cr_number:    form.cr_number    || null,
+            kin_name:     form.kin_name     || null,
+            kin_phone:    form.kin_phone    || null,
+            // ⚠️ ClientContactInfo واجهة بحقول معروفة (id_url/poa_url)، لكن عمود
+            // contact_info في قاعدة البيانات نوعه Json عام (بدون index signature
+            // ثابت) — الكاست عبر unknown هنا موثّق ومحصور في "شكل الحقول
+            // المعروفة دي فعلاً متوافق مع Json" (كلاهما قيم string|null اختيارية).
+            contact_info: { id_url: idUrl, poa_url: poaUrl } as ClientContactInfo as unknown as Json,
+        }, client?.updated_at || null);
+        setSavingClient(false);
+        // 🔒 FIX (تقرير الموثوقية — القسم 12، Concurrent Editing): توست بدل السكوت التام.
+        if (conflict) { toast('⚠️ هذا الموكل عدّله شخص آخر بعد ما فتحته — أعد المحاولة', true); return false; }
+        if (!success) {
+            // 🔒 FIX (تقرير الموثوقية — نتيجة 3): نفس خط الدفاع الأخير المستخدم
+            // في handleSaveClient — راجع التعليق هناك.
+            if (error?.code === '23505') {
+                toast('⚠️ موكل بنفس الاسم أو الرقم القومي مسجل بالفعل', true);
+            } else {
+                toast('❌ فشل تعديل بيانات الموكل — تحقق من الاتصال وأعد المحاولة', true);
+            }
+            return false;
+        }
+        toast('✅ تم تحديث بيانات الموكل');
+        logActivity(db, 'تعديل موكل', { userName: _userName, entity_type: 'client', entity_id: clientId, details: form.full_name || null, client_name: form.full_name || null });
+        fetchClients(0, clientSearch);
+        nav.closeModal('clientDetail');
+        setSelectedClient(null);
+        return true;
+    };
+
+    // ─ إنشاء محامي جديد ─
+    // إنشاء محامي جديد (عبر Edge Function — لا يؤثر على جلسة الأدمن الحالية)
+    const handleSaveLawyer = async (form: { email: string; password: string; full_name: string; role?: string }) => {
+        setSavingLawyer(true);
+        try {
+            await callAdminAction({
+                action: 'create_lawyer',
+                email: form.email,
+                password: form.password,
+                full_name: form.full_name,
+                role: form.role,
+            });
+            toast('✅ تم إنشاء حساب ' + form.full_name + ' بنجاح!');
+            logActivity(db, 'إضافة مستخدم', { userName: _userName, entity_type: 'user', details: `${form.full_name} (${form.role || '—'})` });
+            setShowLawyerModal(false); fetchLawyers();
+        } catch (e) {
+            showErrorToast('client_create_lawyer_account', e, 'تعذّر إنشاء الحساب. تحقق من صحة البيانات وحاول مرة أخرى. لو المشكلة استمرت، تواصل مع الدعم.', 'إنشاء حساب محامي');
+        }
+        setSavingLawyer(false);
+    };
+
+    return { handleSaveClient, handleDeleteClient, handlePermanentDeleteClient, handleRestoreClient, handleUpdateClient, handleSaveLawyer };
+}
