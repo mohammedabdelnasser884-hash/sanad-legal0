@@ -38,3 +38,44 @@ export function createFetchGuard(timeoutMs = 8000): FetchGuard {
         cleanup: () => { if (timeoutId) clearTimeout(timeoutId); },
     };
 }
+
+// ══════════════════════════════════════════════════════════════
+//  🔒 NEW (تقرير فحص أعطال الأوف لاين — 13 أغسطس 2026): فحوصات التكرار
+//  (رقم قيد القضية / بيانات الموكل) بتتنفذ *قبل* أي INSERT/UPDATE فعلي في
+//  5 دوال حفظ، وكانت بتنادي db.from(...) مباشرة من غير أي وعي بحالة
+//  الاتصال — يعني أوف لاين، الفحص نفسه بيفشل (مفيش نت يوصله للسيرفر)،
+//  والـ catch حوله كان بيعرض توست خطأ ويوقف العملية بالكامل (return false)
+//  من غير ما توصل خالص لـ window.__dbWrite (المكان الوحيد اللي فيه منطق
+//  التقييد في طابور الأوفلاين).
+//
+//  runDuplicateCheckOfflineAware بتلف نداء فحص التكرار بنفس منطق
+//  createFetchGuard: لو أوف لاين من الأساس أو الفحص عدّى الـ8 ثواني
+//  (تايم آوت)، بترجع skipped:true (يعني "أجّل الفحص، السيرفر هيرفض
+//  التكرار وقت المزامنة الفعلية على أي حال عن طريق الـUNIQUE index") بدل
+//  ما توقف الحفظ. أي خطأ حقيقي تاني (مش أوف لاين ولا تايم آوت) بيتعاد
+//  رميه زي ما هو عشان المنادي يفضل يعامله بنفس الأسلوب القديم (توست خطأ +
+//  إيقاف الحفظ).
+// ══════════════════════════════════════════════════════════════
+
+export interface DuplicateCheckOutcome<T> {
+    /** true = الفحص اتأجل (أوف لاين أو تايم آوت) — مفيش نتيجة فعلية، كمّل الحفظ عادي */
+    skipped: boolean;
+    result?: T;
+}
+
+export async function runDuplicateCheckOfflineAware<T>(
+    checkFn: (signal: AbortSignal) => Promise<T>,
+    timeoutMs = 8000
+): Promise<DuplicateCheckOutcome<T>> {
+    const guard = createFetchGuard(timeoutMs);
+    if (guard.offline) return { skipped: true };
+    try {
+        const result = await checkFn(guard.controller.signal);
+        return { skipped: false, result };
+    } catch (e) {
+        if (guard.didTimeOut()) return { skipped: true };
+        throw e;
+    } finally {
+        guard.cleanup();
+    }
+}
