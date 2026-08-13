@@ -9,7 +9,7 @@ import { loadOfficeSetting } from '../../../constants';
 import { createFetchGuard } from '../../../shared/lib/offlineGuard';
 import { recordError, recordSuccess } from '../../../systemHealth';
 import { formatArDate } from '../../../shared/ui/arabicLocale';
-import type { ClientRow, ProfileRow, CaseNoteRow } from '../../../types';
+import type { ClientRow, ProfileRow, CaseNoteRow, CaseSessionRow } from '../../../types';
 import type { MappedCase } from '../../../hooks/useAppData';
 import type { PartySide } from '@/shared/parties/partyTypes';
 import { useCaseSessions } from './useCaseSessions';
@@ -97,6 +97,50 @@ export function useCaseDetailActions(
   const { sessions, setSessions } = sessionsHook;
   const { docs, setDocs } = docsHook;
 
+  // ─────────────────────────────────────────────────────────
+  //  🔒 FIX (طلب المستخدم بعد فيكس فحص التكرار — 13 أغسطس 2026): fetchSessions
+  //  (جلسات القضية + ملاحظات + مستندات + أطراف مع بعض) كانت من غير أي كاش
+  //  fallback — أوف لاين، الشاشة كانت بتفضل فاضية بصمت (مفيش حتى رسالة، ومفيش
+  //  حتى نسخة قديمة تتعرض)، رغم إن نفس النمط ده مطبّق بالفعل في
+  //  useAppData.ts (القضايا/الموكلين) وuseRemindersTab.ts وCalendarTab.tsx.
+  //  الكاش هنا مقيّد بـcase id نفسه (مش صفحة عامة زي الباقي) عشان كل قضية
+  //  تحتفظ بآخر نسخة شافها المستخدم فعليًا، مش نسخة عامة مشتركة بين القضايا.
+  // ─────────────────────────────────────────────────────────
+  const CASE_DETAIL_CACHE_PREFIX = 'sanad_cached_case_detail_v1:';
+  interface CaseDetailCache {
+    tenantId: string | null;
+    sessions: CaseSessionRow[];
+    notes: CaseNoteRow[];
+    docs: CaseDocWithUrl[];
+    caseParties: CasePartyRow[];
+  }
+  const saveCaseDetailCache = useCallback((data: Omit<CaseDetailCache, 'tenantId'>) => {
+    try {
+      localStorage.setItem(CASE_DETAIL_CACHE_PREFIX + caseData.id, JSON.stringify({ ...data, tenantId: profile?.tenant_id ?? null }));
+    } catch { /* localStorage غير متاح — تجاهل */ }
+  }, [caseData.id, profile?.tenant_id]);
+  const loadCaseDetailCache = useCallback((): CaseDetailCache | null => {
+    try {
+      const raw = localStorage.getItem(CASE_DETAIL_CACHE_PREFIX + caseData.id);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as CaseDetailCache;
+      if (parsed.tenantId !== (profile?.tenant_id ?? null)) return null;
+      return parsed;
+    } catch { return null; }
+  }, [caseData.id, profile?.tenant_id]);
+  // بتحمّل آخر نسخة محفوظة (لو موجودة) للأربع قوائم مع بعض — بتتنادى لما
+  // الفحص الفعلي يفشل (أوف لاين أو تايم آوت) بدل ما تسيب الشاشة فاضية.
+  const applyCaseDetailCacheIfAny = useCallback((isOffline: boolean) => {
+    const cached = loadCaseDetailCache();
+    if (!cached) return false;
+    setSessions(cached.sessions);
+    setNotes(cached.notes);
+    setDocs(cached.docs);
+    setCaseParties(cached.caseParties);
+    if (isOffline) toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من هذه القضية');
+    return true;
+  }, [loadCaseDetailCache, setSessions, setDocs]);
+
   const fetchSessions = useCallback(async () => {
     setLoadingSessions(true);
     // ⚡ FIX (تحليل شكوى "قسم المستندات/الأتعاب بيقعد يحمّل" — 9 أغسطس
@@ -113,6 +157,7 @@ export function useCaseDetailActions(
     const guard = createFetchGuard();
     if (guard.offline) {
       recordError('db_documents', 'offline');
+      applyCaseDetailCacheIfAny(true);
       setLoadingSessions(false);
       return;
     }
@@ -139,16 +184,24 @@ export function useCaseDetailActions(
         .eq('case_id', caseData.id)
         .order('sort_order', { ascending: true })
         .abortSignal(guard.controller.signal);
-      setCaseParties(partiesErr ? [] : ((pd as unknown as CasePartyRow[]) || []));
+      const cp = partiesErr ? [] : ((pd as unknown as CasePartyRow[]) || []);
+      setCaseParties(cp);
       recordSuccess('db_documents');
+      // 🔒 FIX (13 أغسطس 2026): نخزّن آخر نسخة ناجحة محليًا عشان نقدر نعرضها
+      // لو التحميل الجاي فشل أوف لاين — نفس فلسفة saveOfflineCache في
+      // useAppData.ts.
+      saveCaseDetailCache({ sessions: data || [], notes: nd || [], docs: ddWithUrls, caseParties: cp });
     } catch (err) {
       const msg = guard.didTimeOut() ? 'timeout' : (err as { message?: string })?.message || 'fetch failed';
       recordError('db_documents', msg);
+      // 🔒 FIX (13 أغسطس 2026): تايم آوت أو فشل حقيقي — نجرّب آخر نسخة
+      // محفوظة قبل ما نسيب الشاشة فاضية.
+      applyCaseDetailCacheIfAny(false);
     } finally {
       guard.cleanup();
       setLoadingSessions(false);
     }
-  }, [caseData.id, setSessions, setDocs]);
+  }, [caseData.id, setSessions, setDocs, profile?.tenant_id, applyCaseDetailCacheIfAny, saveCaseDetailCache]);
 
   useEffect(() => { refetchAllRef.current = fetchSessions; }, [fetchSessions]);
   useEffect(() => { fetchSessions(); }, [fetchSessions]);
