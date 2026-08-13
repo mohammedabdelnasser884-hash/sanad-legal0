@@ -87,7 +87,10 @@ export interface ClientDuplicateCheckResult {
 export async function checkClientDuplicate(
     db: SupabaseClient<Database>,
     params: { full_name?: string | null; national_id?: string | null; cr_number?: string | null },
-    excludeClientId?: string | null
+    excludeClientId?: string | null,
+    // 🔒 FIX (تقرير فحص أعطال الأوف لاين — 13 أغسطس 2026): نفس abortSignal
+    // الاختياري المضاف في checkCaseNumberDuplicate — راجع التعليق هناك.
+    signal?: AbortSignal
 ): Promise<ClientDuplicateCheckResult> {
     const name = (params.full_name || '').trim();
     const nationalId = (params.national_id || '').trim();
@@ -116,7 +119,7 @@ export async function checkClientDuplicate(
     // نفس الفلتر المستخدم في useSessionLinking.ts (سطر 117، 322).
     let query = db.from('clients').select('id,full_name,client_name,national_id,cr_number').is('deleted_at', null).or(orParts.join(','));
     if (excludeClientId) query = query.neq('id', excludeClientId);
-    const { data } = await query;
+    const { data } = await (signal ? query.abortSignal(signal) : query);
     if (!data || data.length === 0) return { duplicate: false };
 
     // ⚡ NEW: بدل ما نحسب nameMatch/idMatch/poaMatch كـ boolean عام بس
