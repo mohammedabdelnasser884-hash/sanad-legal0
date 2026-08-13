@@ -572,6 +572,12 @@ function EditStandaloneModalForm({ session, db, onClose, onSaved, linkedClient =
                 secretary_name: form.secretary_name || null,
                 secretary_mobile: form.secretary_mobile || null,
                 next_action: form.next_action || null,
+                // 🔧 FIX (13 أغسطس 2026): نفس الغلطة اللي اتصلحت في
+                // NewStandaloneSessionModal.tsx — plaintiff_legal_title/
+                // defendant_legal_title اتشالوا غلط أثناء Phase F.2 رغم إنهم
+                // مش من الأعمدة القديمة، دول عمود الميزة الحالية نفسها.
+                plaintiff_legal_title: partyFields.legalTitles.plaintiff || null,
+                defendant_legal_title: partyFields.legalTitles.defendant || null,
             },
             knownUpdatedAt: session.updated_at || null,
         });
