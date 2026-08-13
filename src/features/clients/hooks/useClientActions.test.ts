@@ -42,16 +42,23 @@ function makeMockDb() {
     // ويوقع "db.from(...).select is not a function". افتراضيًا مفيش تكرار
     // (data: []) عشان الحفظ يكمل عادي زي قبل الفيكس، وتقدر تتحكم فيه بـ
     // setResult(`${table}:select`, {...}) في أي تست محتاج يحاكي تكرار فعلي.
+    // 🔒 FIX (13 أغسطس 2026): checkClientDuplicate بقى بيستقبل signal اختياري
+    // وبينادي query.abortSignal(signal) عليه (راجع runDuplicateCheckOfflineAware
+    // في offlineGuard.ts) — لازم abortSignal يبقى موجود في السلسلة زي is/or/neq،
+    // وإلا بترمي "abortSignal is not a function" وتقع في catch العام بدل ما
+    // تكمل لسلوك التست الطبيعي.
     select: vi.fn(() => {
       const chain: {
         is: ReturnType<typeof vi.fn>;
         or: ReturnType<typeof vi.fn>;
         neq: ReturnType<typeof vi.fn>;
+        abortSignal: ReturnType<typeof vi.fn>;
         then: (resolve: (v: Result) => void, reject?: (e: unknown) => void) => Promise<void>;
       } = {
         is: vi.fn(() => chain),
         or: vi.fn(() => chain),
         neq: vi.fn(() => chain),
+        abortSignal: vi.fn(() => chain),
         then: (resolve, reject) =>
           Promise.resolve(get(`${table}:select`, { data: [], error: null })).then(resolve, reject),
       };
