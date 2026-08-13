@@ -6,6 +6,7 @@ import { safeUpdate, logActivity } from '../../../shared/lib/dataAccess';
 import { callAdminAction, db } from '../../../supabaseClient';
 import { getCurrentTenantId } from '../../../constants';
 import { showErrorToast } from '../../../shared/lib/errorReporting';
+import { runDuplicateCheckOfflineAware } from '../../../shared/lib/offlineGuard';
 import { linkClientToParty, linkClientToSessionParty } from '../../calendar/hooks/caseSessionLinkingShared';
 import type { Dispatch, SetStateAction } from 'react';
 import type { ClientRow, ProfileRow } from '../../../types';
@@ -171,9 +172,17 @@ export function useClientActions(params: {
         setSavingClient(true);
         // ⚡ تحقق موحّد: يرفض الحفظ لو نفس الاسم أو نفس الرقم القومي مسجل
         // لموكل موجود بالفعل (نفس المكتب) — راجع clientValidation.ts.
-        let dup;
+        // 🔒 FIX (تقرير فحص أعطال الأوف لاين — 13 أغسطس 2026): أوف لاين أو
+        // تايم آوت (8 ثواني) بيأجّلوا فحص التكرار بدل ما يوقفوا الحفظ
+        // بالكامل — السيرفر هيرفض التكرار وقت المزامنة الفعلية بالـUNIQUE
+        // index. أي خطأ حقيقي تاني لسه بيوقف الحفظ زي الأول بالظبط.
+        let dup: { duplicate: boolean; message?: string } = { duplicate: false };
         try {
-            dup = await checkClientDuplicate(db, { full_name: form.full_name, national_id: form.national_id, cr_number: form.cr_number });
+            const check = await runDuplicateCheckOfflineAware((signal) =>
+                checkClientDuplicate(db, { full_name: form.full_name, national_id: form.national_id, cr_number: form.cr_number }, undefined, signal)
+            );
+            if (check.skipped) toast('⚠️ أوف لاين — فحص تكرار بيانات الموكل هيتأجل لحد المزامنة', false);
+            else dup = check.result!;
         } catch (e) {
             showErrorToast('client_duplicate_check', e, 'تعذّر التحقق من بيانات الموكل. حاول مرة أخرى.', 'إضافة موكل');
             setSavingClient(false);
@@ -448,9 +457,16 @@ export function useClientActions(params: {
         // ⚡ تحقق موحّد: يرفض التعديل لو نفس الاسم أو نفس الرقم القومي بقى
         // متسجل لموكل تاني غير الموكل ده نفسه (نفس المكتب) — راجع
         // clientValidation.ts. clientId هنا هو الاستثناء (بنعدّل بياناته هو).
-        let dup;
+        // 🔒 FIX (تقرير فحص أعطال الأوف لاين — 13 أغسطس 2026): نفس فيكس
+        // handleSaveClient — أوف لاين/تايم آوت بيأجّلوا الفحص بدل ما يوقفوا
+        // التعديل بالكامل.
+        let dup: { duplicate: boolean; message?: string } = { duplicate: false };
         try {
-            dup = await checkClientDuplicate(db, { full_name: form.full_name, national_id: form.national_id, cr_number: form.cr_number }, clientId);
+            const check = await runDuplicateCheckOfflineAware((signal) =>
+                checkClientDuplicate(db, { full_name: form.full_name, national_id: form.national_id, cr_number: form.cr_number }, clientId, signal)
+            );
+            if (check.skipped) toast('⚠️ أوف لاين — فحص تكرار بيانات الموكل هيتأجل لحد المزامنة', false);
+            else dup = check.result!;
         } catch (e) {
             showErrorToast('client_duplicate_check', e, 'تعذّر التحقق من بيانات الموكل. حاول مرة أخرى.', 'تعديل موكل');
             setSavingClient(false);
