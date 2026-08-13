@@ -237,7 +237,27 @@ export async function movePartiesFromSessionToCase(
         { case_id: caseId, session_id: null },
       ),
     });
-    if (result.error) allOk = false;
+    if (result.error) {
+      // 🔒 FIX (duplicate national_id عبر أعضاء session_group_id — 13
+      // أغسطس 2026): لو الجلسة دي عضو في سلسلة تحديثات ("⚡ تحديث
+      // الجلسة")، كل عضو في السلسلة عنده نسخته الخاصة من نفس الطرف (نفس
+      // national_id) عبر copySessionPartiesToNewSession. أول عضو بينقل
+      // بنجاح لنفس caseId، أي عضو تاني بيصطدم بـ
+      // idx_case_parties_no_dup_national_id لأن الاتنين بقوا عايزين
+      // يبقوا تحت نفس case_id. ده مش فشل حقيقي في الربط — الشخص ده
+      // اتربط بالفعل بالقضية من النسخة اللي نجحت، فالصف ده بقى نسخة
+      // زيادة يتيمة. بنحذفه بدل ما نسيبه يوقف ربط الجلسة كلها (كان ده
+      // سبب رسالة "تم إنشاء القضية لكن تعذّر ربط الجلسة بها" رغم إن
+      // case_sessions.case_id كان اتحدّث صح فعلاً).
+      const pgError = result.error as { code?: string; message?: string } | null;
+      const isDupNationalId = pgError?.code === '23505'
+        && !!pgError?.message?.includes('idx_case_parties_no_dup_national_id');
+      if (isDupNationalId) {
+        await window.__dbWrite({ type: 'DELETE', table: 'case_parties', id: row.id });
+        continue;
+      }
+      allOk = false;
+    }
   }
   return allOk ? { ok: true } : { ok: false };
 }
