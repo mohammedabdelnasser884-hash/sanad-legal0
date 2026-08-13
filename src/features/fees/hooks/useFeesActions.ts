@@ -13,6 +13,35 @@ import type { MappedCase } from '../../../hooks/useAppData';
 
 const PAGE_SIZE = 15;
 
+// ─────────────────────────────────────────────────────────
+//  🔒 FIX (طلب المستخدم بعد فيكس فحص التكرار — 13 أغسطس 2026): الفتشات
+//  الثلاث تحت (fetchStatusCounts/fetchGrandSummary/fetchFees) كان عندها
+//  الحماية من التعليق للأبد (createFetchGuard) بالفعل من فيكس 9 أغسطس، لكن
+//  من غير أي كاش fallback — أوف لاين، القسم كان بيقعد "بيحمّل" لحظة ثم
+//  يرجع فاضي بصمت (recordError بس، من غير أي نسخة قديمة تتعرض). نفس نمط
+//  الكاش المستخدم بالفعل في useAppData.ts (القضايا/الموكلين)، مقيّد
+//  بـtenant_id عشان مفيش تسريب بيانات مكتب لمكتب تاني على نفس الجهاز.
+//  fetchFees بيتكاش بس لأول صفحة (page 0) من غير بحث — نفس قيد
+//  useAppData.ts بالظبط — ومفتاح كاش منفصل لكل تاب (collected/deferred/open)
+//  عشان آخر تاب فتحه المستخدم يفضل متاح أوف لاين.
+// ─────────────────────────────────────────────────────────
+const FEES_COUNTS_CACHE_KEY  = 'sanad_cached_fees_counts_v1';
+const FEES_SUMMARY_CACHE_KEY = 'sanad_cached_fees_summary_v1';
+const FEES_PAGE0_CACHE_PREFIX = 'sanad_cached_fees_page0_v1:';
+
+function saveFeesCache<T>(key: string, tenantId: string | null | undefined, data: T) {
+    try { localStorage.setItem(key, JSON.stringify({ tenantId: tenantId ?? null, data })); } catch { /* localStorage غير متاح — تجاهل */ }
+}
+function loadFeesCache<T>(key: string, tenantId: string | null | undefined): T | null {
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as { tenantId: string | null; data: T };
+        if (parsed.tenantId !== (tenantId ?? null)) return null;
+        return parsed.data;
+    } catch { return null; }
+}
+
 // شكل بيانات مودال الفاتورة (مبني من fee + payment وقت الإصدار في FeeCard.tsx)
 export interface InvoiceModalState {
     payment: FeePaymentRow;
@@ -100,7 +129,12 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
         // أونلاين بطيء يتقفل بعد 8 ثواني بدل ما يفضل معلّق، وأي فشل يتسجل
         // بلقب واضح (db_fees) بدل ما يظهر برسالة عامة غلط في الداشبورد.
         const guard = createFetchGuard();
-        if (guard.offline) { recordError('db_fees', 'offline'); return; }
+        if (guard.offline) {
+            recordError('db_fees', 'offline');
+            const cached = loadFeesCache<Record<string, number>>(FEES_COUNTS_CACHE_KEY, profile.tenant_id);
+            if (cached) { setStatusCounts(cached); toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من عدّاد الأتعاب'); }
+            return;
+        }
         try {
             const [c1, c2, c3] = await Promise.all([
                 db.from('case_fees').select('id', { count: 'exact', head: true }).eq('status','collected').is('deleted_at', null).abortSignal(guard.controller.signal),
@@ -108,11 +142,15 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
                 db.from('case_fees').select('id', { count: 'exact', head: true }).eq('status','open').is('deleted_at', null).abortSignal(guard.controller.signal),
             ]);
             if (c1.error || c2.error || c3.error) throw (c1.error || c2.error || c3.error);
-            setStatusCounts({ collected: c1.count||0, deferred: c2.count||0, open: c3.count||0 });
+            const counts = { collected: c1.count||0, deferred: c2.count||0, open: c3.count||0 };
+            setStatusCounts(counts);
+            saveFeesCache(FEES_COUNTS_CACHE_KEY, profile.tenant_id, counts);
             recordSuccess('db_fees');
         } catch (err) {
             const msg = guard.didTimeOut() ? 'timeout' : (err as { message?: string })?.message || 'fetch failed';
             recordError('db_fees', msg);
+            const cached = loadFeesCache<Record<string, number>>(FEES_COUNTS_CACHE_KEY, profile.tenant_id);
+            if (cached) setStatusCounts(cached);
         } finally {
             guard.cleanup();
         }
@@ -122,7 +160,13 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
         if (!profile) return;
         setLoadingSummary(true);
         const guard = createFetchGuard();
-        if (guard.offline) { recordError('db_fees', 'offline'); setLoadingSummary(false); return; }
+        if (guard.offline) {
+            recordError('db_fees', 'offline');
+            const cached = loadFeesCache<{ total: number; paid: number }>(FEES_SUMMARY_CACHE_KEY, profile.tenant_id);
+            if (cached) { setGrandTotalAll(cached.total); setGrandPaidAll(cached.paid); toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من إجمالي الأتعاب'); }
+            setLoadingSummary(false);
+            return;
+        }
         try {
             const { data, error } = await db.from('case_fees').select('total_fees,paid_fees').is('deleted_at', null).abortSignal(guard.controller.signal);
             if (error) throw error;
@@ -130,10 +174,13 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
             const p = (data || []).reduce((s: number, f: { paid_fees: number | null }) => s + (f.paid_fees  || 0), 0);
             setGrandTotalAll(t);
             setGrandPaidAll(p);
+            saveFeesCache(FEES_SUMMARY_CACHE_KEY, profile.tenant_id, { total: t, paid: p });
             recordSuccess('db_fees');
         } catch (err) {
             const msg = guard.didTimeOut() ? 'timeout' : (err as { message?: string })?.message || 'fetch failed';
             recordError('db_fees', msg);
+            const cached = loadFeesCache<{ total: number; paid: number }>(FEES_SUMMARY_CACHE_KEY, profile.tenant_id);
+            if (cached) { setGrandTotalAll(cached.total); setGrandPaidAll(cached.paid); }
         } finally {
             guard.cleanup();
             setLoadingSummary(false);
@@ -169,7 +216,20 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
         // نمط fetchStatusCounts/fetchGrandSummary فوق — offline يوقف فورًا،
         // أونلاين بطيء يتقفل بعد 8 ثواني، وأي فشل يتسجل بلقب واضح.
         const guard = createFetchGuard();
-        if (guard.offline) { recordError('db_fees', 'offline'); setLoading(false); return; }
+        if (guard.offline) {
+            recordError('db_fees', 'offline');
+            if (page === 0 && !search.trim()) {
+                const cached = loadFeesCache<{ fees: CaseFeeRow[]; payments: PaymentsByFeeId }>(FEES_PAGE0_CACHE_PREFIX + status, profile.tenant_id);
+                if (cached) {
+                    setFees(cached.fees);
+                    setPayments(cached.payments);
+                    setFeesMore(false);
+                    toast('أنت أوف لاين — بتشوف آخر نسخة محفوظة من الأتعاب');
+                }
+            }
+            setLoading(false);
+            return;
+        }
         try {
             const { data, error, count } = await q.abortSignal(guard.controller.signal);
             if (error) throw error;
@@ -204,10 +264,15 @@ export function useFeesActions(cases: MappedCase[], clients: ClientRow[], countr
             setFeesTotal(count || 0);
             setFeesPage(page);
             setFeesMore((page + 1) * PAGE_SIZE < (count || 0));
+            if (page === 0 && !search.trim()) saveFeesCache(FEES_PAGE0_CACHE_PREFIX + status, profile.tenant_id, { fees: list, payments: grouped });
             recordSuccess('db_fees');
         } catch (err) {
             const msg = guard.didTimeOut() ? 'timeout' : (err as { message?: string })?.message || 'fetch failed';
             recordError('db_fees', msg);
+            if (page === 0 && !search.trim()) {
+                const cached = loadFeesCache<{ fees: CaseFeeRow[]; payments: PaymentsByFeeId }>(FEES_PAGE0_CACHE_PREFIX + status, profile.tenant_id);
+                if (cached) { setFees(cached.fees); setPayments(cached.payments); setFeesMore(false); }
+            }
         } finally {
             guard.cleanup();
             setLoading(false);
