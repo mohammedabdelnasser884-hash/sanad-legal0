@@ -400,6 +400,14 @@ export default function NewStandaloneSessionModal({ onClose, onSaved, onClientAd
                     description: form.description || null,
                     result: form.result || null,
                     next_action: form.next_action || null,
+                    // 🔧 FIX (13 أغسطس 2026): plaintiff_legal_title/defendant_legal_title
+                    // اتشالوا غلط أثناء Phase F.2 (كانوا متصورين ضمن أعمدة "الطرف
+                    // الأساسي" القديمة اللي بيتزامن معاها case_parties)، مع إنهم
+                    // فعليًا عمود الميزة الحالية (المسمى القانوني الجامع) ومفيش
+                    // مكان تاني بيخزنهم — case_parties مفيهوش عمود مسمى قانوني
+                    // جامع. نفس الغلطة اتصلحت قبل كده في NewCaseModal.tsx.
+                    plaintiff_legal_title: partyFields.legalTitles.plaintiff || null,
+                    defendant_legal_title: partyFields.legalTitles.defendant || null,
                     // ⚡ NEW (مرحلة 6.2): راجع تعليق sessionOfflineTempId فوق.
                     _offlineTempId: sessionOfflineTempId,
                 },
