@@ -111,11 +111,18 @@ function makeMockDb(
         // بيغطي السلسلتين، افتراضيًا [] فاضية (مفيش أطراف إضافية) عشان
         // مسار الاسم الواحد القديم يفضل شغال زي ما هو في التستات اللي
         // مش بتغطي تعدد الأطراف.
+        // 🔒 FIX (متابعة فيكس "ترتيب معالجة نسخ الطرف المكررة" — 13 أغسطس
+        // 2026): movePartiesFromSessionToCase بقت بتنادي .order() بعد
+        // .eq() الأولى برضه (مش awaited مباشرة زي قبل كده) — لازم .order()
+        // يبقى موجود على نفس مستوى .eq()/.then() هنا، وإلا التستات اللي
+        // بتوصل لمسار ربط الجلسة بالقضية بتاخد TypeError صامت جوه
+        // try/catch في handleLinkCase وclientStep بيفضل 'idle' غلط.
         const chain = {
           eq: vi.fn(() => ({
             eq: vi.fn(() => ({
               order: vi.fn(() => Promise.resolve({ data: partiesData, error: null })),
             })),
+            order: vi.fn(() => Promise.resolve({ data: [], error: null })),
             then: (resolve: (v: { data: unknown; error: unknown }) => void, reject?: (e: unknown) => void) =>
               Promise.resolve({ data: [], error: null }).then(resolve, reject),
           })),
