@@ -28,6 +28,7 @@ import type { SessionWithLegacyFields } from '../../../types';
 // الحرة في الجلسة وملف الموكل المختار وقت الربط اليدوي اللاحق.
 import { findClientDataMismatches, syncSessionIdentityToGroupSiblings, fetchSessionClientParties, unlinkClientFromSessionParty, makeOfflineTempId, buildCaseInsertData, linkSessionGroupToCase } from '../hooks/caseSessionLinkingShared';
 import { checkCaseNumberDuplicate } from '@/shared/lib/caseValidation';
+import { runDuplicateCheckOfflineAware } from '@/shared/lib/offlineGuard';
 import { recalcNextHearing } from '@/shared/lib/dataAccess';
 // ⚡ NEW (خطة تعدد الأطراف، مرحلة 6.4، 23 يوليو 2026): نفس Component/هوك
 // مشترك مرحلة 5.1 (EditCaseModal.tsx) و6.1 (NewStandaloneSessionModal.tsx)
@@ -1280,9 +1281,16 @@ ${PDF_FONT_LINK}
             // الـ INSERT، فرقم قيد مسجل بالفعل لقضية بنفس المحكمة والنوع
             // كان بيوصّل لرسالة Postgres خام غير مفهومة للمستخدم بدل رسالة
             // واضحة زي باقي مسارات إنشاء القضية.
-            let caseDup;
+            // 🔒 FIX (تقرير فحص أعطال الأوف لاين — 13 أغسطس 2026): أوف لاين أو
+            // تايم آوت بيأجّلوا الفحص بدل ما يوقفوا التحويل بالكامل — نفس
+            // فيكس useClientLinking.ts (handleLinkCase).
+            let caseDup: { duplicate: boolean; message?: string } = { duplicate: false };
             try {
-                caseDup = await checkCaseNumberDuplicate(db, session.case_number, session.court_level, session.case_type);
+                const check = await runDuplicateCheckOfflineAware((signal) =>
+                    checkCaseNumberDuplicate(db, session.case_number, session.court_level, session.case_type, undefined, signal)
+                );
+                if (check.skipped) toast('⚠️ أوف لاين — فحص تكرار رقم القيد هيتأجل لحد المزامنة', false);
+                else caseDup = check.result!;
             } catch (e) {
                 showErrorToast('case_number_duplicate_check', e, 'تعذّر التحقق من رقم القيد. حاول مرة أخرى.', 'تحويل جلسة لقضية');
                 return;
